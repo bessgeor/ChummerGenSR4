@@ -84,14 +84,17 @@ internal sealed class TabNavigator
             : null;
     }
 
-    /// <summary>An item whose name MSAA cannot read has no name; it is not a match.</summary>
+    /// <summary>
+    /// An item whose name MSAA cannot read has no name, so it is not a match. Tab controls count
+    /// children they reject by id (E_INVALIDARG, surfaced as <see cref="ArgumentException"/>).
+    /// </summary>
     private static string? ChildName(IAccessible accessible, int childId)
     {
         try
         {
             return accessible.GetAccName(childId);
         }
-        catch (COMException)
+        catch (Exception error) when (error is COMException or ArgumentException)
         {
             return null;
         }

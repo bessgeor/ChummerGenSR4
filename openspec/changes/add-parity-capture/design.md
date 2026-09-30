@@ -55,6 +55,7 @@ Both executables therefore run with the same data and the canonical executable's
 
 **Driving the UI.**
 - Launch the executable with the staged character path, wait up to 60 s for the largest visible top-level window of the process, maximize it, then wait for input idle and for stable window bounds.
+- Tab items whose MSAA name cannot be read (the control rejects the child id with `E_INVALIDARG`, or the COM call fails) count as unnamed and never match; any other error fails the action.
 - `selectTab` finds the tab item by name through MSAA across all visible `SysTabControl32` children, ordered by position. It runs the default action and waits until the item is selected, either by the MSAA selected state or by the native current selection index. On a stale COM object it re-resolves once.
 - `waitFor` waits for stable bounds and then up to 5 s for a visible UI Automation element with that exact name, then settles.
 - `capture` waits for stable bounds, moves focus to the status bar (so a focus rectangle never differs between runs), and renders the window with `PrintWindow(PW_RENDERFULLCONTENT)`. If `PrintWindow` fails, the capture is an execution failure. There is no screen-copy fallback, because it would silently capture whatever is on top.
