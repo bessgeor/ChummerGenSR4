@@ -43,13 +43,14 @@ internal sealed class CaptureRun(
         }
 
         DateTimeOffset started = time.GetUtcNow();
-        string canonicalSource = options.Resolve(options.CanonicalExecutable);
+        string canonicalSource;
         IReadOnlyList<ParityCase> cases;
         IReadOnlySet<string>? captureFilter;
         CaseSuite suite;
         string sourceHashBefore;
         try
         {
+            canonicalSource = options.Resolve(options.CanonicalExecutable);
             suite = loader.Load(options.Resolve(options.CaseFile));
             cases = SelectCases(suite, options.Cases);
             captureFilter = SelectCaptures(cases, options.Captures);
@@ -61,8 +62,19 @@ internal sealed class CaptureRun(
             return ExitCode(RunStatus.SetupError);
         }
 
-        RunLayout layout = RunLayout.Create(options.Resolve(options.RunsDirectory), started);
-        Directory.CreateDirectory(layout.Root);
+        RunLayout layout;
+        try
+        {
+            layout = RunLayout.Create(options.Resolve(options.RunsDirectory), started);
+            Directory.CreateDirectory(layout.Root);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            // Without a run folder there is nowhere to write a summary.
+            Console.Error.WriteLine($"ERROR: cannot create the run folder under {options.RunsDirectory}: {error.Message}");
+            return ExitCode(RunStatus.SetupError);
+        }
+
         Console.WriteLine($"Run {layout.RunId}: {layout.Root}");
         Console.WriteLine($"Canonical SHA-256 before: {sourceHashBefore}");
         RunReport report = new()
@@ -76,12 +88,13 @@ internal sealed class CaptureRun(
             CanonicalSourceSha256Before = sourceHashBefore,
             CandidateSource = options.Resolve(options.CandidateExecutable),
             SettingsOverlay = options.SettingsOverlay is null ? null : Path.GetFullPath(options.SettingsOverlay, options.RepositoryRoot),
-            Screens = screens.Current(),
+            Screens = [],
             Cases = [],
         };
         List<CaseRun> runs = [];
         try
         {
+            report = report with { Screens = screens.Current() };
             StagedRun staged = stager.Stage(layout, options.RepositoryRoot, canonicalSource, report.CandidateSource, report.SettingsOverlay, cases);
             report = report with { Staged = staged };
             UiTiming timing = new(TimeSpan.FromSeconds(suite.StartupDelaySeconds), TimeSpan.FromMilliseconds(suite.SettleMilliseconds));

@@ -169,6 +169,18 @@ public sealed class CaseFileLoaderTests : IDisposable
     }
 
     [Fact]
+    public void Unreadable_fixture_fails_as_a_case_file_error()
+    {
+        string fixture = Path.Combine(_directory, BuildFixture);
+        File.Copy(Path.Combine(RepositoryPaths.Fixtures, BuildFixture), fixture);
+        string path = Write(MinimalCaseFile(new JsonArray(new JsonObject { ["path"] = fixture, ["mode"] = "build" })));
+        using FileStream locked = new(fixture, FileMode.Open, FileAccess.Read, FileShare.None);
+
+        CaseFileException error = Assert.Throws<CaseFileException>(() => _loader.Load(path));
+        Assert.Contains("not a readable character file", error.Message);
+    }
+
+    [Fact]
     public void Career_fixture_is_detected_as_career()
     {
         CharacterMode mode = new CharacterModeReader().Read(Path.Combine(RepositoryPaths.Fixtures, CareerFixture));

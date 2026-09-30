@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Parity.Capture.Execution;
 using Parity.Capture.Run;
 using Parity.Capture.Staging;
@@ -57,6 +58,24 @@ public sealed class CaptureRunTests
         Assert.Equal(1, CaptureRun.ExitCode(RunStatus.VisualDifferences));
         Assert.Equal(0, CaptureRun.ExitCode(RunStatus.Passed));
         Assert.Equal(3, CaptureRun.ExitCode(RunStatus.SetupError));
+    }
+
+    [Fact]
+    public void Unusable_runs_folder_is_a_setup_error()
+    {
+        string file = Path.GetTempFileName();
+        try
+        {
+            using ServiceProvider services = Parity.Capture.Program.BuildServices();
+
+            int exitCode = services.GetRequiredService<CaptureRun>().Execute(["--repo-root", RepositoryPaths.Root, "--runs-dir", file]);
+
+            Assert.Equal(3, exitCode);
+        }
+        finally
+        {
+            File.Delete(file);
+        }
     }
 
     [Fact]

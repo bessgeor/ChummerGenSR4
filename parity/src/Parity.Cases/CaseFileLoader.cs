@@ -16,10 +16,20 @@ public sealed class CaseFileLoader(ActionExpander expander, CharacterModeReader 
             throw new CaseFileException(fullPath, "the case file does not exist.");
         }
 
+        string json;
+        try
+        {
+            json = File.ReadAllText(fullPath);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            throw new CaseFileException(fullPath, $"the case file cannot be read: {error.Message}", error);
+        }
+
         ParityCasesContract document;
         try
         {
-            document = ContractJson.ReadCases(File.ReadAllText(fullPath));
+            document = ContractJson.ReadCases(json);
         }
         catch (Exception error) when (error is JsonException || error.GetType() == typeof(Exception))
         {

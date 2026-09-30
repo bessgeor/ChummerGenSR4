@@ -11,7 +11,7 @@ public sealed class CharacterModeReader
         {
             return ReadCreated(characterPath);
         }
-        catch (XmlException error)
+        catch (Exception error) when (error is XmlException or IOException or UnauthorizedAccessException)
         {
             throw new InvalidDataException($"{characterPath}: not a readable character file: {error.Message}", error);
         }
