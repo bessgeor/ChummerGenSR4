@@ -36,7 +36,6 @@ internal sealed class RunStager(FileHasher hasher, CanonicalExecutableGuard guar
         string canonicalStaged = Path.Combine(layout.CanonicalApp, Path.GetFileName(canonicalExecutable));
         Directory.CreateDirectory(layout.CanonicalApp);
         File.Copy(canonicalExecutable, canonicalStaged);
-        string canonicalHash = guard.Verify(canonicalStaged, "staged canonical executable");
         CopySupport(canonicalSource, layout.CanonicalApp);
 
         Directory.CreateDirectory(layout.CandidateApp);
@@ -47,7 +46,6 @@ internal sealed class RunStager(FileHasher hasher, CanonicalExecutableGuard guar
 
         CopySupport(canonicalSource, layout.CandidateApp);
         string candidateStaged = Path.Combine(layout.CandidateApp, Path.GetFileName(candidateExecutable));
-        string candidateHash = hasher.Sha256(candidateStaged);
 
         IReadOnlyList<OverlayFileRecord>? overlay = null;
         if (overlayDirectory is not null)
@@ -59,6 +57,10 @@ internal sealed class RunStager(FileHasher hasher, CanonicalExecutableGuard guar
                 throw new SetupException("The settings overlay changed while it was being applied.");
             }
         }
+
+        // Hashed after the overlay, so the hashes describe the executables that actually run.
+        string canonicalHash = guard.Verify(canonicalStaged, "staged canonical executable");
+        string candidateHash = hasher.Sha256(candidateStaged);
 
         Directory.CreateDirectory(layout.Characters);
         Dictionary<string, string> copies = new(StringComparer.Ordinal);

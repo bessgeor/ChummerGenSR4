@@ -78,6 +78,18 @@ public sealed class StagingTests : IDisposable
     }
 
     [Fact]
+    public void Overlay_that_replaces_the_executable_fails_the_canonical_check()
+    {
+        string overlay = Path.Combine(_directory, "overlay");
+        Directory.CreateDirectory(overlay);
+        File.WriteAllText(Path.Combine(overlay, "ChummerGenSR4.exe"), "not the canonical build");
+
+        SetupException error = Assert.Throws<SetupException>(
+            () => Stager().Stage(Layout(), RepositoryPaths.Root, CanonicalExecutable, Candidate(), overlay, [FixtureCase()]));
+        Assert.Contains("staged canonical executable", error.Message);
+    }
+
+    [Fact]
     public void Overlay_inside_the_repository_outside_out_is_rejected()
     {
         string trackedFolder = Path.Combine(RepositoryPaths.Root, "bin", "settings");
