@@ -66,13 +66,17 @@ internal sealed class WindowGeometry
             ? Rectangle.FromLTRB(rect.Left, rect.Top, rect.Right, rect.Bottom)
             : throw new InvalidOperationException($"GetWindowRect failed for window {handle}.");
 
-    /// <summary>Waits until the bounds are non-empty and unchanged for <paramref name="stableFor"/>.</summary>
+    /// <summary>
+    /// Waits until the bounds are non-empty and unchanged for <paramref name="stableFor"/>. The bounds
+    /// get <see cref="StabilityTimeout"/> to settle on top of that interval, whatever its length.
+    /// </summary>
     public Rectangle WaitForStableBounds(Func<IntPtr> getWindow, TimeSpan stableFor)
     {
+        TimeSpan timeout = StabilityTimeout + stableFor;
         Stopwatch timer = Stopwatch.StartNew();
         Stopwatch? stableTimer = null;
         Rectangle previous = Rectangle.Empty;
-        while (timer.Elapsed < StabilityTimeout)
+        while (timer.Elapsed < timeout)
         {
             Rectangle bounds = GetVisibleBounds(getWindow());
             if (bounds.Width <= 0 || bounds.Height <= 0)
@@ -94,6 +98,6 @@ internal sealed class WindowGeometry
         }
 
         throw new TimeoutException(
-            $"The window bounds did not stay unchanged for {stableFor.TotalMilliseconds:0} ms within {StabilityTimeout.TotalSeconds:0} s (last {previous}).");
+            $"The window bounds did not stay unchanged for {stableFor.TotalMilliseconds:0} ms within {timeout.TotalSeconds:0.#} s (last {previous}).");
     }
 }
