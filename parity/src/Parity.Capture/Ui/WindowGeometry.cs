@@ -1,0 +1,70 @@
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using Parity.Capture.Interop;
+
+namespace Parity.Capture.Ui;
+
+/// <summary>Window bounds as the user sees them, and waiting until they stop changing.</summary>
+internal sealed class WindowGeometry
+{
+    public static readonly TimeSpan StabilityTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>The DWM frame bounds (falling back to the window rectangle), clipped to the screens.</summary>
+    public Rectangle GetVisibleBounds(IntPtr handle)
+    {
+        if (handle == IntPtr.Zero)
+        {
+            return Rectangle.Empty;
+        }
+
+        if (NativeMethods.DwmGetWindowAttribute(handle, NativeMethods.DwmwaExtendedFrameBounds, out NativeMethods.Rect rect, Marshal.SizeOf<NativeMethods.Rect>()) != 0
+            && !NativeMethods.GetWindowRect(handle, out rect))
+        {
+            return Rectangle.Empty;
+        }
+
+        Rectangle bounds = Rectangle.FromLTRB(rect.Left, rect.Top, rect.Right, rect.Bottom);
+        Rectangle? visible = null;
+        foreach (Screen screen in Screen.AllScreens)
+        {
+            Rectangle intersection = Rectangle.Intersect(bounds, screen.Bounds);
+            if (intersection.Width > 0 && intersection.Height > 0)
+            {
+                visible = visible is null ? intersection : Rectangle.Union(visible.Value, intersection);
+            }
+        }
+
+        return visible ?? bounds;
+    }
+
+    /// <summary>Waits until the bounds are non-empty and unchanged for <paramref name="stableFor"/>.</summary>
+    public Rectangle WaitForStableBounds(Func<IntPtr> getWindow, TimeSpan stableFor)
+    {
+        Stopwatch timer = Stopwatch.StartNew();
+        Stopwatch? stableTimer = null;
+        Rectangle previous = Rectangle.Empty;
+        while (timer.Elapsed < StabilityTimeout)
+        {
+            Rectangle bounds = GetVisibleBounds(getWindow());
+            if (bounds.Width <= 0 || bounds.Height <= 0)
+            {
+                stableTimer = null;
+                previous = Rectangle.Empty;
+            }
+            else if (bounds != previous)
+            {
+                previous = bounds;
+                stableTimer = Stopwatch.StartNew();
+            }
+            else if (stableTimer is not null && stableTimer.Elapsed >= stableFor)
+            {
+                return bounds;
+            }
+
+            Thread.Sleep(100);
+        }
+
+        throw new TimeoutException(
+            $"The window bounds did not stay unchanged for {stableFor.TotalMilliseconds:0} ms within {StabilityTimeout.TotalSeconds:0} s (last {previous}).");
+    }
+}

@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Parity.Cases/Parity.Cases.csproj" />
+    <Project Path="src/Parity.Capture/Parity.Capture.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Parity.Tests/Parity.Tests.csproj" />
