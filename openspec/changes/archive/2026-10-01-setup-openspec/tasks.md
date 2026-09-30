@@ -18,4 +18,4 @@
 ## 4. Verification and archive
 
 - [x] 4.1 Record `npm install`, `npm run openspec:validate`, the diff file list and the canonical executable's SHA-256 in `verification.md`, separating what was checked from what remains unverified
-- [ ] 4.2 Archive the change with `openspec archive setup-openspec`; verify `openspec/specs/development-process/spec.md` exists and `npm run openspec:validate` passes
+- [x] 4.2 Archive the change with `openspec archive setup-openspec`; verify `openspec/specs/development-process/spec.md` exists and `npm run openspec:validate` passes
