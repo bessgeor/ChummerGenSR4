@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Parity.Cases</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Contract types generated from contracts/schemas; regenerate with npm run contracts:generate. -->
+    <Compile Include="..\..\..\contracts\generated\csharp\*.g.cs" Link="Contracts\%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>
