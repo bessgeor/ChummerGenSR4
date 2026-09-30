@@ -91,7 +91,9 @@ function check() {
     }
     if (problems.length > 0) {
       console.error(`Generated contracts are out of date (run npm run contracts:generate):\n  ${problems.join("\n  ")}`);
-      process.exit(1);
+      // Not process.exit(): it would skip the finally block and leave the scratch folder behind.
+      process.exitCode = 1;
+      return;
     }
     console.log(`Generated contracts are up to date (${expected.length} files).`);
   } finally {
