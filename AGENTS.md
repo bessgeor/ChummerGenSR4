@@ -40,6 +40,7 @@
 - `npm run parity` captures every case in `parity/cases/characters.json` on the canonical and the candidate executable; `npm start` builds the candidate first. Pass options after `--`, for example `npm run parity -- --case Diego_v_alpha2_by_bessgeor --capture common`; `--help` lists them. In PowerShell, call `npm.cmd` instead of `npm`, because the `npm.ps1` shim drops the `--`.
 - A run writes only under `out/runs/<runId>/`: staged apps, fixture copies, `captures/`, `summary.json` and `results.json`. The exit status is 0 (all passed), 1 (visual differences), 2 (execution failures) or 3 (setup error). Read the summary's per-action outcomes for execution and `results.json` for visual pass/fail, and report them separately.
 - Run-specific settings go in a folder passed with `--settings-overlay`. Keep it outside the repository or under `out/`; never edit `bin/settings/` for a run.
+- The career fixture `Шпала - карьера.chum` uses a Street Magic tradition, and `bin/settings/default.xml` enables only the core book. With those settings both executables fail to open it, so the case fails at startup on both sides. To run it, pass an overlay holding `settings/default.xml`: a copy of `bin/settings/default.xml` (UTF-16) with `<book>SM</book>` added to `<books>`.
 - Add a fixture to `parity/fixtures/characters/` only after reviewing its content (names, notes, links, images), and declare its mode in the case file.
 
 ## Desktop use

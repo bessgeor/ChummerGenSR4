@@ -66,6 +66,11 @@ For each case and each side, the runner SHALL record exactly one outcome for eve
 - **AND** every later action on that side is `not-run`
 - **AND** the run exits with the execution-failure status even if every visual result passed
 
+#### Scenario: Character fails to open
+- **WHEN** the app shows a window without the character form's status bar, such as an unhandled-exception dialog, instead of the character
+- **THEN** that side fails at startup with a reason naming the window's title
+- **AND** every action on that side is `not-run`
+
 #### Scenario: Window activation fails
 - **WHEN** the app's window cannot be brought to the foreground after the bounded retries
 - **THEN** the action is `failed` with a reason that starts with `window-activation`

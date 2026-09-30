@@ -51,6 +51,8 @@ Both executables therefore run with the same data and the canonical executable's
 
 **Declared settings overlay.** `--settings-overlay <dir>` names a folder whose files are copied over both staged apps, at the same relative paths (for example `settings/default.xml`), after the `bin/` copies. The overlay is optional, lives outside the repository (or under the ignored `out/`), and is never committed. The summary records its absolute path and the relative path and SHA-256 of every file it replaced or added. A path that escapes the app folder fails the run. Without an overlay, the summary records `overlay: null`.
 
+**Fixture settings.** The in-repo `bin/settings/default.xml` enables only the core book (`SR4`). The career fixture's magical tradition, Black Magic, comes from Street Magic (`SM`). With the in-repo settings, both executables throw a `NullReferenceException` in `frmCareer.cboTradition_SelectedIndexChanged` while opening that character and show the .NET unhandled-exception dialog, so a plain `npm start` reports that case as a startup failure on both sides and exits with status 2. The in-repo settings stay as they are; a run that exercises the career fixture passes an overlay whose `settings/default.xml` is `bin/settings/default.xml` (UTF-16) with `<book>SM</book>` added to `<books>`. `AGENTS.md` states the same.
+
 **Candidate build.** `npm run build:candidate` runs MSBuild on `Chummer/Chummer.csproj` in Release, with `OutputPath` and `BaseIntermediateOutputPath` redirected under `out/candidate/`. It finds MSBuild through `vswhere`. The runner takes the candidate executable path (default `out/candidate/bin/ChummerGenSR4.exe`) and records its SHA-256.
 
 **Driving the UI.**
