@@ -62,11 +62,12 @@ internal sealed class RunStager(FileHasher hasher, CanonicalExecutableGuard guar
         string canonicalHash = guard.Verify(canonicalStaged, "staged canonical executable");
         string candidateHash = hasher.Sha256(candidateStaged);
 
-        Directory.CreateDirectory(layout.Characters);
         Dictionary<string, string> copies = new(StringComparer.Ordinal);
         foreach (ParityCase parityCase in cases)
         {
-            string copy = Path.Combine(layout.Characters, parityCase.CharacterFile);
+            // One folder per case: two fixtures may share a file name.
+            string copy = layout.CharacterCopy(parityCase.Name, parityCase.CharacterFile);
+            Directory.CreateDirectory(Path.GetDirectoryName(copy)!);
             File.Copy(parityCase.CharacterPath, copy);
             copies.Add(parityCase.Name, copy);
         }

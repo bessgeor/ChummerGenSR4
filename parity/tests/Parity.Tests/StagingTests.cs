@@ -90,6 +90,19 @@ public sealed class StagingTests : IDisposable
     }
 
     [Fact]
+    public void Fixtures_with_the_same_file_name_are_staged_apart()
+    {
+        ParityCase build = FixtureCase();
+        ParityCase career = build with { Name = "career-Diego_v_alpha2_by_bessgeor", Mode = CharacterMode.Career };
+
+        StagedRun staged = Stager().Stage(Layout(), RepositoryPaths.Root, CanonicalExecutable, Candidate(), null, [build, career]);
+
+        Assert.NotEqual(staged.CharacterCopies[build.Name], staged.CharacterCopies[career.Name]);
+        Assert.All(staged.CharacterCopies.Values, copy => Assert.Equal(build.CharacterFile, Path.GetFileName(copy)));
+        Assert.All(staged.CharacterCopies.Values, copy => Assert.True(File.Exists(copy)));
+    }
+
+    [Fact]
     public void Overlay_inside_the_repository_outside_out_is_rejected()
     {
         string trackedFolder = Path.Combine(RepositoryPaths.Root, "bin", "settings");

@@ -41,7 +41,7 @@ The case name is `<mode>-<file name without extension>`. The action set is `sele
 
 **Run-scoped staging.** A run creates `out/runs/<runId>/`, where `runId` is a UTC timestamp plus a short random suffix. Its layout:
 - `apps/canonical/` and `apps/candidate/` each hold the executable plus copies of `bin/`'s `data`, `lang`, `settings`, `sheets`, `export` and the two manifest files (not `saves`, which is 51 MB of samples the scenarios never open);
-- `characters/` holds byte-identical copies of the fixtures, so the app can never write to a committed fixture;
+- `characters/<case>/` holds a byte-identical copy of each case's fixture under its own file name, so the app can never write to a committed fixture and two fixtures with the same file name do not collide;
 - `captures/<case>/<side>/<capture>.png`;
 - `summary.json` and `results.json`.
 

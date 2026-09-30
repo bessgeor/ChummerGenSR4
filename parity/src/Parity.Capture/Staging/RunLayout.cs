@@ -22,6 +22,9 @@ internal sealed record RunLayout(string RunId, string Root)
         return new RunLayout(runId, Path.Combine(Path.GetFullPath(runsDirectory), runId));
     }
 
+    public string CharacterCopy(string caseName, string characterFile) =>
+        Path.Combine(Characters, SafeSegment(caseName), characterFile);
+
     public string CapturePath(string caseName, string side, string captureName) =>
         Path.Combine(Root, "captures", SafeSegment(caseName), side, $"{SafeSegment(captureName)}.png");
 
