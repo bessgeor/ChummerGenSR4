@@ -30,9 +30,14 @@ internal sealed class ChummerSession(
     private IntPtr _stableWindow;
     private Rectangle? _stableBounds;
 
-    /// <summary>Waits for the main window, maximizes it, and waits for input idle and stable bounds.</summary>
+    /// <summary>
+    /// Waits for a window and input idle, then maximizes and activates the largest window and waits
+    /// for input idle and stable bounds. Activating before the app is idle races its own startup.
+    /// </summary>
     public void WaitUntilReady()
     {
+        finder.WaitForMainWindow(process, WindowTimeout);
+        WaitForInputIdle();
         _mainWindow = finder.WaitForMainWindow(process, WindowTimeout);
         NativeMethods.ShowWindow(_mainWindow, NativeMethods.SwMaximize);
         activator.Activate(_mainWindow);

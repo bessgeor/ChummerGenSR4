@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Text;
 using Parity.Capture.Interop;
 
 namespace Parity.Capture.Ui;
@@ -42,7 +44,34 @@ internal sealed class WindowActivator
 
         throw new WindowActivationException(
             $"window {handle} was not in the foreground after {Attempts} attempts {RetryDelay.TotalMilliseconds:0} ms apart " +
-            $"(foreground window {NativeMethods.GetForegroundWindow()}).");
+            $"(foreground: {DescribeWindow(NativeMethods.GetForegroundWindow())}).");
+    }
+
+    /// <summary>Names a window by handle, title, class and owning process, so a failure shows who holds the foreground.</summary>
+    private static string DescribeWindow(IntPtr handle)
+    {
+        if (handle == IntPtr.Zero)
+        {
+            return "none";
+        }
+
+        StringBuilder title = new(256);
+        NativeMethods.GetWindowText(handle, title, title.Capacity);
+        StringBuilder className = new(256);
+        NativeMethods.GetClassName(handle, className, className.Capacity);
+        NativeMethods.GetWindowThreadProcessId(handle, out int processId);
+        string processName;
+        try
+        {
+            using Process owner = Process.GetProcessById(processId);
+            processName = owner.ProcessName;
+        }
+        catch (ArgumentException)
+        {
+            processName = "exited";
+        }
+
+        return $"window {handle} '{title}' of class '{className}' in process {processId} ({processName})";
     }
 
     private static bool TryActivate(IntPtr handle)
