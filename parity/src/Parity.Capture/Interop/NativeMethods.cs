@@ -60,6 +60,12 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     public static extern IntPtr SetFocus(IntPtr handle);
 
+    public const byte VkMenu = 0x12;
+    public const uint KeyEventKeyUp = 0x0002;
+
+    [DllImport("user32.dll")]
+    public static extern void keybd_event(byte virtualKey, byte scanCode, uint flags, UIntPtr extraInfo);
+
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool AttachThreadInput(uint sourceThreadId, uint targetThreadId, [MarshalAs(UnmanagedType.Bool)] bool attach);

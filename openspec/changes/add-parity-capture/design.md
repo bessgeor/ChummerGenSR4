@@ -60,7 +60,7 @@ Both executables therefore run with the same data and the canonical executable's
 - `waitFor` waits for stable bounds and then up to 5 s for a visible UI Automation element with that exact name, then settles.
 - `capture` waits for stable bounds, moves focus to the status bar (so a focus rectangle never differs between runs), and renders the window with `PrintWindow(PW_RENDERFULLCONTENT)`. If `PrintWindow` fails, the capture is an execution failure. There is no screen-copy fallback, because it would silently capture whatever is on top.
 
-**Foreground activation with a bounded retry.** Before each action the runner activates the app's window. A single `SetForegroundWindow` call can fail while another window holds the foreground, so activation makes up to 10 attempts, 200 ms apart. If all fail, the action fails with the reason `window-activation: …`, which the summary keeps apart from UI failures. `AGENTS.md` asks users not to use the desktop during a run.
+**Foreground activation with a bounded retry.** Before each action the runner activates the app's window. A single `SetForegroundWindow` call can fail while another process holds the foreground lock, for example one the user just typed into. Activation therefore makes up to 10 attempts, 200 ms apart. From the third attempt on, an Alt key tap precedes each try, because Windows lets the process that sent the last input event take the foreground. If all fail, the action fails with the reason `window-activation: …`, which the summary keeps apart from UI failures. `AGENTS.md` asks users not to use the desktop during a run.
 
 **Execution outcomes.** Every expanded action of every side gets exactly one outcome, by index:
 - `performed`;

@@ -3,12 +3,15 @@ using Parity.Capture.Interop;
 namespace Parity.Capture.Ui;
 
 /// <summary>
-/// Brings a window to the foreground. Another window can hold the foreground lock for a moment,
-/// so activation is retried a bounded number of times before it fails.
+/// Brings a window to the foreground. Windows refuses <c>SetForegroundWindow</c> while another
+/// process holds the foreground lock (for example one the user just typed into), so activation is
+/// retried a bounded number of times. From the third attempt on, an Alt key tap precedes each try:
+/// the process that sent the last input event may take the foreground.
 /// </summary>
 internal sealed class WindowActivator
 {
     public const int Attempts = 10;
+    public const int PlainAttempts = 2;
     public static readonly TimeSpan RetryDelay = TimeSpan.FromMilliseconds(200);
 
     public void Activate(IntPtr handle)
@@ -20,6 +23,12 @@ internal sealed class WindowActivator
 
         for (int attempt = 1; attempt <= Attempts; attempt++)
         {
+            if (attempt > PlainAttempts)
+            {
+                NativeMethods.keybd_event(NativeMethods.VkMenu, 0, 0, UIntPtr.Zero);
+                NativeMethods.keybd_event(NativeMethods.VkMenu, 0, NativeMethods.KeyEventKeyUp, UIntPtr.Zero);
+            }
+
             if (TryActivate(handle))
             {
                 return;
