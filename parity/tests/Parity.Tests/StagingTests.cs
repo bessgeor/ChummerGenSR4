@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Parity.Capture.Staging;
 using Parity.Cases;
 
@@ -17,6 +18,18 @@ public sealed class StagingTests : IDisposable
     public void Guard_accepts_the_canonical_executable()
     {
         Assert.Equal(CanonicalExecutableGuard.PinnedSha256, new CanonicalExecutableGuard(_hasher).Verify(CanonicalExecutable, "canonical executable"));
+    }
+
+    [Theory]
+    [InlineData("AGENTS.md")]
+    [InlineData("parity/scripts/build-candidate.mjs")]
+    public void Every_copy_of_the_pinned_hash_is_the_same(string file)
+    {
+        string text = File.ReadAllText(Path.Combine(RepositoryPaths.Root, file));
+
+        Assert.Equal(
+            [CanonicalExecutableGuard.PinnedSha256],
+            Regex.Matches(text, "\\b[0-9a-f]{64}\\b").Select(match => match.Value).Distinct());
     }
 
     [Fact]

@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const canonical = join(root, "bin", "ChummerGenSR4.exe");
+// Same value as CanonicalExecutableGuard.PinnedSha256 and AGENTS.md; Parity.Tests fails when they differ.
 const pinnedSha256 = "9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56";
 const outputDir = join(root, "out", "candidate", "bin") + "\\";
 const intermediateDir = join(root, "out", "candidate", "obj") + "\\";

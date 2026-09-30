@@ -3,6 +3,7 @@ namespace Parity.Capture.Staging;
 /// <summary>Checks that a file is byte-identical to the canonical executable by its pinned SHA-256.</summary>
 internal sealed class CanonicalExecutableGuard(FileHasher hasher)
 {
+    /// <summary>Also stated in <c>AGENTS.md</c> and <c>parity/scripts/build-candidate.mjs</c>; a test keeps the three equal.</summary>
     public const string PinnedSha256 = "9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56";
 
     /// <summary>Returns the file's hash, or throws <see cref="SetupException"/> when it is missing or differs.</summary>
