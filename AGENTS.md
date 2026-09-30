@@ -37,7 +37,7 @@
 ## Visual parity capture
 
 - `npm run build:candidate` builds the app from the current source into `out/candidate/bin/`. Use it instead of building `Chummer/Chummer.csproj` yourself.
-- `npm run parity` captures every case in `parity/cases/characters.json` on the canonical and the candidate executable; `npm start` builds the candidate first. Pass options after `--`, for example `npm run parity -- --case Diego_v_alpha2_by_bessgeor --capture common`; `--help` lists them.
+- `npm run parity` captures every case in `parity/cases/characters.json` on the canonical and the candidate executable; `npm start` builds the candidate first. Pass options after `--`, for example `npm run parity -- --case Diego_v_alpha2_by_bessgeor --capture common`; `--help` lists them. In PowerShell, call `npm.cmd` instead of `npm`, because the `npm.ps1` shim drops the `--`.
 - A run writes only under `out/runs/<runId>/`: staged apps, fixture copies, `captures/`, `summary.json` and `results.json`. The exit status is 0 (all passed), 1 (visual differences), 2 (execution failures) or 3 (setup error). Read the summary's per-action outcomes for execution and `results.json` for visual pass/fail, and report them separately.
 - Run-specific settings go in a folder passed with `--settings-overlay`. Keep it outside the repository or under `out/`; never edit `bin/settings/` for a run.
 - Add a fixture to `parity/fixtures/characters/` only after reviewing its content (names, notes, links, images), and declare its mode in the case file.
