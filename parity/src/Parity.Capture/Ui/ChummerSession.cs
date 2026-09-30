@@ -23,6 +23,7 @@ internal sealed class ChummerSession(
     private static readonly TimeSpan InputIdleTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan FirstSelectionCheck = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan SelectionTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan CharacterFormTimeout = TimeSpan.FromSeconds(10);
 
     private readonly Dictionary<string, AccessibleTab> _tabCache = new(StringComparer.Ordinal);
     private IntPtr _mainWindow;
@@ -41,6 +42,7 @@ internal sealed class ChummerSession(
         process.Refresh();
         WaitForInputIdle();
         WaitForStableBounds();
+        EnsureCharacterOpen();
     }
 
     public void Activate() => activator.Activate(LiveWindow());
@@ -161,6 +163,28 @@ internal sealed class ChummerSession(
         _stableWindow = LiveWindow();
         _stableBounds = bounds;
         return bounds;
+    }
+
+    /// <summary>
+    /// The character form has a status bar. Without one, the largest window is something else, such
+    /// as an unhandled-exception dialog, and the character did not open.
+    /// </summary>
+    private void EnsureCharacterOpen()
+    {
+        Stopwatch timer = Stopwatch.StartNew();
+        while (timer.Elapsed < CharacterFormTimeout)
+        {
+            if (capturer.FindStatusBar(LiveWindow()) != IntPtr.Zero)
+            {
+                return;
+            }
+
+            Thread.Sleep(200);
+        }
+
+        string title = System.Windows.Automation.AutomationElement.FromHandle(LiveWindow()).Current.Name;
+        throw new InvalidOperationException(
+            $"The character did not open within {CharacterFormTimeout.TotalSeconds:0} s: the largest window is '{title}' and has no status bar.");
     }
 
     private void WaitForInputIdle()

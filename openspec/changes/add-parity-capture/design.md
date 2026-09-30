@@ -54,7 +54,7 @@ Both executables therefore run with the same data and the canonical executable's
 **Candidate build.** `npm run build:candidate` runs MSBuild on `Chummer/Chummer.csproj` in Release, with `OutputPath` and `BaseIntermediateOutputPath` redirected under `out/candidate/`. It finds MSBuild through `vswhere`. The runner takes the candidate executable path (default `out/candidate/bin/ChummerGenSR4.exe`) and records its SHA-256.
 
 **Driving the UI.**
-- Launch the executable with the staged character path, wait up to 60 s for the largest visible top-level window of the process, maximize it, then wait for input idle and for stable window bounds.
+- Launch the executable with the staged character path, wait up to 60 s for the largest visible top-level window of the process, maximize it, then wait for input idle and for stable window bounds. Startup is complete only when that window contains the character form's status bar. Otherwise the largest window is something else, such as an unhandled-exception dialog, and the side fails at startup with that window's title.
 - Tab items whose MSAA name cannot be read (the control rejects the child id with `E_INVALIDARG`, or the COM call fails) count as unnamed and never match; any other error fails the action.
 - `selectTab` finds the tab item by name through MSAA across all visible `SysTabControl32` children, ordered by position. It runs the default action and waits until the item is selected, either by the MSAA selected state or by the native current selection index. On a stale COM object it re-resolves once.
 - `waitFor` waits for stable bounds and then up to 5 s for a visible UI Automation element with that exact name, then settles.
