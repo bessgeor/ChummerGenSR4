@@ -13,3 +13,15 @@ Chummer is continuously updated to address bugs and introduce new and interestin
 If you have a bug to report or idea to suggest, please report them on the issue section by using the link in the menu."
 
 This text is a copy (slightly modified) from http://chummergen.com/
+
+Development
+-------
+
+This fork is being modernized in small, reviewable steps with AI coding agents (Claude Code and Codex). The released build, `bin/ChummerGenSR4.exe`, is the reference for correct behavior and is never modified.
+
+Each step is an OpenSpec change (`openspec/`) in its own pull request, with a proposal, spec deltas, tasks and a verification record. To validate the specs and changes (Node.js 20.19 or later):
+
+```
+npm install
+npm run openspec:validate
+```
