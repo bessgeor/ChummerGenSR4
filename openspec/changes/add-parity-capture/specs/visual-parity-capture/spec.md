@@ -77,6 +77,14 @@ Before each capture, the runner SHALL bring the app's window to the foreground, 
 - **WHEN** one side's window is the first one launched in the run and the other side's is not
 - **THEN** both sides' captures show an active window frame and the same focused control
 
+### Requirement: A capture holds exactly the visible window
+Each capture SHALL contain the window's visible area and nothing else: no invisible resize borders and nothing outside the screens. It SHALL have the size at which the app renders itself, so a DPI-unaware app is captured at its logical size.
+
+#### Scenario: Maximized window
+- **WHEN** a maximized window's rectangle reaches past the screen edges
+- **THEN** the capture starts at the window's visible top-left corner
+- **AND** it includes the visible right and bottom edges of the window
+
 ### Requirement: Visual results are reported apart from execution outcomes
 For every capture name produced by either side of a case, the runner SHALL write a result row. The row carries the pixel difference ratio, the threshold, the capture paths and a pass flag. A capture that only one side produced, while the other side's action did not fail, SHALL be a failing row with reason `missing-canonical` or `missing-candidate`. Captures missing because of an execution failure SHALL produce no visual row. The exit status SHALL distinguish all-pass (0), visual differences only (1), execution failures (2) and setup errors (3).
 

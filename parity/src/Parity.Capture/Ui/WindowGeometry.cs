@@ -37,6 +37,35 @@ internal sealed class WindowGeometry
         return visible ?? bounds;
     }
 
+    /// <summary>
+    /// The window rectangle as the window itself measures it, which is the size <c>PrintWindow</c>
+    /// renders: physical pixels for a DPI-aware window, logical pixels for a DPI-unaware one.
+    /// </summary>
+    public Rectangle GetRenderedWindowRectangle(IntPtr handle)
+    {
+        IntPtr context = NativeMethods.GetWindowDpiAwarenessContext(handle);
+        IntPtr previous = context == IntPtr.Zero ? IntPtr.Zero : NativeMethods.SetThreadDpiAwarenessContext(context);
+        if (previous == IntPtr.Zero)
+        {
+            throw new InvalidOperationException($"Could not switch to the DPI awareness of window {handle}.");
+        }
+
+        try
+        {
+            return GetWindowRectangle(handle);
+        }
+        finally
+        {
+            NativeMethods.SetThreadDpiAwarenessContext(previous);
+        }
+    }
+
+    /// <summary>The window rectangle, including the invisible resize borders, in this thread's coordinates.</summary>
+    public Rectangle GetWindowRectangle(IntPtr handle) =>
+        NativeMethods.GetWindowRect(handle, out NativeMethods.Rect rect)
+            ? Rectangle.FromLTRB(rect.Left, rect.Top, rect.Right, rect.Bottom)
+            : throw new InvalidOperationException($"GetWindowRect failed for window {handle}.");
+
     /// <summary>Waits until the bounds are non-empty and unchanged for <paramref name="stableFor"/>.</summary>
     public Rectangle WaitForStableBounds(Func<IntPtr> getWindow, TimeSpan stableFor)
     {

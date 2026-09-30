@@ -1,10 +1,11 @@
+using System.Drawing.Imaging;
 using System.Windows.Automation;
 using Parity.Capture.Interop;
 
 namespace Parity.Capture.Ui;
 
 /// <summary>Renders a window into a bitmap with <c>PrintWindow</c>, after moving focus to a neutral control.</summary>
-internal sealed class WindowCapturer
+internal sealed class WindowCapturer(WindowGeometry geometry)
 {
     /// <summary>The status bar of an open character form, or <see cref="IntPtr.Zero"/> when there is none.</summary>
     public IntPtr FindStatusBar(IntPtr mainWindow)
@@ -41,9 +42,10 @@ internal sealed class WindowCapturer
     }
 
     /// <summary>
-    /// Renders an activated window. Its frame is repainted as active first: whether the frame looks
-    /// active otherwise depends on the activation history, not on the app. A failed <c>PrintWindow</c>
-    /// is an error; there is no screen-copy fallback.
+    /// Renders an activated window and returns the part inside its visible <paramref name="bounds"/>,
+    /// without the invisible resize borders or anything off screen. The frame is repainted as active
+    /// first: whether it looks active otherwise depends on the activation history, not on the app.
+    /// A failed <c>PrintWindow</c> is an error; there is no screen-copy fallback.
     /// </summary>
     public Bitmap Capture(IntPtr handle, Rectangle bounds)
     {
@@ -53,10 +55,11 @@ internal sealed class WindowCapturer
         }
 
         NativeMethods.SendMessage(handle, NativeMethods.WmNcActivate, new IntPtr(1), IntPtr.Zero);
-        Bitmap bitmap = new(bounds.Width, bounds.Height);
-        try
+        Rectangle rendered = geometry.GetRenderedWindowRectangle(handle);
+        Rectangle region = CaptureRegion.Map(geometry.GetWindowRectangle(handle), rendered.Size, bounds);
+        using Bitmap window = new(rendered.Width, rendered.Height, PixelFormat.Format32bppArgb);
+        using (Graphics graphics = Graphics.FromImage(window))
         {
-            using Graphics graphics = Graphics.FromImage(bitmap);
             IntPtr hdc = graphics.GetHdc();
             bool printed;
             try
@@ -72,13 +75,8 @@ internal sealed class WindowCapturer
             {
                 throw new InvalidOperationException($"PrintWindow failed for window {handle}.");
             }
+        }
 
-            return bitmap;
-        }
-        catch
-        {
-            bitmap.Dispose();
-            throw;
-        }
+        return window.Clone(region, PixelFormat.Format32bppArgb);
     }
 }
