@@ -21,4 +21,4 @@
 ## 5. Verification and archive
 
 - [x] 5.1 Run a live `npm start` on both fixtures, once with the in-repo settings and once with the overlay the career fixture needs. Record the hashes, execution outcomes, action-index coverage and visual results in `verification.md`, separating fixture-tested scope from live evidence and naming what remains unverified.
-- [ ] 5.2 Archive the change with `openspec archive add-parity-capture`. Evidence: `openspec/specs/parity-contracts/spec.md` and `openspec/specs/visual-parity-capture/spec.md` exist and `npm run openspec:validate` passes after the archive, recorded in `verification.md`.
+- [x] 5.2 Archive the change with `openspec archive add-parity-capture`. Evidence: `openspec/specs/parity-contracts/spec.md` and `openspec/specs/visual-parity-capture/spec.md` exist and `npm run openspec:validate` passes after the archive, recorded in `verification.md`.

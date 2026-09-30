@@ -76,6 +76,10 @@ Visual: 33 rows, 33 pass, 0 fail, every difference 0 (threshold 0.00004): 13 bui
 
 All 66 captures of this run are 1280×680 PNGs: the app is not DPI-aware, so it renders at its logical size, and the capture holds its visible window from the title bar through the status bar, without resize borders.
 
+## Archive
+
+`npx openspec archive add-parity-capture --yes` printed `Task status: ✓ Complete`, `parity-contracts: create` (+ 3 requirements), `visual-parity-capture: create` (+ 9 requirements) and `Change 'add-parity-capture' archived as '2026-10-01-add-parity-capture'.` Afterwards `npm run openspec:validate` printed `✓ spec/development-process`, `✓ spec/parity-contracts`, `✓ spec/visual-parity-capture` and `Totals: 3 passed, 0 failed (3 items)`.
+
 ## Unverified
 
 - Foreground activation while other applications are in use: run `20260930T233905Z-24ef406b` failed at its first launch because another application still held the foreground after the bounded retry. The runner reports this as a `window-activation` failure naming the window that held the foreground; it cannot prevent it.
