@@ -4,6 +4,10 @@
   "description": "Character generator for Shadowrun 4th Edition",
   "type": "module",
   "scripts": {
+    "start": "npm run build:candidate && npm run parity --",
+    "parity": "dotnet run --project parity/src/Parity.Capture -c Release --",
+    "build:candidate": "node parity/scripts/build-candidate.mjs",
+    "parity:test": "dotnet test parity/Parity.slnx",
     "openspec:validate": "openspec validate --all --strict",
     "contracts:generate": "node contracts/scripts/generate.mjs",
     "contracts:check": "node contracts/scripts/generate.mjs --check",
