@@ -40,7 +40,11 @@ internal sealed class WindowCapturer
         }
     }
 
-    /// <summary>A failed <c>PrintWindow</c> is an error; there is no screen-copy fallback.</summary>
+    /// <summary>
+    /// Renders an activated window. Its frame is repainted as active first: whether the frame looks
+    /// active otherwise depends on the activation history, not on the app. A failed <c>PrintWindow</c>
+    /// is an error; there is no screen-copy fallback.
+    /// </summary>
     public Bitmap Capture(IntPtr handle, Rectangle bounds)
     {
         if (bounds.Width <= 0 || bounds.Height <= 0)
@@ -48,6 +52,7 @@ internal sealed class WindowCapturer
             throw new InvalidOperationException($"Cannot capture the empty rectangle {bounds}.");
         }
 
+        NativeMethods.SendMessage(handle, NativeMethods.WmNcActivate, new IntPtr(1), IntPtr.Zero);
         Bitmap bitmap = new(bounds.Width, bounds.Height);
         try
         {

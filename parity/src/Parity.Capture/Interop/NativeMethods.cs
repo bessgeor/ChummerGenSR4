@@ -13,6 +13,7 @@ internal static class NativeMethods
     public const int StateSystemSelected = 2;
     public const int TcmGetItemCount = 0x1304;
     public const int TcmGetCurSel = 0x130B;
+    public const int WmNcActivate = 0x0086;
     public const int ProcessPerMonitorDpiAware = 2;
     public const int EAccessDenied = unchecked((int)0x80070005);
 

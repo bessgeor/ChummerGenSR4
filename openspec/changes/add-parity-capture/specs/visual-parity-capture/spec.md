@@ -70,6 +70,13 @@ For each case and each side, the runner SHALL record exactly one outcome for eve
 - **WHEN** the app's window cannot be brought to the foreground after the bounded retries
 - **THEN** the action is `failed` with a reason that starts with `window-activation`
 
+### Requirement: Captures do not depend on focus or activation history
+Before each capture, the runner SHALL bring the app's window to the foreground, move keyboard focus to the character form's status bar and paint the window frame as active, so that neither earlier input nor the order in which windows were activated changes the captured pixels.
+
+#### Scenario: Frame state is the same on both sides
+- **WHEN** one side's window is the first one launched in the run and the other side's is not
+- **THEN** both sides' captures show an active window frame and the same focused control
+
 ### Requirement: Visual results are reported apart from execution outcomes
 For every capture name produced by either side of a case, the runner SHALL write a result row. The row carries the pixel difference ratio, the threshold, the capture paths and a pass flag. A capture that only one side produced, while the other side's action did not fail, SHALL be a failing row with reason `missing-canonical` or `missing-candidate`. Captures missing because of an execution failure SHALL produce no visual row. The exit status SHALL distinguish all-pass (0), visual differences only (1), execution failures (2) and setup errors (3).
 
