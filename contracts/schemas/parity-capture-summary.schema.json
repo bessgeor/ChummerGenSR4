@@ -1,0 +1,185 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/bessgeor/ChummerGenSR4/contracts/parity-capture-summary.schema.json",
+  "title": "CaptureSummary",
+  "description": "Summary of a capture run: inputs, canonical hashes, settings, and the execution outcome of every action.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["runId", "startedUtc", "status", "caseFile", "threshold", "canonical", "candidate", "screens", "cases", "totals"],
+  "properties": {
+    "runId": { "type": "string", "minLength": 1 },
+    "startedUtc": { "description": "ISO 8601 UTC timestamp.", "type": "string" },
+    "finishedUtc": { "description": "ISO 8601 UTC timestamp; absent when setup failed.", "type": "string" },
+    "status": { "$ref": "#/definitions/RunStatus" },
+    "setupError": { "description": "Present only when status is setup-error.", "type": "string" },
+    "caseFile": { "type": "string", "minLength": 1 },
+    "threshold": { "type": "number", "minimum": 0 },
+    "canonical": { "$ref": "#/definitions/CanonicalExecutable" },
+    "candidate": { "$ref": "#/definitions/CandidateExecutable" },
+    "settingsOverlay": { "$ref": "#/definitions/SettingsOverlay" },
+    "screens": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/ScreenInfo" }
+    },
+    "cases": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/CaseExecution" }
+    },
+    "totals": { "$ref": "#/definitions/RunTotals" },
+    "results": {
+      "description": "Results file path relative to the run folder; absent when setup failed.",
+      "type": "string"
+    }
+  },
+  "definitions": {
+    "RunStatus": {
+      "description": "passed = exit 0, visual-differences = exit 1, execution-failures = exit 2, setup-error = exit 3.",
+      "type": "string",
+      "enum": ["passed", "visual-differences", "execution-failures", "setup-error"]
+    },
+    "CanonicalExecutable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourcePath", "pinnedSha256", "sourceSha256Before"],
+      "properties": {
+        "sourcePath": { "type": "string" },
+        "stagedPath": { "type": "string" },
+        "pinnedSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "sourceSha256Before": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "stagedSha256Before": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "sourceSha256After": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "stagedSha256After": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "CandidateExecutable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourcePath"],
+      "properties": {
+        "sourcePath": { "type": "string" },
+        "stagedPath": { "type": "string" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "SettingsOverlay": {
+      "description": "Absent when the run used the canonical settings unchanged.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "files"],
+      "properties": {
+        "path": { "type": "string" },
+        "files": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/OverlayFile" }
+        }
+      }
+    },
+    "OverlayFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "replaced"],
+      "properties": {
+        "path": { "description": "Path relative to the staged app folder, with forward slashes.", "type": "string" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "replaced": { "description": "True when the file replaced a canonical copy.", "type": "boolean" }
+      }
+    },
+    "ScreenInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["deviceName", "primary", "bounds", "workingArea"],
+      "properties": {
+        "deviceName": { "type": "string" },
+        "primary": { "type": "boolean" },
+        "bounds": { "$ref": "#/definitions/ScreenRect" },
+        "workingArea": { "$ref": "#/definitions/ScreenRect" }
+      }
+    },
+    "ScreenRect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": { "type": "integer" },
+        "y": { "type": "integer" },
+        "width": { "type": "integer" },
+        "height": { "type": "integer" }
+      }
+    },
+    "CaseExecution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["case", "characterFile", "mode", "sides"],
+      "properties": {
+        "case": { "type": "string", "minLength": 1 },
+        "characterFile": { "type": "string", "minLength": 1 },
+        "mode": { "type": "string", "enum": ["build", "career"] },
+        "sides": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/SideExecution" }
+        }
+      }
+    },
+    "SideExecution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["side", "status", "durationMilliseconds", "counts", "actions"],
+      "properties": {
+        "side": { "type": "string", "enum": ["canonical", "candidate"] },
+        "status": { "type": "string", "enum": ["completed", "failed"] },
+        "durationMilliseconds": { "type": "integer", "minimum": 0 },
+        "counts": { "$ref": "#/definitions/OutcomeCounts" },
+        "failure": {
+          "description": "The error that stopped this side, including failures before the first action such as startup; present only when status is failed.",
+          "type": "string"
+        },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/ActionExecution" }
+        }
+      }
+    },
+    "OutcomeCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["performed", "failed", "optionalAbsent", "skippedOptional", "filtered", "notRun"],
+      "properties": {
+        "performed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "optionalAbsent": { "type": "integer", "minimum": 0 },
+        "skippedOptional": { "type": "integer", "minimum": 0 },
+        "filtered": { "type": "integer", "minimum": 0 },
+        "notRun": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "ActionExecution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["index", "action", "optional", "outcome"],
+      "properties": {
+        "index": { "type": "integer", "minimum": 0 },
+        "action": { "description": "Readable action description, e.g. selectTab:Skills.", "type": "string" },
+        "optional": { "description": "True for an optional selectTab, whose target may be absent.", "type": "boolean" },
+        "outcome": { "$ref": "#/definitions/ActionOutcome" },
+        "reason": { "type": "string" }
+      }
+    },
+    "ActionOutcome": {
+      "type": "string",
+      "enum": ["performed", "failed", "optional-absent", "skipped-optional", "filtered", "not-run"]
+    },
+    "RunTotals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cases", "failedSides", "failedActions", "captures", "visualPassed", "visualFailed"],
+      "properties": {
+        "cases": { "type": "integer", "minimum": 0 },
+        "failedSides": { "type": "integer", "minimum": 0 },
+        "failedActions": { "type": "integer", "minimum": 0 },
+        "captures": { "description": "Number of visual result rows.", "type": "integer", "minimum": 0 },
+        "visualPassed": { "type": "integer", "minimum": 0 },
+        "visualFailed": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

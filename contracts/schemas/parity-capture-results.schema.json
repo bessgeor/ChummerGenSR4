@@ -1,0 +1,65 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/bessgeor/ChummerGenSR4/contracts/parity-capture-results.schema.json",
+  "title": "CaptureResults",
+  "description": "Visual results of a capture run: one row per capture name produced by either side of a case.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["runId", "threshold", "results"],
+  "properties": {
+    "runId": { "type": "string", "minLength": 1 },
+    "threshold": {
+      "description": "Largest share of differing pixels that still passes.",
+      "type": "number",
+      "minimum": 0
+    },
+    "results": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/CaptureResult" }
+    }
+  },
+  "definitions": {
+    "CaptureResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["case", "characterFile", "mode", "capture", "passed", "reason", "difference"],
+      "properties": {
+        "case": { "type": "string", "minLength": 1 },
+        "characterFile": { "type": "string", "minLength": 1 },
+        "mode": { "type": "string", "enum": ["build", "career"] },
+        "capture": { "type": "string", "minLength": 1 },
+        "passed": { "type": "boolean" },
+        "reason": { "$ref": "#/definitions/ResultReason" },
+        "difference": {
+          "description": "Share of pixels whose ARGB value differs; 1 when dimensions differ or one side is missing.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "canonicalCapture": {
+          "description": "PNG path relative to the run folder; absent when the canonical side produced no capture.",
+          "type": "string"
+        },
+        "candidateCapture": {
+          "description": "PNG path relative to the run folder; absent when the candidate side produced no capture.",
+          "type": "string"
+        },
+        "canonicalSize": { "$ref": "#/definitions/ImageSize" },
+        "candidateSize": { "$ref": "#/definitions/ImageSize" }
+      }
+    },
+    "ResultReason": {
+      "type": "string",
+      "enum": ["within-threshold", "visual-difference", "missing-canonical", "missing-candidate"]
+    },
+    "ImageSize": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

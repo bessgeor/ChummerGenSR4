@@ -1,0 +1,80 @@
+{
+  "runId": "20261001T120000Z-1a2b3c4d",
+  "startedUtc": "2026-10-01T12:00:00.000Z",
+  "finishedUtc": "2026-10-01T12:02:30.500Z",
+  "status": "execution-failures",
+  "caseFile": "parity/cases/characters.json",
+  "threshold": 0.00004,
+  "canonical": {
+    "sourcePath": "bin/ChummerGenSR4.exe",
+    "stagedPath": "out/runs/20261001T120000Z-1a2b3c4d/apps/canonical/ChummerGenSR4.exe",
+    "pinnedSha256": "9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56",
+    "sourceSha256Before": "9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56",
+    "stagedSha256Before": "9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56",
+    "sourceSha256After": "9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56",
+    "stagedSha256After": "9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56"
+  },
+  "candidate": {
+    "sourcePath": "out/candidate/bin/ChummerGenSR4.exe",
+    "stagedPath": "out/runs/20261001T120000Z-1a2b3c4d/apps/candidate/ChummerGenSR4.exe",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "settingsOverlay": {
+    "path": "out/overlays/example",
+    "files": [
+      {
+        "path": "settings/default.xml",
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "replaced": true
+      }
+    ]
+  },
+  "screens": [
+    {
+      "deviceName": "\\\\.\\DISPLAY1",
+      "primary": true,
+      "bounds": { "x": 0, "y": 0, "width": 1920, "height": 1080 },
+      "workingArea": { "x": 0, "y": 0, "width": 1920, "height": 1020 }
+    }
+  ],
+  "cases": [
+    {
+      "case": "build-example",
+      "characterFile": "example-build.chum",
+      "mode": "build",
+      "sides": [
+        {
+          "side": "canonical",
+          "status": "completed",
+          "durationMilliseconds": 45000,
+          "counts": { "performed": 3, "failed": 0, "optionalAbsent": 1, "skippedOptional": 2, "filtered": 0, "notRun": 0 },
+          "actions": [
+            { "index": 0, "action": "capture:common", "optional": false, "outcome": "performed" },
+            { "index": 1, "action": "selectTab:Skills", "optional": false, "outcome": "performed" },
+            { "index": 2, "action": "waitFor:Active Skills", "optional": false, "outcome": "performed" },
+            { "index": 3, "action": "selectTab:Adept Powers", "optional": true, "outcome": "optional-absent", "reason": "No tab named 'Adept Powers'." },
+            { "index": 4, "action": "waitFor:Power Points:", "optional": false, "outcome": "skipped-optional", "reason": "optional tab 'Adept Powers' is absent" },
+            { "index": 5, "action": "capture:adept-powers", "optional": false, "outcome": "skipped-optional", "reason": "optional tab 'Adept Powers' is absent" }
+          ]
+        },
+        {
+          "side": "candidate",
+          "status": "failed",
+          "durationMilliseconds": 12000,
+          "counts": { "performed": 2, "failed": 1, "optionalAbsent": 0, "skippedOptional": 0, "filtered": 0, "notRun": 3 },
+          "failure": "action 2 (waitFor:Active Skills): TimeoutException: Timed out waiting for visible UI label 'Active Skills'.",
+          "actions": [
+            { "index": 0, "action": "capture:common", "optional": false, "outcome": "performed" },
+            { "index": 1, "action": "selectTab:Skills", "optional": false, "outcome": "performed" },
+            { "index": 2, "action": "waitFor:Active Skills", "optional": false, "outcome": "failed", "reason": "TimeoutException: Timed out waiting for visible UI label 'Active Skills'." },
+            { "index": 3, "action": "selectTab:Adept Powers", "optional": true, "outcome": "not-run" },
+            { "index": 4, "action": "waitFor:Power Points:", "optional": false, "outcome": "not-run" },
+            { "index": 5, "action": "capture:adept-powers", "optional": false, "outcome": "not-run" }
+          ]
+        }
+      ]
+    }
+  ],
+  "totals": { "cases": 1, "failedSides": 1, "failedActions": 1, "captures": 1, "visualPassed": 1, "visualFailed": 0 },
+  "results": "results.json"
+}
