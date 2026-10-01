@@ -10,6 +10,7 @@ import type { WorkflowPaths } from "../paths.js";
 import { addBenchmarkItem, checkBenchmarkItem, readBenchmark } from "./benchmark.js";
 import { CommandOptions } from "./command-options.js";
 import { listRecords } from "./eval-record.js";
+import { freezeDataset } from "./dataset.js";
 import { gradeRecords } from "./grader.js";
 import { labelHindsight } from "./hindsight.js";
 import { recordSummary } from "./record-summary.js";
@@ -26,6 +27,8 @@ export const evalUsage = `Usage: npm run eval -- <command> [options]
                                   advisory model grades of answers without one (or of the named records, again)
   queue [--seed <text>] [--per-stratum <n>]
                                   print the review queue (npm run review shows it)
+  freeze --job <hypothesis|challenge> --name <name> [--seed <text>] [--test-percent <0-100>] [--reason <text>]
+                                  freeze the next version of a dataset under out/evals/datasets/<name>/
 
 Exit status: 0 done, 1 certificate refused, 2 a grader job failed, 3 setup error.`;
 
@@ -116,7 +119,22 @@ const queue: Command = async (args, context) => {
   return 0;
 };
 
-const commands: Readonly<Record<string, Command>> = { records, benchmark, hindsight, grade, queue };
+const freeze: Command = async (args, context) => {
+  const options = CommandOptions.parse("freeze", args, ["job", "name", "seed", "test-percent", "reason"]);
+  options.required("job");
+  const jobKind = options.choice("job", ["hypothesis", "challenge"] as const, "hypothesis");
+  const { folder, dataset } = await freezeDataset({
+    name: options.required("name"), jobKind, seed: options.text("seed") ?? "dataset", testPercent: options.number("test-percent", 50, 0, 100, true),
+    reason: options.text("reason"), datasetsFolder: join(context.paths.evalsFolder, "datasets"), threadFolder: context.paths.threadFolder,
+    records: await listRecords(context.store), benchmark: readBenchmark(context.paths.benchmark), now: context.now, log: context.log,
+  });
+  const count = (partition: string) => dataset.items.filter((item) => item.partition === partition).length;
+  context.log(`Dataset ${dataset.name} v${dataset.version} (${jobKind}): ${dataset.items.length} items, ${count("test")} test and ${count("development")} development, `
+    + `${dataset.items.filter((item) => item.gold !== null).length} with gold; hash ${dataset.datasetHash}; ${folder}`);
+  return 0;
+};
+
+const commands: Readonly<Record<string, Command>> = { records, benchmark, hindsight, grade, queue, freeze };
 
 /** Runs one evaluation command and returns its exit status; a setup error is thrown. */
 export async function runEvalCommand(args: readonly string[], context: EvalContext): Promise<number> {
