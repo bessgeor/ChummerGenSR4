@@ -280,14 +280,14 @@ export class DiagnosisService {
       const waiting: QuotaWaitMark = { job: kind, provider: choice.provider, since: finished.toISOString(), processId: this.dependencies.quota.processId, message: failure.message };
       return { update: { clusterId: cluster.clusterId, waiting, records }, chargedMs: 0 };
     }
-    if (failure.kind === "infra") throw new SetupError(`${label} failed: ${failure.message} (record ${recordId})`);
+    if (failure.kind === "infra" || failure.kind === "timeout") throw new SetupError(`${label} failed: ${failure.message} (record ${recordId})`);
     return { update: { clusterId: cluster.clusterId, status: "failed", failure: { job: kind, kind: failure.kind, message: failure.message }, records }, chargedMs: record.durationMs };
   }
 }
 
-/** The model time a result charges to the run budget: a finished job, a failed one too; not a usage limit, and an infra failure ends the run. */
+/** The model time a result charges to the run budget: a finished job, a failed one too; not a usage limit, and an infra failure or timeout ends the run. */
 function chargedMilliseconds(label: string, result: AgentResult<unknown>): number {
-  return !result.ok && (result.failure.kind === "quota_exhausted" || result.failure.kind === "infra") ? 0 : measuredDuration(label, result);
+  return !result.ok && ["quota_exhausted", "infra", "timeout"].includes(result.failure.kind) ? 0 : measuredDuration(label, result);
 }
 
 /** The adapter's duration in whole milliseconds. A negative or non-finite duration or cost is a bug in the adapter and fails the run. */

@@ -42,7 +42,7 @@ export type ClusterDiagnosis = {
   readonly hypothesis: JobAnswer<HypothesisOutput> | null;
   readonly challenge: JobAnswer<ChallengeOutput> | null;
   readonly waiting: QuotaWaitMark | null;
-  readonly failure: { readonly job: JobKind; readonly kind: Exclude<AgentFailureKind, "quota_exhausted" | "infra">; readonly message: string } | null;
+  readonly failure: { readonly job: JobKind; readonly kind: Exclude<AgentFailureKind, "quota_exhausted" | "infra" | "timeout">; readonly message: string } | null;
   /** The eval records of every job of the cluster, in order, failed and quota attempts included. */
   readonly records: readonly string[];
 };

@@ -21,19 +21,31 @@ const HindsightLabelSchema = z.strictObject({ grade: z.enum(grades), item: z.str
 const ReviewLabelSchema = z.strictObject({ verdict: z.enum(verdicts), note: z.string().nullable(), reviewer: z.string().min(1), reviewedUtc: z.string() });
 const GraderLabelSchema = z.strictObject({ score: z.number().min(0).max(1), rationale: z.string().min(1), record: z.string().min(1), gradedUtc: z.string() });
 
+/** Where a rejected repair attempt stopped. */
+export const repairStages = ["model", "deadline", "patch", "build", "check"] as const;
+export type RepairStage = (typeof repairStages)[number];
+
+/** The outcome of a repair job's attempt: automatic, never gold. */
+const RepairLabelSchema = z.strictObject({
+  outcome: z.enum(["passed", "rejected"]), stage: z.enum(repairStages).nullable(), reason: z.string().nullable(), labelledUtc: z.string(),
+});
+
 /** The labels of a record, each from its own source; only hindsight and review verdicts are gold. */
 const LabelsSchema = z.strictObject({
   check: z.enum(checkLabels).nullable(),
   hindsight: HindsightLabelSchema.nullable(),
   review: ReviewLabelSchema.nullable(),
   grader: GraderLabelSchema.nullable(),
+  /** Records stored before repair existed have no such label. */
+  repair: RepairLabelSchema.nullable().default(null),
 });
 export type Labels = z.infer<typeof LabelsSchema>;
 export type HindsightLabel = z.infer<typeof HindsightLabelSchema>;
 export type ReviewLabel = z.infer<typeof ReviewLabelSchema>;
 export type GraderLabel = z.infer<typeof GraderLabelSchema>;
+export type RepairLabel = z.infer<typeof RepairLabelSchema>;
 
-export const noLabels: Labels = { check: null, hindsight: null, review: null, grader: null };
+export const noLabels: Labels = { check: null, hindsight: null, review: null, grader: null, repair: null };
 
 const common = {
   recordId: z.string().min(1),

@@ -8,8 +8,11 @@ import { childEnvironment } from "./child-environment.js";
 import { claudeNativeBesideShim, resolveExecutable, type ResolvedExecutable } from "./executable.js";
 import { classifyFailure, failure, finishOutput, jsonSchemaOf } from "./job-output.js";
 
-/** The only tools a Claude job gets: reading and searching files. */
+/** The only tools a read-only Claude job gets: reading and searching files. */
 export const claudeTools = ["Read", "Grep", "Glob"] as const;
+
+/** A writable job also edits and writes files; no job gets a tool that runs commands. */
+export const claudeWritableTools = [...claudeTools, "Edit", "Write"] as const;
 
 /** Variables that would bill a job to an API key or another cloud account instead of the subscription. */
 const billingVariables = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"];
@@ -19,8 +22,9 @@ export function claudeArguments<T>(job: AgentJob<T>): string[] {
     "--json-schema", JSON.stringify(jsonSchemaOf(job.schema)), "--effort", job.choice.effort];
   if (job.choice.model !== null) args.push("--model", job.choice.model);
   // No --allowedTools: a bare tool name allows every path. Without it, dontAsk reads only the job folder and the
-  // --add-dir folders and denies everything else.
-  args.push("--permission-mode", "dontAsk", "--tools", claudeTools.join(","));
+  // --add-dir folders and denies everything else; acceptEdits also accepts edits there without a prompt.
+  if (job.workspace.writable === true) args.push("--permission-mode", "acceptEdits", "--tools", claudeWritableTools.join(","));
+  else args.push("--permission-mode", "dontAsk", "--tools", claudeTools.join(","));
   for (const folder of job.workspace.readOnly) args.push("--add-dir", folder);
   args.push("--strict-mcp-config", "--no-session-persistence", "--setting-sources", "");
   return args;
@@ -84,8 +88,8 @@ function succeededCalls(event: Record<string, unknown>): string[] {
 type Ending = { result: ResultEvent | null; guard: AgentFailure | null; timedOut: boolean; code: number | null; stderr: string; diagnostics: string[]; read: string[] };
 
 /**
- * Runs a job with the Claude Code CLI in headless mode, under the user's Claude subscription: read-only tools,
- * no MCP servers, no settings or saved session, and the job folder as working directory.
+ * Runs a job with the Claude Code CLI in headless mode, under the user's Claude subscription: file tools only
+ * (edits only for a writable job), no MCP servers, no settings or saved session, and the job folder as working directory.
  */
 export class ClaudeAdapter implements AgentRunner {
   constructor(
@@ -110,7 +114,7 @@ export class ClaudeAdapter implements AgentRunner {
     const usage = ending.result === null ? null : usageOf(ending.result);
     const failed = (value: AgentFailure): AgentResult<T> => ({ ok: false, failure: value, usage, durationMs, sessionId });
     if (ending.guard !== null) return failed(ending.guard);
-    if (ending.timedOut) return failed(failure("infra", `${job.label}: the Claude job ran longer than ${job.choice.timeoutMinutes} minutes and was stopped.`));
+    if (ending.timedOut) return failed(failure("timeout", `${job.label}: the Claude job ran longer than ${job.choice.timeoutMinutes} minutes and was stopped.`));
     const result = ending.result;
     if (result === null) {
       // The CLI's own words only: stderr, stdout lines that are no events, and error events. Model text and file contents are not.

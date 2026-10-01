@@ -144,6 +144,29 @@ test("a file change, MCP tool call or web search stops the job as infra; read co
   ok(read.result.ok);
 });
 
+test("a writable job runs in a workspace-write sandbox and may change files only inside its working folder", async () => {
+  const environment = { CODEX_HOME: codexHome("chatgpt") };
+  const writable = (): AgentJob<Answer> => {
+    const given = job();
+    return { ...given, workspace: { ...given.workspace, writable: true } };
+  };
+  const inside = writable();
+  const change = (paths: string[]): ThreadEvent => ({
+    type: "item.completed", item: { id: "f", type: "file_change", changes: paths.map((path) => ({ path, kind: "update" as const })), status: "completed" },
+  });
+  const allowed = await runWith([change([join(inside.workspace.folder, "Chummer", "frmCreate.cs"), "Chummer/frmCareer.cs"]), ...answered("{\"answer\":1}")], environment, inside);
+  ok(allowed.result.ok);
+  equal(allowed.recorded.thread?.sandboxMode, "workspace-write");
+  equal(allowed.recorded.thread?.networkAccessEnabled, false);
+  for (const path of [join(tmpdir(), "elsewhere.cs"), "../outside.cs"]) {
+    const given = writable();
+    const outside = await runWith([change(["Chummer/a.cs", path])], environment, given, { hang: true });
+    const failure = failureOf(outside.result);
+    equal(failure.kind, "infra");
+    ok(failure.message.includes(path) && failure.message.includes("outside its working folder"), failure.message);
+  }
+});
+
 test("an answer that is no JSON, does not match the schema or fails validation is invalid_output; no answer too", async () => {
   const environment = { CODEX_HOME: codexHome("chatgpt") };
   for (const text of ["the answer is 7", "{\"answer\":\"7\"}", "{\"answer\":-7}"]) {
@@ -153,9 +176,10 @@ test("an answer that is no JSON, does not match the schema or fails validation i
   equal(failureOf(silent.result).kind, "invalid_output");
 });
 
-test("a job past its time limit fails as infra; a stopped run is a setup error", async () => {
+test("a job past its time limit fails as timeout; a stopped run is a setup error", async () => {
   const environment = { CODEX_HOME: codexHome("chatgpt") };
   const timeout = await runWith([], environment, job({ choice: { provider: "codex", model: null, effort: "low", timeoutMinutes: 0.0005 } }), { hang: true });
+  equal(failureOf(timeout.result).kind, "timeout");
   ok(/longer than 0.0005 minutes/.test(failureOf(timeout.result).message));
   const controller = new AbortController();
   const adapter = new CodexAdapter(null, environment, fakeClient([], {}, { hang: true }));

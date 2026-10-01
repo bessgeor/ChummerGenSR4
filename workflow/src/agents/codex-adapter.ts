@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
-import { Codex, type CodexOptions, type Input, type ThreadEvent, type ThreadOptions, type TurnOptions, type Usage } from "@openai/codex-sdk";
+import { isAbsolute, join, relative, resolve } from "node:path";
+import { Codex, type CodexOptions, type Input, type ThreadEvent, type ThreadItem, type ThreadOptions, type TurnOptions, type Usage } from "@openai/codex-sdk";
 import { SetupError } from "../host/setup-error.js";
 import type { AgentFailure, AgentJob, AgentResult, AgentRunner, AgentUsage } from "./agent-job.js";
 import { JobLog } from "./job-log.js";
@@ -25,7 +25,7 @@ export function codexThreadOptions<T>(job: AgentJob<T>): ThreadOptions {
     workingDirectory: job.workspace.folder,
     ...(job.choice.model === null ? {} : { model: job.choice.model }),
     modelReasoningEffort: job.choice.effort,
-    sandboxMode: "read-only",
+    sandboxMode: job.workspace.writable === true ? "workspace-write" : "read-only",
     approvalPolicy: "never",
     webSearchMode: "disabled",
     networkAccessEnabled: false,
@@ -47,14 +47,32 @@ export function signInProblem(environment: NodeJS.ProcessEnv): string | null {
   return mode === "chatgpt" ? null : `Codex is signed in with ${String(mode)}, which would bill an API key; sign in with the ChatGPT subscription.`;
 }
 
+/**
+ * Why an item breaks the job's limits, or null: no MCP call or web search, and a file change only in a writable
+ * job and only inside its working folder.
+ */
+export function forbiddenItem<T>(job: AgentJob<T>, item: ThreadItem): string | null {
+  if (item.type === "mcp_tool_call" || item.type === "web_search") return `Codex used ${item.type}, which a job must not.`;
+  if (item.type !== "file_change") return null;
+  if (job.workspace.writable !== true) return "Codex used file_change, which a read-only job must not.";
+  const outside = item.changes.map((change) => change.path).filter((path) => !isInside(job.workspace.folder, path));
+  return outside.length === 0 ? null : `Codex changed ${outside.join(", ")}, outside its working folder ${job.workspace.folder}.`;
+}
+
+function isInside(folder: string, path: string): boolean {
+  const relation = relative(resolve(folder), resolve(folder, path));
+  return relation !== "" && !relation.startsWith("..") && !isAbsolute(relation);
+}
+
 function usageOf(usage: Usage): AgentUsage {
   return { inputTokens: usage.input_tokens, cachedInputTokens: usage.cached_input_tokens, outputTokens: usage.output_tokens, costUsd: null };
 }
 
 /**
- * Runs a job with the Codex SDK under the user's ChatGPT subscription: a read-only sandbox, no approvals, no web
- * search, no network for commands, and the job folder as working directory. The sandbox limits writes, not reads,
- * so the caller must give the job a working folder that has nothing else of value around it.
+ * Runs a job with the Codex SDK under the user's ChatGPT subscription: a read-only sandbox (workspace-write for a
+ * writable job), no approvals, no web search, no network for commands, and the job folder as working directory.
+ * The sandbox limits writes, not reads, so the caller must give the job a working folder that has nothing else of
+ * value around it.
  */
 export class CodexAdapter implements AgentRunner {
   constructor(
@@ -111,9 +129,10 @@ export class CodexAdapter implements AgentRunner {
           streamFailure ??= event.message;
         } else if (event.type !== "turn.started") {
           const item = event.item;
-          // Codex reads files with commands, which the read-only sandbox keeps from writing or reaching the network.
-          if (item.type === "file_change" || item.type === "mcp_tool_call" || item.type === "web_search") {
-            guard = failure("infra", `${job.label}: Codex used ${item.type}, which a read-only job must not.`);
+          // Codex reads files with commands, which the sandbox keeps from reaching the network and, read-only, from writing.
+          const misuse = forbiddenItem(job, item);
+          if (misuse !== null) {
+            guard = failure("infra", `${job.label}: ${misuse}`);
             controller.abort();
             break;
           }
@@ -131,7 +150,7 @@ export class CodexAdapter implements AgentRunner {
 
     if (stopped === "run") throw new SetupError(`${job.label}: the Codex job was stopped because the run was stopped.`);
     if (guard !== null) return failed(guard);
-    if (stopped === "timeout") return failed(failure("infra", `${job.label}: the Codex job ran longer than ${job.choice.timeoutMinutes} minutes and was stopped.`));
+    if (stopped === "timeout") return failed(failure("timeout", `${job.label}: the Codex job ran longer than ${job.choice.timeoutMinutes} minutes and was stopped.`));
     const turnFailure = failedTurn ?? streamFailure;
     if (turnFailure !== null) return failed(failure(classifyFailure(turnFailure), `${job.label}: ${turnFailure}`));
     if (answer === null) return failed(failure("invalid_output", `${job.label}: the Codex turn ended without an answer.`));

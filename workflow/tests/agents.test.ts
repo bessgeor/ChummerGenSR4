@@ -133,11 +133,13 @@ test("one runner, and so one model pool, serves the same agent settings", () => 
   ok(runners(settings) !== runners(resolveAgentSettings({ modelPool: 3 })));
 });
 
-test("without a profile, hypotheses and grades run on Claude and challenges on Codex", () => {
+test("without a profile, hypotheses, grades and repairs run on Claude and challenges on Codex", () => {
   const settings = resolveAgentSettings(undefined);
   deepStrictEqual(settings.jobs.hypothesis, { provider: "claude", model: null, effort: "medium", timeoutMinutes: 30 });
   deepStrictEqual(settings.jobs.challenge, { provider: "codex", model: null, effort: "medium", timeoutMinutes: 30 });
   deepStrictEqual(settings.jobs.grade, { provider: "claude", model: null, effort: "medium", timeoutMinutes: 30 });
+  deepStrictEqual(settings.jobs.repair, { provider: "claude", model: null, effort: "high", timeoutMinutes: 30 });
+  deepStrictEqual(resolveAgentSettings({ jobs: { repair: { provider: "codex", timeoutMinutes: 45 } } }).jobs.repair, { provider: "codex", model: null, effort: "high", timeoutMinutes: 45 });
   deepStrictEqual(resolveAgentSettings({ jobs: { grade: { provider: "codex", effort: "low" } } }).jobs.grade, { provider: "codex", model: null, effort: "low", timeoutMinutes: 30 });
   deepStrictEqual([settings.modelPool, settings.runBudgetMinutes, settings.executables], [2, 120, { claude: "claude", codex: null }]);
   const configured = resolveAgentSettings({
@@ -162,5 +164,15 @@ test("the profile's agents part is validated strictly", () => {
   ]) {
     writeFileSync(path, JSON.stringify({ agents }));
     throws(() => loadProfile({ PARITY_WORKFLOW_PROFILE: path }), (error: Error) => error instanceof SetupError && error.message.includes(path), JSON.stringify(agents));
+  }
+});
+
+test("the profile's repair deadline is a positive number of minutes within a timer's range", () => {
+  const path = join(mkdtempSync(join(tmpdir(), "workflow-agents-")), "profile.json");
+  writeFileSync(path, JSON.stringify({ repair: { deadlineMinutes: 20 } }));
+  deepStrictEqual(loadProfile({ PARITY_WORKFLOW_PROFILE: path }).repair, { deadlineMinutes: 20 });
+  for (const repair of [{ deadlineMinutes: 0 }, { deadlineMinutes: 100_000 }, { deadline: 5 }]) {
+    writeFileSync(path, JSON.stringify({ repair }));
+    throws(() => loadProfile({ PARITY_WORKFLOW_PROFILE: path }), (error: Error) => error instanceof SetupError && error.message.includes(path), JSON.stringify(repair));
   }
 });
