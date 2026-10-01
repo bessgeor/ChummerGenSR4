@@ -224,3 +224,7 @@ A stored entry's key lines include `monitor-dpi:\\.\DISPLAY1:144x144`, `os-patch
 - Timing overhead: the cost of the decorator itself was not measured.
 - Fixture content: the fixtures are binary files, so the diff does not show what was replaced in them. The case-file test checks only the declared modes and that no fixture names a linked character file; that the free-text notes, links, one contact name and the face mage portrait are neutral placeholders was not checked independently, and captures of the originals were not compared with captures of the placeholders.
 - Other hosts, OS versions, cultures and overlays: every run used this host, the culture `en-US` and the one overlay above.
+
+## Archive
+
+`npx openspec archive add-parity-evidence --yes` printed `Task status: ✓ Complete`, `visual-parity-capture: update` (`+ 5 added`), `visual-parity-compare: update` (`+ 1 added`) and `Change 'add-parity-evidence' archived as '2026-10-01-add-parity-evidence'.` Afterwards `npm run openspec:validate` printed `✓ spec/development-process`, `✓ spec/parity-contracts`, `✓ spec/visual-parity-capture`, `✓ spec/visual-parity-compare` and `Totals: 4 passed, 0 failed (4 items)`. This section was added in the archive commit, after the archive ran.

@@ -22,4 +22,4 @@
 ## 5. Verification and archive
 
 - [x] 5.1 Run live `npm start` on the whole suite with the sourcebook overlay and the cache, then again so the canonical sides come from the cache. Record the canonical hash before and after, coverage, execution outcomes apart from visual results, the comparer's counts and completeness, timing, and the cache hits in `verification.md`, with the first baseline counts, separating fixture-tested scope from live evidence and naming what remains unverified.
-- [ ] 5.2 Archive the change with `openspec archive add-parity-evidence`. Evidence: `npm run openspec:validate` passes after the archive, recorded in `verification.md`.
+- [x] 5.2 Archive the change with `openspec archive add-parity-evidence`. Evidence: `npm run openspec:validate` passes after the archive, recorded in `verification.md`.
