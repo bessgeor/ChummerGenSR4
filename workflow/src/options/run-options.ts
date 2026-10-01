@@ -1,0 +1,50 @@
+import { join, resolve } from "node:path";
+import type { Arguments, NodeName } from "./arguments.js";
+import { localDataFolder, type Environment, type Profile } from "./profile.js";
+
+/** Everything a thread runs with; stored in the thread's state so a resumed thread uses the same options. */
+export type RunOptions = {
+  readonly caseFile: string;
+  readonly cases: readonly string[];
+  readonly captures: readonly string[];
+  readonly settingsOverlay: string | null;
+  readonly threshold: number | null;
+  /** The canonical cache folder, or null when every canonical side runs live. */
+  readonly canonicalCache: string | null;
+  readonly canonicalCacheSource: "option" | "environment" | "profile" | "default" | "off";
+  readonly noOcr: boolean;
+  readonly tessdata: string | null;
+  readonly only: NodeName | null;
+  /** Capture every planned case again even when a completed step with the same inputs exists. */
+  readonly recapture: boolean;
+};
+
+function cacheFolder(args: Arguments, profile: Profile, env: Environment): Pick<RunOptions, "canonicalCache" | "canonicalCacheSource"> {
+  if (args.liveCanonical) return { canonicalCache: null, canonicalCacheSource: "off" };
+  if (args.canonicalCache !== null) return { canonicalCache: args.canonicalCache, canonicalCacheSource: "option" };
+  const fromEnvironment = env["PARITY_CANONICAL_CACHE"];
+  if (fromEnvironment !== undefined && fromEnvironment.length > 0) {
+    return { canonicalCache: fromEnvironment, canonicalCacheSource: "environment" };
+  }
+  if (profile.canonicalCache !== undefined) return { canonicalCache: profile.canonicalCache, canonicalCacheSource: "profile" };
+  return { canonicalCache: join(localDataFolder(env), "canonical-cache"), canonicalCacheSource: "default" };
+}
+
+/** Fills in defaults from the profile and the environment and makes every path absolute. */
+export function resolveRunOptions(args: Arguments, profile: Profile, env: Environment, repositoryRoot: string): RunOptions {
+  const absolute = (path: string | null): string | null => (path === null ? null : resolve(repositoryRoot, path));
+  const cache = cacheFolder(args, profile, env);
+  return {
+    caseFile: resolve(repositoryRoot, args.caseFile ?? join("parity", "cases", "characters.json")),
+    cases: args.cases,
+    captures: args.captures,
+    settingsOverlay: absolute(args.settingsOverlay ?? profile.settingsOverlay ?? null),
+    threshold: args.threshold,
+    canonicalCache: absolute(cache.canonicalCache),
+    canonicalCacheSource: cache.canonicalCacheSource,
+    noOcr: args.noOcr,
+    tessdata: absolute(args.tessdata),
+    only: args.only,
+    recapture: args.recapture,
+  };
+}

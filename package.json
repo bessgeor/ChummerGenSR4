@@ -3,6 +3,9 @@
   "private": true,
   "description": "Character generator for Shadowrun 4th Edition",
   "type": "module",
+  "workspaces": [
+    "workflow"
+  ],
   "scripts": {
     "start": "node parity/scripts/start.mjs",
     "parity": "dotnet run --project parity/src/Parity.Capture -c Release --",
@@ -13,7 +16,9 @@
     "openspec:validate": "openspec validate --all --strict",
     "contracts:generate": "node contracts/scripts/generate.mjs",
     "contracts:check": "node contracts/scripts/generate.mjs --check",
-    "contracts:test": "tsc -p contracts && node --import tsx --test contracts/tests/round-trip.test.ts"
+    "contracts:test": "tsc -p contracts && node --import tsx --test contracts/tests/round-trip.test.ts",
+    "workflow:typecheck": "tsc -p workflow",
+    "workflow:test": "node --import tsx --test \"workflow/tests/**/*.test.ts\""
   },
   "devDependencies": {
     "@fission-ai/openspec": "1.13.2",
