@@ -40,9 +40,34 @@ public sealed class CaptureRunTests
     [InlineData("--case")]
     [InlineData("--threshold", "2")]
     [InlineData("--capture", "--case")]
+    [InlineData("--run-folder-file")]
     public void Invalid_options_are_rejected(params string[] args)
     {
         Assert.Throws<ArgumentException>(() => new CaptureOptionsParser().Parse(args));
+    }
+
+    [Fact]
+    public void Run_folder_file_receives_the_run_folder()
+    {
+        string runs = Directory.CreateTempSubdirectory("parity-runs-").FullName;
+        try
+        {
+            string runFolderFile = Path.Combine(runs, "run-folder.txt");
+            using ServiceProvider services = Parity.Capture.Program.BuildServices();
+
+            // A missing candidate stops the run after its folder exists, before any app starts.
+            int exitCode = services.GetRequiredService<CaptureRun>().Execute(
+                ["--repo-root", RepositoryPaths.Root, "--runs-dir", runs, "--run-folder-file", runFolderFile, "--candidate-exe", Path.Combine(runs, "missing.exe")]);
+
+            Assert.Equal(3, exitCode);
+            string runFolder = File.ReadAllText(runFolderFile);
+            Assert.Equal(runs, Path.GetDirectoryName(runFolder));
+            Assert.True(File.Exists(Path.Combine(runFolder, "summary.json")));
+        }
+        finally
+        {
+            Directory.Delete(runs, recursive: true);
+        }
     }
 
     [Fact]
