@@ -12,6 +12,13 @@ import { join } from "node:path";
 const setupError = 3;
 const reportExitStatus = new Map([["clear", 0], ["differences", 1], ["analysis-failures", 2]]);
 
+// An unexpected error, for example a scratch folder that cannot be removed, must not end with Node's
+// status 1, which would read as visual differences.
+process.on("uncaughtException", (error) => {
+  console.error(`npm start failed: ${error.stack ?? error}`);
+  process.exit(setupError);
+});
+
 const npmCli = process.env.npm_execpath;
 if (!npmCli) {
   console.error("Run this through npm: npm start -- <options>.");
@@ -52,7 +59,7 @@ function splitArguments(args) {
 /** The comparer's status, or a setup error when it did not end with a report that matches its status. */
 function compareOutcome(runFolder, status) {
   if (status < 0 || status >= setupError) {
-    console.error(`Compare exited with ${status}, so it wrote no complete report.`);
+    console.error(`Compare exited with ${status}, not with 0, 1 or 2, so its run did not finish.`);
     return setupError;
   }
   const reportPath = join(runFolder, "compare", "report.json");
@@ -98,23 +105,42 @@ if (build !== 0) {
   process.exit(setupError);
 }
 
+/** The run folder capture wrote to the file, or null when the file cannot be read. */
+function readRunFolder(runFolderFile, capture) {
+  if (!existsSync(runFolderFile)) {
+    console.error(`Capture exited with ${capture} but did not report its run folder; compare did not run.`);
+    return null;
+  }
+  try {
+    return readFileSync(runFolderFile, "utf8");
+  } catch (error) {
+    console.error(`The run folder that capture reported cannot be read: ${error.message}; compare did not run.`);
+    return null;
+  }
+}
+
 // Capture writes the full path of the run folder it created here, so compare analyzes exactly that run.
-const scratch = mkdtempSync(join(tmpdir(), "parity-start-"));
+let scratch;
+try {
+  scratch = mkdtempSync(join(tmpdir(), "parity-start-"));
+} catch (error) {
+  console.error(`The folder for capture's run folder file cannot be created: ${error.message}; capture and compare did not run.`);
+  process.exit(setupError);
+}
+
 const runFolderFile = join(scratch, "run-folder.txt");
-let status;
+let status = setupError;
 try {
   const capture = npm("parity", [...split.capture, "--run-folder-file", runFolderFile]);
   if (capture >= setupError) {
     console.error(`Capture ended with a setup error (exit ${capture}); compare did not run.`);
-    status = setupError;
-  } else if (!existsSync(runFolderFile)) {
-    console.error(`Capture exited with ${capture} but did not report its run folder; compare did not run.`);
-    status = setupError;
   } else {
-    const runFolder = readFileSync(runFolderFile, "utf8");
-    const compare = compareOutcome(runFolder, npm("compare", ["--run", runFolder, ...split.compare]));
-    status = Math.max(capture, compare);
-    console.log(`Capture exit ${capture}, compare exit ${compare}: exit ${status}.`);
+    const runFolder = readRunFolder(runFolderFile, capture);
+    if (runFolder !== null) {
+      const compare = compareOutcome(runFolder, npm("compare", ["--run", runFolder, ...split.compare]));
+      status = Math.max(capture, compare);
+      console.log(`Capture exit ${capture}, compare exit ${compare}: exit ${status}.`);
+    }
   }
 } finally {
   rmSync(scratch, { recursive: true, force: true });

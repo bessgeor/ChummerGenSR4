@@ -12,14 +12,20 @@ const here = dirname(fileURLToPath(import.meta.url));
 const start = join(here, "..", "start.mjs");
 const fakeNpm = join(here, "fake-npm.mjs");
 
-function runStart(args, plan) {
+function runStart(args, plan, env = () => ({})) {
   const scratch = mkdtempSync(join(tmpdir(), "start-test-"));
   try {
     const log = join(scratch, "calls.jsonl");
     const runFolder = join(scratch, "run");
     const result = spawnSync(process.execPath, [start, ...args], {
       encoding: "utf8",
-      env: { ...process.env, npm_execpath: fakeNpm, FAKE_NPM: JSON.stringify({ runFolder, ...plan }), FAKE_NPM_LOG: log },
+      env: {
+        ...process.env,
+        npm_execpath: fakeNpm,
+        FAKE_NPM: JSON.stringify({ runFolder, ...plan }),
+        FAKE_NPM_LOG: log,
+        ...env(scratch),
+      },
     });
     let calls = [];
     try {
@@ -88,6 +94,23 @@ test("a capture setup error skips the comparer", () => {
 
   assert.equal(run.status, 3);
   assert.deepEqual(run.calls.map((call) => call.script), ["build:candidate", "parity"]);
+});
+
+test("a run folder file that cannot be read is a setup error and skips the comparer", () => {
+  const run = runStart([], { parity: { status: 1, runFolderFileIsFolder: true } });
+
+  assert.equal(run.status, 3);
+  assert.match(run.stderr, /run folder that capture reported cannot be read/);
+  assert.deepEqual(run.calls.map((call) => call.script), ["build:candidate", "parity"]);
+});
+
+test("a temporary folder that cannot be created is a setup error before capture", () => {
+  const missing = (scratch) => join(scratch, "missing");
+  const run = runStart([], {}, (scratch) => ({ TEMP: missing(scratch), TMP: missing(scratch), TMPDIR: missing(scratch) }));
+
+  assert.equal(run.status, 3);
+  assert.match(run.stderr, /cannot be created/);
+  assert.deepEqual(run.calls.map((call) => call.script), ["build:candidate"]);
 });
 
 test("a failed candidate build skips capture and compare", () => {
