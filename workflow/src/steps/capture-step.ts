@@ -34,10 +34,14 @@ const RunCasesSchema = z.object({ cases: z.array(z.object({ case: z.string() }))
 /** What one capture runner call captures: the named cases, and only the named captures unless the filter is null. */
 export type CaptureSelection = { readonly cases: readonly string[]; readonly captures: readonly string[] | null };
 
-/** The capture runner's arguments for a selection under a thread's options; every capture run uses them. */
-export function captureArguments(paths: WorkflowPaths, options: RunOptions, selection: CaptureSelection, runFolderFile: string): string[] {
+/**
+ * The capture runner's arguments for a selection under a thread's options; every capture run uses them. A candidate
+ * executable replaces the thread's candidate (`out/candidate/bin/`).
+ */
+export function captureArguments(paths: WorkflowPaths, options: RunOptions, selection: CaptureSelection, runFolderFile: string, candidateExecutable: string | null = null): string[] {
   const args = [join(paths.captureTools, "Parity.Capture.dll"),
     "--case", selection.cases.join(","), "--case-file", options.caseFile, "--repo-root", paths.repositoryRoot, "--run-folder-file", runFolderFile];
+  if (candidateExecutable !== null) args.push("--candidate-exe", candidateExecutable);
   if (selection.captures !== null) args.push("--capture", selection.captures.join(","));
   if (options.threshold !== null) args.push("--threshold", String(options.threshold));
   if (options.settingsOverlay !== null) args.push("--settings-overlay", options.settingsOverlay);
@@ -53,6 +57,8 @@ export type CaptureRunRequest = {
   readonly selection: CaptureSelection;
   /** Names the run in the host's progress lines and its errors, for example `capture alpha`. */
   readonly subject: string;
+  /** The executable to capture as the candidate instead of the thread's. */
+  readonly candidateExecutable?: string;
   readonly signal?: AbortSignal;
 };
 
@@ -66,7 +72,7 @@ export async function runCaptureRunner(request: CaptureRunRequest): Promise<{ re
     const runFolderFile = join(scratch.path, "run-folder.txt");
     const exit = await request.host.run({
       resource: "desktop", label: request.subject, command: "dotnet",
-      args: captureArguments(request.paths, request.options, request.selection, runFolderFile), ...(request.signal === undefined ? {} : { signal: request.signal }),
+      args: captureArguments(request.paths, request.options, request.selection, runFolderFile, request.candidateExecutable ?? null), ...(request.signal === undefined ? {} : { signal: request.signal }),
     });
     const status = finishedStatus(exit);
     if (status === null) throw new SetupError(`${request.subject} exited with ${exit}, so its run did not finish.`);

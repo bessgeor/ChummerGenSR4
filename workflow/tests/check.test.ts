@@ -157,6 +157,10 @@ test("the check capture is one capture runner call on the desktop lane with the 
   // The same arguments the capture step builds, so an option added there reaches the check too.
   deepStrictEqual(command.args, captureArguments(paths, options, { cases: ["build-a", "career-b"], captures: ["skills", "common"] }, value("--run-folder-file")!));
   ok(!captureArguments(paths, options, { cases: ["build-a"], captures: null }, "f").includes("--capture"));
+  // The thread's candidate unless another executable is named.
+  ok(!command.args.includes("--candidate-exe"));
+  const attempt = captureArguments(paths, options, { cases: ["build-a"], captures: ["skills"] }, "f", "C:/attempt/build/bin/ChummerGenSR4.exe");
+  equal(attempt[attempt.indexOf("--candidate-exe") + 1], "C:/attempt/build/bin/ChummerGenSR4.exe");
   const failing = hostCheckCapture(paths, { run: async () => 3 }, createScratchFolder);
   await rejects(failing({ cases: ["a"], captures: ["x"], options }), (error: Error) => error instanceof SetupError && /exited with 3/.test(error.message));
   const silent = hostCheckCapture(paths, { run: async () => 0 }, createScratchFolder);
