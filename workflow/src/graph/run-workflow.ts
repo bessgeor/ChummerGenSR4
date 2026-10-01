@@ -5,6 +5,7 @@ import type { Command } from "../options/arguments.js";
 import type { RunOptions } from "../options/run-options.js";
 import type { CaseDetails } from "../steps/case-details.js";
 import { describeCase } from "./case-report.js";
+import { describeDiagnosis, diagnosisStatus } from "./diagnosis-report.js";
 import type { buildWorkflowGraph } from "./workflow-graph.js";
 import type { WorkflowStateValue } from "./workflow-state.js";
 
@@ -38,10 +39,10 @@ function config(threadId: string, cases: number, signal: AbortSignal | undefined
   };
 }
 
-/** The highest finished status of every capture and compare, in plan order of severity. */
-export function exitStatus(state: Pick<WorkflowStateValue, "captures" | "compares">): number {
+/** The highest finished status of every capture and compare and of the diagnosis. */
+export function exitStatus(state: Pick<WorkflowStateValue, "captures" | "compares"> & Partial<Pick<WorkflowStateValue, "clusters" | "diagnosisCheck">>): number {
   const statuses = [...Object.values(state.captures), ...Object.values(state.compares)].map((outcome) => outcome.status);
-  return Math.max(0, ...statuses);
+  return Math.max(0, ...statuses, diagnosisStatus(state.clusters ?? {}, state.diagnosisCheck ?? null));
 }
 
 function report(state: WorkflowStateValue, readCase: RunDependencies["readCase"], log: (line: string) => void): void {
@@ -56,6 +57,7 @@ function report(state: WorkflowStateValue, readCase: RunDependencies["readCase"]
     log(`Triage: ${triage.discrepancies} discrepancies in ${triage.clusters} clusters (${triage.newClusters} new), `
       + `${triage.otherFindings} other findings; ${triage.path}`);
   }
+  for (const line of describeDiagnosis(state.clusters, state.diagnosisCheck, state.diagnosisPath)) log(line);
 }
 
 async function start(command: Extract<Command, { kind: "start" }>, dependencies: RunDependencies): Promise<{ threadId: string; cases: number; input: WorkflowStateValue }> {
@@ -67,7 +69,7 @@ async function start(command: Extract<Command, { kind: "start" }>, dependencies:
   dependencies.log(`Thread ${threadId}: ${plan.cases.length} cases, canonical cache ${cache}.`);
   const input: WorkflowStateValue = {
     threadId, options, plan: [...plan.cases], fingerprints: null, captures: {}, lastCaptured: -1, compares: {}, triageSummary: null,
-    clusters: {}, agentMilliseconds: 0,
+    clusters: {}, agentMilliseconds: 0, diagnosisCheck: null, diagnosisPath: null,
   };
   return { threadId, cases: plan.cases.length, input };
 }

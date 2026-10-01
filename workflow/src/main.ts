@@ -11,6 +11,7 @@ import { ClaudeAdapter } from "./agents/claude-adapter.js";
 import { CodexAdapter } from "./agents/codex-adapter.js";
 import { PooledAgentRunner } from "./agents/pooled-agent-runner.js";
 import { planCases } from "./cases/case-plan.js";
+import { hostCheckCapture } from "./diagnosis/check-capture.js";
 import { DiagnosisService } from "./diagnosis/diagnosis-service.js";
 import { QuotaWaiter } from "./diagnosis/quota-waiter.js";
 import { processGit } from "./diagnosis/source-snapshot.js";
@@ -101,7 +102,8 @@ async function main(): Promise<number> {
   const diagnosis = new DiagnosisService({
     repositoryRoot, threadFolder: paths.threadFolder, agents, quota: new QuotaWaiter(randomBytes(8).toString("hex"), undefined, log),
     git: processGit(repositoryRoot), allCases: (caseFile) => planCases(caseFile, [], []).cases,
-    readReport: (runFolder) => readDocument(join(runFolder, reportPath), CompareReportSchema), now, log,
+    readReport: (runFolder) => readDocument(join(runFolder, reportPath), CompareReportSchema),
+    checkCapture: hostCheckCapture(paths, host, createScratchFolder), now, log,
   });
 
   const checkpointer = SqliteSaver.fromConnString(paths.checkpoints);

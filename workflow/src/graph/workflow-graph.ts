@@ -2,7 +2,8 @@ import type { BaseStore } from "@langchain/langgraph-checkpoint";
 import { END, Send, START, StateGraph, type LangGraphRunnableConfig } from "@langchain/langgraph";
 import type { PlannedCase } from "../cases/case-plan.js";
 import { nextDiagnosisRoute, type ClusterDiagnosis, type QuotaWaitMark } from "../diagnosis/cluster-diagnosis.js";
-import type { JobInput, JobStep, PrepareInput } from "../diagnosis/diagnosis-service.js";
+import type { CheckResult } from "../diagnosis/check.js";
+import type { CheckInput, JobInput, JobStep, PrepareInput } from "../diagnosis/diagnosis-service.js";
 import { SetupError } from "../host/setup-error.js";
 import type { NodeName } from "../options/arguments.js";
 import type { RunOptions } from "../options/run-options.js";
@@ -31,6 +32,9 @@ export interface DiagnosisSteps {
   hypothesize(input: JobInput, store: BaseStore): Promise<JobStep>;
   challenge(input: JobInput, store: BaseStore): Promise<JobStep>;
   waitForQuota(marks: readonly QuotaWaitMark[], signal?: AbortSignal): Promise<void>;
+  check(input: CheckInput, store: BaseStore): Promise<CheckResult>;
+  /** Writes the thread's `diagnosis.json` and returns its path. */
+  finish(threadId: string, clusters: Readonly<Record<string, ClusterDiagnosis>>, check: CheckResult | null): string;
 }
 
 const order: readonly NodeName[] = ["capture", "compare", "triage", "diagnose"];
@@ -117,6 +121,10 @@ export function buildWorkflowGraph(steps: WorkflowSteps, diagnosis: DiagnosisSte
       await diagnosis.waitForQuota(waiting.map((cluster) => cluster.waiting!), config.signal);
       return { clusters: Object.fromEntries(waiting.map((cluster) => [cluster.clusterId, { clusterId: cluster.clusterId, waiting: null }])) };
     })
+    .addNode("check", async (state: WorkflowStateValue, config: LangGraphRunnableConfig) => ({
+      diagnosisCheck: await diagnosis.check({ options: state.options, clusters: state.clusters, ...(config.signal === undefined ? {} : { signal: config.signal }) }, requireStore(config)),
+    }))
+    .addNode("finish_diagnosis", (state: WorkflowStateValue) => ({ diagnosisPath: diagnosis.finish(state.threadId, state.clusters, state.diagnosisCheck) }))
     .addEdge(START, "build")
     .addConditionalEdges("build", (state: WorkflowStateValue) => {
       if (state.plan.length === 0) throw new SetupError("No case is planned, so nothing can be captured.");
@@ -138,16 +146,18 @@ export function buildWorkflowGraph(steps: WorkflowSteps, diagnosis: DiagnosisSte
       (state.options.diagnosis && nodeMode("diagnose", state.options.only) !== "skip" ? "prepare_diagnosis" : END), ["prepare_diagnosis", END])
     .addEdge("prepare_diagnosis", "route_diagnosis")
     .addConditionalEdges("route_diagnosis", (state: WorkflowStateValue) => {
-      const route = nextDiagnosisRoute(state.clusters, true);
+      const route = nextDiagnosisRoute(state.clusters, state.diagnosisCheck !== null);
       switch (route.kind) {
-        case "wait_for_quota": return "wait_for_quota";
         case "hypothesize":
         case "challenge": return route.clusters.map((clusterId) => new Send(route.kind, { ...state, clusterId }));
-        default: return END;
+        case "end": return "finish_diagnosis";
+        default: return route.kind;
       }
-    }, ["wait_for_quota", "hypothesize", "challenge", END])
+    }, ["wait_for_quota", "hypothesize", "challenge", "check", "finish_diagnosis"])
     // Plain edges: the router runs once after every job of the step finished, and sees all their writes.
     .addEdge("hypothesize", "route_diagnosis")
     .addEdge("challenge", "route_diagnosis")
-    .addEdge("wait_for_quota", "route_diagnosis");
+    .addEdge("wait_for_quota", "route_diagnosis")
+    .addEdge("check", "route_diagnosis")
+    .addEdge("finish_diagnosis", END);
 }

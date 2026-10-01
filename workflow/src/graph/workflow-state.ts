@@ -1,5 +1,6 @@
 import { Annotation } from "@langchain/langgraph";
 import type { PlannedCase } from "../cases/case-plan.js";
+import type { CheckResult } from "../diagnosis/check.js";
 import { mergeClusters, type ClusterDiagnosis, type ClusterUpdate } from "../diagnosis/cluster-diagnosis.js";
 import type { RunOptions } from "../options/run-options.js";
 import type { InputFingerprints } from "../steps/input-fingerprints.js";
@@ -40,6 +41,10 @@ export const WorkflowState = Annotation.Root({
     reducer: (current, update) => current + update,
     default: () => 0,
   }),
+  /** The batched check run and each checked cluster's outcome, once it ran. */
+  diagnosisCheck: Annotation<CheckResult | null>(),
+  /** The thread's `diagnosis.json`, once diagnosis finished. */
+  diagnosisPath: Annotation<string | null>(),
 });
 
 export type WorkflowStateValue = typeof WorkflowState.State;

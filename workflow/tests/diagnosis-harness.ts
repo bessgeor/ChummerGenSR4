@@ -1,16 +1,20 @@
-import { writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { InMemoryStore, MemorySaver } from "@langchain/langgraph";
 import type { AgentFailure, AgentJob, AgentResult, AgentRunner } from "../src/agents/agent-job.js";
 import { resolveAgentSettings } from "../src/agents/agent-settings.js";
 import { finishOutput } from "../src/agents/job-output.js";
 import type { PlannedCase } from "../src/cases/case-plan.js";
+import type { CheckCapture, CheckCaptureRequest } from "../src/diagnosis/check-capture.js";
 import { DiagnosisService } from "../src/diagnosis/diagnosis-service.js";
 import type { ChallengeOutput, HypothesisOutput } from "../src/diagnosis/job-schemas.js";
 import { QuotaWaiter, type Sleep } from "../src/diagnosis/quota-waiter.js";
 import { processGit } from "../src/diagnosis/source-snapshot.js";
 import { buildWorkflowGraph, type WorkflowSteps } from "../src/graph/workflow-graph.js";
 import { runWorkflow, type RunDependencies } from "../src/graph/run-workflow.js";
+import type { WorkflowStateValue } from "../src/graph/workflow-state.js";
 import { SetupError } from "../src/host/setup-error.js";
 import type { Arguments } from "../src/options/arguments.js";
 import type { CaseDetails } from "../src/steps/case-details.js";
@@ -104,6 +108,9 @@ export type HarnessOptions = {
   readonly root?: string;
   readonly signal?: AbortSignal;
   readonly extraSteps?: Partial<WorkflowSteps>;
+  /** What the check capture observes per `case/capture`; anything not named passes. */
+  readonly observed?: Readonly<Record<string, "passed" | "failed" | "missing-candidate" | "missing">>;
+  readonly checkStatus?: 0 | 1 | 2;
 };
 
 /** A workflow whose host steps are fakes over fixture run folders, with the real diagnosis service and fake agents. */
@@ -128,12 +135,35 @@ export function diagnosisHarness(options: HarnessOptions) {
     },
     ...options.extraSteps,
   };
+  const checks: CheckCaptureRequest[] = [];
+  const checkCapture: CheckCapture = async (request) => {
+    checks.push(request);
+    const runFolder = join(root, "check-runs", String(checks.length));
+    mkdirSync(runFolder, { recursive: true });
+    const observed = options.observed ?? defaultObserved;
+    const results = request.cases.flatMap((name) => request.captures.flatMap((capture) => {
+      const value = observed[`${name}/${capture}`] ?? "passed";
+      if (value === "missing") return [];
+      return [{
+        case: name, characterFile: `${name}.chum`, mode: "build" as const, capture, passed: value === "passed",
+        reason: value === "passed" ? "within-threshold" as const : value === "failed" ? "visual-difference" as const : "missing-candidate" as const,
+        difference: value === "passed" ? 0 : 0.01,
+      }];
+    }));
+    writeFileSync(join(runFolder, "results.json"), JSON.stringify({ runId: "check", threshold: 0.00004, results }));
+    const coverage = JSON.parse(readFileSync(join(examples, "parity-execution-coverage.example.json"), "utf8")) as { valid: boolean; invalidReasons: string[] };
+    // The example coverage is invalid; a check run is valid unless it ends with execution failures.
+    coverage.valid = options.checkStatus !== 2;
+    coverage.invalidReasons = options.checkStatus === 2 ? ["an action failed"] : [];
+    writeFileSync(join(runFolder, "coverage.json"), JSON.stringify(coverage));
+    return { status: options.checkStatus ?? (results.some((row) => !row.passed) ? 1 : 0), runFolder };
+  };
   const quota = new QuotaWaiter(options.processId ?? "process-1", options.sleep ?? (async (milliseconds) => {
     sleeps.push(milliseconds);
   }), log);
   const diagnosis = new DiagnosisService({
     repositoryRoot: sourceRepository, threadFolder: (threadId) => join(root, "threads", threadId), agents: () => agents, quota,
-    git: processGit(sourceRepository), allCases: () => cases, readReport, now: () => new Date("2026-10-01T12:00:00Z"), log,
+    git: processGit(sourceRepository), allCases: () => cases, readReport, checkCapture, now: () => new Date("2026-10-01T12:00:00Z"), log,
   });
   const checkpointer = options.checkpointer ?? new MemorySaver();
   const store = options.store ?? new InMemoryStore();
@@ -153,13 +183,18 @@ export function diagnosisHarness(options: HarnessOptions) {
     ...(options.signal === undefined ? {} : { signal: options.signal }),
   };
   return {
-    root, agents, sleeps, lines, store, checkpointer, graph,
+    root, agents, sleeps, checks, lines, store, checkpointer, graph,
     start: (overrides: Partial<Arguments> = {}) => runWorkflow({ kind: "start", arguments: { ...baseArguments, ...overrides } }, dependencies),
     resume: (threadId: string) => runWorkflow({ kind: "resume", threadId }, dependencies),
     threadId: () => /Thread (wf-\S+):/.exec(lines.join("\n"))?.[1] ?? "",
-    state: async (threadId: string) => (await graph.getState({ configurable: { thread_id: threadId } })).values,
+    state: async (threadId: string) => (await graph.getState({ configurable: { thread_id: threadId } })).values as WorkflowStateValue,
   };
 }
+
+const examples = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "contracts", "examples");
+
+/** The hypothesis's predictions hold and the alternative's does not. */
+const defaultObserved: Readonly<Record<string, "passed" | "failed" | "missing-candidate" | "missing">> = { "build-alpha/skills": "failed", "career-beta/common": "passed" };
 
 export const twoClusters: Spot[] = [
   { case: "build-alpha", capture: "skills", x: 100 },

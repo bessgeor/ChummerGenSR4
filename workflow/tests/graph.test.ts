@@ -88,6 +88,10 @@ const noDiagnosis: DiagnosisSteps = {
   hypothesize: () => Promise.reject(new Error("diagnosis is off")),
   challenge: () => Promise.reject(new Error("diagnosis is off")),
   waitForQuota: () => Promise.reject(new Error("diagnosis is off")),
+  check: () => Promise.reject(new Error("diagnosis is off")),
+  finish: () => {
+    throw new Error("diagnosis is off");
+  },
 };
 
 const baseArguments: Arguments = {

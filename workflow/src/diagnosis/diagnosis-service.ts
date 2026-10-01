@@ -4,12 +4,17 @@ import type { CompareReport } from "../../../contracts/generated/typescript/pari
 import type { AgentResult, AgentRunner, JobKind } from "../agents/agent-job.js";
 import type { AgentSettings } from "../agents/agent-settings.js";
 import type { PlannedCase } from "../cases/case-plan.js";
-import { putRecord, recordNamespace, type EvalRecord } from "../evals/eval-record.js";
+import { CaptureResultsSchema } from "../../../contracts/generated/typescript/parity-capture-results.js";
+import { ExecutionCoverageSchema } from "../../../contracts/generated/typescript/parity-execution-coverage.js";
+import { labelRecord, putRecord, recordNamespace, type EvalRecord } from "../evals/eval-record.js";
 import { SetupError } from "../host/setup-error.js";
 import type { RunOptions } from "../options/run-options.js";
 import { readDocument } from "../steps/read-document.js";
 import { TriageDocumentSchema } from "../triage/triage-document.js";
+import { judge, observe, planCheck, type CheckResult, type ClusterCheck } from "./check.js";
+import type { CheckCapture } from "./check-capture.js";
 import type { ClusterDiagnosis, ClusterUpdate, QuotaWaitMark } from "./cluster-diagnosis.js";
+import { diagnosisDocument, writeDiagnosisDocument } from "./diagnosis-document.js";
 import { ContextManifestSchema, contextHash, sealContext, type ContextManifest } from "./context.js";
 import {
   ChallengeOutputSchema, challengePromptVersion, HypothesisOutputSchema, hypothesisPromptVersion,
@@ -36,6 +41,7 @@ export type DiagnosisDependencies = {
   /** Every case of a case file, unfiltered: the check vocabulary. */
   readonly allCases: (caseFile: string) => readonly PlannedCase[];
   readonly readReport: (runFolder: string) => CompareReport;
+  readonly checkCapture: CheckCapture;
   readonly now: () => Date;
   readonly log: (line: string) => void;
 };
@@ -48,6 +54,12 @@ export type JobInput = {
   readonly cluster: ClusterDiagnosis;
   /** Model time the thread's finished jobs used, in milliseconds. */
   readonly spentMs: number;
+  readonly signal?: AbortSignal;
+};
+
+export type CheckInput = {
+  readonly options: RunOptions;
+  readonly clusters: Readonly<Record<string, ClusterDiagnosis>>;
   readonly signal?: AbortSignal;
 };
 
@@ -89,6 +101,46 @@ export class DiagnosisService {
   /** Waits for the usage limit of the marked jobs; they run again afterwards. */
   async waitForQuota(marks: readonly QuotaWaitMark[], signal?: AbortSignal): Promise<void> {
     await this.dependencies.quota.wait(marks.map((mark) => mark.processId), signal);
+  }
+
+  /** Captures every predicted case and capture in one run, judges each challenged cluster and labels its records. */
+  async check(input: CheckInput, store: BaseStore): Promise<CheckResult> {
+    const plan = planCheck(input.clusters);
+    if (plan === null) throw new Error("The diagnosis check ran without a prediction.");
+    this.dependencies.log(`Diagnosis check: one capture of ${plan.cases.join(", ")} (${plan.captures.join(", ")}) for ${plan.checked.length} clusters.`);
+    const run = await this.dependencies.checkCapture({ cases: plan.cases, captures: plan.captures, options: input.options, ...(input.signal === undefined ? {} : { signal: input.signal }) });
+    const results = readDocument(join(run.runFolder, "results.json"), CaptureResultsSchema);
+    const coverage = readDocument(join(run.runFolder, "coverage.json"), ExecutionCoverageSchema);
+    const predicted = new Map<string, { case: string; capture: string }>();
+    for (const id of plan.checked) {
+      const cluster = input.clusters[id]!;
+      for (const prediction of [...(cluster.hypothesis?.output.explanation?.predictions ?? []), ...(cluster.challenge?.output.alternative?.predictions ?? [])]) {
+        predicted.set(`${prediction.case}/${prediction.capture}`, prediction);
+      }
+    }
+    const observations = [...predicted.values()].map((item) => observe(results, item.case, item.capture));
+    const clusters: Record<string, ClusterCheck> = {};
+    for (const id of plan.checked) {
+      const cluster = input.clusters[id]!;
+      const checked = judge(cluster, observations);
+      clusters[id] = checked;
+      for (const answer of [cluster.hypothesis, cluster.challenge]) {
+        if (answer !== null) await labelRecord(store, answer.recordId.includes("/hypothesis/") ? "hypothesis" : "challenge", answer.recordId, checked.outcome);
+      }
+      this.dependencies.log(`Diagnosis check: ${id} ${checked.outcome}.`);
+    }
+    return {
+      runFolder: run.runFolder, cases: plan.cases, captures: plan.captures,
+      execution: { status: run.status, coverageValid: coverage.valid, invalidReasons: coverage.invalidReasons, failures: coverage.totals.failures },
+      observations, clusters,
+    };
+  }
+
+  /** Writes the thread's `diagnosis.json` and returns its path. */
+  finish(threadId: string, clusters: Readonly<Record<string, ClusterDiagnosis>>, check: CheckResult | null): string {
+    const path = join(this.dependencies.threadFolder(threadId), "diagnosis.json");
+    writeDiagnosisDocument(path, diagnosisDocument(threadId, clusters, check));
+    return path;
   }
 
   private manifest(cluster: ClusterDiagnosis): ContextManifest {

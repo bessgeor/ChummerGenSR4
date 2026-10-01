@@ -40,7 +40,8 @@ test("hypotheses fan out per cluster, and challenges start once every hypothesis
   deepStrictEqual(record.agent, { provider: "claude", model: null, effort: "medium" });
   deepStrictEqual(record.result, { status: "succeeded", message: null });
   deepStrictEqual(record.output, hypothesisAnswer());
-  deepStrictEqual(record.labels, { check: null });
+  // Both clusters' hypotheses held in the check and their alternatives did not.
+  deepStrictEqual(record.labels, { check: "confirmed" });
 });
 
 test("an abstaining cluster gets no challenge", async () => {
