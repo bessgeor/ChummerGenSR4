@@ -111,6 +111,12 @@ internal static class NativeMethods
     public static extern uint GetDpiForSystem();
 
     [DllImport("user32.dll")]
+    public static extern IntPtr MonitorFromPoint(PointStruct point, uint flags);
+
+    [DllImport("shcore.dll")]
+    public static extern int GetDpiForMonitor(IntPtr monitor, int type, out uint dpiX, out uint dpiY);
+
+    [DllImport("user32.dll")]
     public static extern int GetSystemMetricsForDpi(int index, uint dpi);
 
     [DllImport("user32.dll")]

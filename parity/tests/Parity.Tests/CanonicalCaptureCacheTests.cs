@@ -65,18 +65,39 @@ public sealed class CanonicalCaptureCacheTests : IDisposable
     }
 
     [Fact]
-    public void Environment_lists_screens_dpi_os_cultures_and_runner_assemblies()
+    public void Environment_lists_screens_scale_os_colours_options_cultures_and_runner_assemblies()
     {
         ScreenRect rect = new() { X = 0, Y = 0, Width = 1920, Height = 1080 };
-        CacheEnvironment environment = new CacheEnvironmentReader(_hasher).Read(
-            [new ScreenInfo { DeviceName = "DISPLAY1", Primary = true, Bounds = rect, WorkingArea = rect }]);
+        ScreenInfo[] screens = [new ScreenInfo { DeviceName = "DISPLAY1", Primary = true, Bounds = rect, WorkingArea = rect }];
+        CacheEnvironment environment = new CacheEnvironmentReader(_hasher).Read(screens);
 
         Assert.Equal("screen:DISPLAY1:primary:0,0,1920x1080:0,0,1920x1080", environment.Lines[0]);
-        Assert.StartsWith("dpi:", environment.Lines[1]);
-        Assert.StartsWith("os:", environment.Lines[2]);
-        Assert.StartsWith("culture:", environment.Lines[3]);
+        Assert.Matches(@"^monitor-dpi:DISPLAY1:\d+x\d+$", environment.Lines[1]);
+        Assert.StartsWith("dpi:", environment.Lines[2]);
+        Assert.StartsWith("os:", environment.Lines[3]);
+        Assert.Matches(@"^os-patch:\d+\.\d+$", environment.Lines[4]);
+        Assert.StartsWith("culture:", environment.Lines[5]);
+        Assert.Contains(environment.Lines, line => line.StartsWith("dwm:", StringComparison.Ordinal));
+        Assert.Contains(environment.Lines, line => line.StartsWith("personalize:", StringComparison.Ordinal));
+        foreach (string prefix in new[] { "system-colour:", "desktop:", "window-metric:", "text-scale:", "high-contrast:" })
+        {
+            Assert.Contains(environment.Lines, line => line.StartsWith(prefix, StringComparison.Ordinal));
+        }
+        Assert.Contains(environment.Lines, line => line.StartsWith("app-option:", StringComparison.Ordinal));
         Assert.Contains(environment.Lines, line => line.StartsWith("runner:Parity.Capture.dll:", StringComparison.Ordinal));
+        Assert.Equal(environment.Lines, new CacheEnvironmentReader(_hasher).Read(screens).Lines);
     }
+
+    [Theory]
+    [InlineData("language", true)]
+    [InlineData("startupfullscreen", true)]
+    [InlineData("defaultsheet", true)]
+    [InlineData("mru1", false)]
+    [InlineData("stickymru2", false)]
+    [InlineData("omaeusername", false)]
+    [InlineData("omaepassword", false)]
+    public void App_options_in_the_key_leave_out_recent_files_and_the_omae_account(string name, bool inKey) =>
+        Assert.Equal(inKey, CacheEnvironmentReader.IsAppOption(name));
 
     [Fact]
     public void Runner_assemblies_do_not_embed_the_commit()
@@ -161,6 +182,22 @@ public sealed class CanonicalCaptureCacheTests : IDisposable
     }
 
     [Fact]
+    public void Completed_side_is_stored_only_when_the_run_stores_its_pending_sides()
+    {
+        Run("first", commit: false);
+
+        Assert.Equal((0, 1, 0), (_session.Hits, _session.Misses, _session.Stored));
+        Assert.Single(_session.Pending);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(_session.Directory));
+
+        new CanonicalCaptureCache(_hasher).StorePending(_session);
+
+        Assert.Equal((0, 1, 1), (_session.Hits, _session.Misses, _session.Stored));
+        Assert.Empty(_session.Pending);
+        Assert.Single(Directory.EnumerateDirectories(_session.Directory));
+    }
+
+    [Fact]
     public void Existing_entry_is_never_replaced()
     {
         CaseRun first = Run("first");
@@ -239,7 +276,7 @@ public sealed class CanonicalCaptureCacheTests : IDisposable
         Assert.Equal(_session.Directory, summary.CanonicalCache.Path);
     }
 
-    private CaseRun Run(string runName)
+    private CaseRun Run(string runName, bool commit = true)
     {
         RunLayout layout = new($"{runName}-{Guid.NewGuid():N}", Path.Combine(_root, "runs", $"{runName}-{Guid.NewGuid():N}"));
         StagedRun staged = new(
@@ -255,7 +292,13 @@ public sealed class CanonicalCaptureCacheTests : IDisposable
             new TimingRecorder(),
             new CacheKeyBuilder(_hasher),
             new CanonicalCaptureCache(_hasher));
-        return runner.Run(_case, layout, staged, Timing, null, 0.00004, _session);
+        CaseRun run = runner.Run(_case, layout, staged, Timing, null, 0.00004, _session);
+        if (commit)
+        {
+            new CanonicalCaptureCache(_hasher).StorePending(_session);
+        }
+
+        return run;
     }
 
     private static ParityCase Case(string characterPath, params ParityAction[] actions) =>

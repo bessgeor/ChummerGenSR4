@@ -10,7 +10,8 @@ namespace Parity.Capture.Run;
 
 /// <summary>
 /// Runs a case on the canonical side, then the candidate side, then compares their captures. With a
-/// cache, the canonical side is restored when its key is stored and stored when it completed live.
+/// cache, the canonical side is restored when its key is stored; one that completed live is queued for
+/// the run to store once the canonical executable is verified again.
 /// </summary>
 internal sealed class CaseRunner(
     SideExecutor executor,
@@ -62,10 +63,9 @@ internal sealed class CaseRunner(
         {
             Console.WriteLine($"  {RunLayout.CanonicalSide}: failed, so it is not stored in the cache");
         }
-        else if (cache.Store(session, key, layout.RunId, live))
+        else
         {
-            session.Stored++;
-            Console.WriteLine($"  {RunLayout.CanonicalSide}: stored in the cache as {key.Value}");
+            session.Pending.Add(new PendingStore(key, layout.RunId, live));
         }
 
         return live;

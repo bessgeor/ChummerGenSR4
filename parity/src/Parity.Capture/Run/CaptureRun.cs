@@ -27,6 +27,7 @@ internal sealed class CaptureRun(
     CoverageAuditor auditor,
     TimingRecorder timingRecorder,
     CacheSessionFactory cacheSessions,
+    CanonicalCaptureCache cache,
     TimeProvider time)
 {
     public int Execute(IReadOnlyList<string> args)
@@ -144,6 +145,12 @@ internal sealed class CaptureRun(
             writer.Write(layout.ResultsPath, writer.BuildResults(report));
             writer.Write(layout.CoveragePath, coverage);
             writer.Write(layout.TimingPath, timingRecorder.Build(layout.RunId));
+            if (report.Cache is not null)
+            {
+                // Last, so that a run that fails while building its reports stores nothing; the summary records the count.
+                cache.StorePending(report.Cache);
+            }
+
             writer.Write(layout.SummaryPath, writer.BuildSummary(report, path => DisplayPath(options.RepositoryRoot, path)));
             PrintOutcome(runs, coverage, report.Cache, report.Status, layout);
             return ExitCode(report.Status);

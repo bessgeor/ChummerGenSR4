@@ -18,4 +18,9 @@ internal sealed class CacheSession(string directory, string appFingerprint, Cach
     public int Misses { get; set; }
 
     public int Stored { get; set; }
+
+    /// <summary>Completed live sides waiting for the run's final check of the canonical executable before they are stored.</summary>
+    public List<PendingStore> Pending { get; } = [];
 }
+
+internal sealed record PendingStore(CacheKey Key, string RunId, Execution.SideRun Side);

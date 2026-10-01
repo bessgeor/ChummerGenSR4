@@ -6,9 +6,10 @@ using Parity.Cases;
 namespace Parity.Capture.Cache;
 
 /// <summary>
-/// Builds a case's canonical cache key from every input that decides the canonical side's pixels and
+/// Builds a case's canonical cache key from the inputs that decide the canonical side's pixels and
 /// outcomes: the staged canonical app, the fixture, the expanded actions in order, the capture filter,
-/// the timings and the environment.
+/// the timings and the environment the runner reads (see <see cref="CacheEnvironmentReader"/>). What it
+/// cannot read, such as fonts or other software that changes how a window is drawn, is not in the key.
 /// </summary>
 internal sealed class CacheKeyBuilder(FileHasher hasher)
 {

@@ -66,6 +66,21 @@ internal sealed class CanonicalCaptureCache(FileHasher hasher)
         };
     }
 
+    /// <summary>Stores the sides the run queued and empties the queue; the run calls it once its canonical executable is verified.</summary>
+    public void StorePending(CacheSession session)
+    {
+        foreach (PendingStore pending in session.Pending)
+        {
+            if (Store(session, pending.Key, pending.RunId, pending.Side))
+            {
+                session.Stored++;
+                Console.WriteLine($"  {pending.Side.Side}: stored in the cache as {pending.Key.Value}");
+            }
+        }
+
+        session.Pending.Clear();
+    }
+
     /// <summary>Stores a completed side; returns false and leaves the existing entry when the key is already stored.</summary>
     public bool Store(CacheSession session, CacheKey key, string runId, SideRun side)
     {
@@ -100,7 +115,16 @@ internal sealed class CanonicalCaptureCache(FileHasher hasher)
                 return false;
             }
 
-            Directory.Move(incoming, folder);
+            try
+            {
+                Directory.Move(incoming, folder);
+            }
+            catch (IOException) when (Directory.Exists(folder))
+            {
+                // Another run stored the same key between the check and the move; its entry stays.
+                return false;
+            }
+
             return true;
         }
         finally
