@@ -50,7 +50,7 @@
       { "type": "waitFor", "label": "Initiate Grade:" },
       { "type": "capture", "name": "initiation" },
       { "type": "selectTab", "name": "Submersion", "optional": true },
-      { "type": "waitFor", "label": "Initiate Grade:" },
+      { "type": "waitFor", "label": "Submersion Grade:" },
       { "type": "capture", "name": "submersion" },
       { "type": "selectTab", "name": "Cyberware and Bioware" },
       { "type": "waitFor", "label": "Selected Cyberware" },
