@@ -1,5 +1,6 @@
 using Parity.Capture.Execution;
 using Parity.Capture.Staging;
+using Parity.Capture.Timing;
 using Parity.Capture.Ui;
 using Parity.Cases;
 using Parity.Contracts.CaptureResults;
@@ -7,7 +8,7 @@ using Parity.Contracts.CaptureResults;
 namespace Parity.Capture.Run;
 
 /// <summary>Runs a case on the canonical side, then the candidate side, then compares their captures.</summary>
-internal sealed class CaseRunner(SideExecutor executor, VisualResultBuilder results)
+internal sealed class CaseRunner(SideExecutor executor, VisualResultBuilder results, TimingRecorder timingRecorder)
 {
     public CaseRun Run(
         ParityCase parityCase,
@@ -34,14 +35,19 @@ internal sealed class CaseRunner(SideExecutor executor, VisualResultBuilder resu
         IReadOnlySet<string>? captureFilter)
     {
         Console.WriteLine($"  {side}: {executable}");
-        SideRun run = executor.Run(
-            side,
-            executable,
-            parityCase,
-            character,
-            timing,
-            captureFilter,
-            captureName => layout.CapturePath(parityCase.Name, side, captureName));
+        SideRun run;
+        using (timingRecorder.BeginSide(parityCase.Name, side))
+        {
+            run = executor.Run(
+                side,
+                executable,
+                parityCase,
+                character,
+                timing,
+                captureFilter,
+                captureName => layout.CapturePath(parityCase.Name, side, captureName));
+        }
+
         Console.WriteLine(run.Failed
             ? $"  {side}: FAILED after {run.Duration.TotalSeconds:0.0} s: {run.Failure}"
             : $"  {side}: completed in {run.Duration.TotalSeconds:0.0} s, {run.Captures.Count} captures");

@@ -1,6 +1,7 @@
 using System.Globalization;
 using Parity.Capture.Coverage;
 using Parity.Capture.Staging;
+using Parity.Capture.Timing;
 using Parity.Capture.Ui;
 using Parity.Cases;
 using Parity.Contracts.CaptureSummary;
@@ -23,6 +24,7 @@ internal sealed class CaptureRun(
     ReportWriter writer,
     ScreenInventory screens,
     CoverageAuditor auditor,
+    TimingRecorder timingRecorder,
     TimeProvider time)
 {
     public int Execute(IReadOnlyList<string> args)
@@ -126,6 +128,7 @@ internal sealed class CaptureRun(
             report = report with { Finished = time.GetUtcNow(), Status = Status(runs, coverage) };
             writer.Write(layout.ResultsPath, writer.BuildResults(report));
             writer.Write(layout.CoveragePath, coverage);
+            writer.Write(layout.TimingPath, timingRecorder.Build(layout.RunId));
             writer.Write(layout.SummaryPath, writer.BuildSummary(report, path => DisplayPath(options.RepositoryRoot, path)));
             PrintOutcome(runs, coverage, report.Status, layout);
             return ExitCode(report.Status);
@@ -228,6 +231,7 @@ internal sealed class CaptureRun(
         Console.WriteLine($"Summary: {layout.SummaryPath}");
         Console.WriteLine($"Results: {layout.ResultsPath}");
         Console.WriteLine($"Coverage: {layout.CoveragePath}");
+        Console.WriteLine($"Timing: {layout.TimingPath}");
     }
 
     private static string Reason(ResultRow row) => row.Reason switch

@@ -4,6 +4,7 @@ using Parity.Capture.Execution;
 using Parity.Capture.Interop;
 using Parity.Capture.Run;
 using Parity.Capture.Staging;
+using Parity.Capture.Timing;
 using Parity.Capture.Ui;
 using Parity.Cases;
 
@@ -39,7 +40,12 @@ internal static class Program
         services.AddSingleton<TabNavigator>();
         services.AddSingleton<LabelWaiter>();
         services.AddSingleton<WindowCapturer>();
-        services.AddSingleton<IUiDriver, ChummerUiDriver>();
+        services.AddSingleton<ChummerUiDriver>();
+        services.AddSingleton<TimingRecorder>();
+        services.AddSingleton<IUiDriver>(provider => new TimedUiDriver(
+            provider.GetRequiredService<ChummerUiDriver>(),
+            provider.GetRequiredService<TimingRecorder>(),
+            provider.GetRequiredService<TimeProvider>()));
 
         services.AddSingleton<SideExecutor>();
         services.AddSingleton<PixelComparer>();
