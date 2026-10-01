@@ -11,4 +11,4 @@
 ## 2. Verification and archive
 
 - [x] 2.1 Run `npm start` live on one case with a temporarily seeded discrepancy: diagnosis confirms it, a repair attempt runs on Claude, is guarded, built and narrowly checked, and a kill during the repair is resumed. Record in `verification.md` the canonical hash before and after, each case's execution outcome apart from its visual results, the check and narrow check's execution apart from their observations, the attempt's archive, fixture-tested scope apart from live evidence, and what remains unverified.
-- [ ] 2.2 Archive the change with `openspec archive add-isolated-repair`. Evidence: `npm run openspec:validate` passes after the archive, recorded in `verification.md`.
+- [x] 2.2 Archive the change with `openspec archive add-isolated-repair`. Evidence: `npm run openspec:validate` passes after the archive, recorded in `verification.md`.
