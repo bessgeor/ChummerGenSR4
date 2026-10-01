@@ -26,7 +26,7 @@ const fingerprints: InputFingerprints = {
 const options: RunOptions = {
   caseFile: "cases.json", cases: [], captures: [], settingsOverlay: null, threshold: null, canonicalCache: "C:/cache",
   canonicalCacheSource: "option", noOcr: false, tessdata: null, only: null, recapture: false,
-  diagnosis: false, agents: resolveAgentSettings(undefined), unattended: false, certificates: "certificates",
+  diagnosis: false, agents: resolveAgentSettings(undefined), unattended: false, certificates: "certificates", repair: null,
 };
 
 function scratch(): string {

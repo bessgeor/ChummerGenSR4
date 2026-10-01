@@ -11,7 +11,12 @@ const examples = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "cont
 export type BuildBehaviour = number | "hang";
 
 /** What the fake narrow check observes per `case/capture` (anything not named passes), and its exit status unless derived. */
-export type CheckBehaviour = { readonly observed?: Readonly<Record<string, "passed" | "failed">>; readonly status?: 0 | 1 | 2 | 3 };
+export type CheckBehaviour = {
+  readonly observed?: Readonly<Record<string, "passed" | "failed">>;
+  readonly status?: 0 | 1 | 2 | 3;
+  /** Runs until the run's signal stops it, calling this once it started. */
+  readonly hang?: () => void;
+};
 
 /** A fake host for repair attempts: builds and narrow checks are recorded and answered from a script. */
 export class FakeRepairHost {
@@ -35,6 +40,11 @@ export class FakeRepairHost {
 
   readonly narrowCheck: NarrowCheck = async (request) => {
     this.checks.push(request);
+    const hang = this.checkBehaviour.hang;
+    if (hang !== undefined) {
+      hang();
+      return new Promise((_resolve, reject) => request.signal?.addEventListener("abort", () => reject(new Error(`${request.label}: stopped`)), { once: true }));
+    }
     const runFolder = join(this.root, "narrow-runs", String(this.checks.length));
     mkdirSync(runFolder, { recursive: true });
     const observed = this.checkBehaviour.observed ?? {};

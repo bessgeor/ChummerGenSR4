@@ -7,6 +7,8 @@ import type { CheckInput, JobInput, JobStep, PrepareInput } from "../diagnosis/d
 import { SetupError } from "../host/setup-error.js";
 import type { NodeName } from "../options/arguments.js";
 import type { RunOptions } from "../options/run-options.js";
+import { nextRepairRoute, type ClusterRepair } from "../repair/cluster-repair.js";
+import type { RepairInput, RepairStep } from "../repair/repair-service.js";
 import type { InputFingerprints } from "../steps/input-fingerprints.js";
 import type { StepContext, StepMode, StepOutcome } from "../steps/step-outcome.js";
 import { WorkflowState, type CaseTask, type ClusterTask, type TriageSummary, type WorkflowStateValue } from "./workflow-state.js";
@@ -37,7 +39,22 @@ export interface DiagnosisSteps {
   finish(threadId: string, clusters: Readonly<Record<string, ClusterDiagnosis>>, check: CheckResult | null): string;
 }
 
+/** The repair work behind the graph's repair nodes. */
+export interface RepairSteps {
+  /** A pending repair for each cluster the check confirmed. */
+  prepare(clusters: Readonly<Record<string, ClusterDiagnosis>>, check: CheckResult | null): Record<string, ClusterRepair>;
+  repair(input: RepairInput, store: BaseStore): Promise<RepairStep>;
+  waitForQuota(marks: readonly QuotaWaitMark[], signal?: AbortSignal): Promise<void>;
+  /** Writes the thread's `repair.json` and returns its path. */
+  finish(threadId: string, repairs: Readonly<Record<string, ClusterRepair>>): string;
+}
+
 const order: readonly NodeName[] = ["capture", "compare", "triage", "diagnose"];
+
+/** Whether a thread repairs its confirmed clusters: repair is on and no single node was asked for. */
+export function repairs(options: RunOptions): boolean {
+  return options.repair !== null && options.only === null;
+}
 
 /** Whether a node runs its steps, only reuses recorded ones (it comes before `--only`), or is skipped. */
 export function nodeMode(node: NodeName, only: NodeName | null): StepMode | "skip" {
@@ -77,13 +94,24 @@ function applyJob(step: JobStep) {
   return { clusters: { [step.update.clusterId]: step.update }, agentMilliseconds: step.chargedMs };
 }
 
+function repairInput(state: ClusterTask, config: LangGraphRunnableConfig): RepairInput {
+  const repair = state.repairs[state.clusterId];
+  const cluster = state.clusters[state.clusterId];
+  if (repair === undefined || cluster === undefined || state.diagnosisCheck === null) throw new Error(`No confirmed diagnosis to repair for cluster ${state.clusterId}.`);
+  return {
+    threadId: state.threadId, options: state.options, repair, diagnosis: cluster, check: state.diagnosisCheck, spentMs: state.agentMilliseconds,
+    ...(config.signal === undefined ? {} : { signal: config.signal }),
+  };
+}
+
 /**
  * build → capture(case k) → compare(case k) ∥ capture(case k+1) → … → triage → diagnosis. `Send` addresses each
  * case, so compare k and capture k+1 run in the same super-step and both are checkpointed. Diagnosis seals a
  * context per cluster, then `route_diagnosis` sends one job per cluster (hypotheses, then challenges) and waits
  * for quota when a job hit a usage limit; each job is one task, so a resumed thread repeats only unfinished jobs.
+ * Repair then sends one attempt per confirmed cluster the same way, and waits for quota the same way.
  */
-export function buildWorkflowGraph(steps: WorkflowSteps, diagnosis: DiagnosisSteps) {
+export function buildWorkflowGraph(steps: WorkflowSteps, diagnosis: DiagnosisSteps, repair: RepairSteps) {
   return new StateGraph(WorkflowState)
     .addNode("build", async (state: WorkflowStateValue, config: LangGraphRunnableConfig) => {
       const only = state.options.only;
@@ -125,6 +153,18 @@ export function buildWorkflowGraph(steps: WorkflowSteps, diagnosis: DiagnosisSte
       diagnosisCheck: await diagnosis.check({ options: state.options, clusters: state.clusters, ...(config.signal === undefined ? {} : { signal: config.signal }) }, requireStore(config)),
     }))
     .addNode("finish_diagnosis", (state: WorkflowStateValue) => ({ diagnosisPath: diagnosis.finish(state.threadId, state.clusters, state.diagnosisCheck) }))
+    .addNode("prepare_repair", (state: WorkflowStateValue) => ({ repairs: repair.prepare(state.clusters, state.diagnosisCheck) }))
+    .addNode("route_repair", () => ({}))
+    .addNode("repair", async (state: ClusterTask, config: LangGraphRunnableConfig) => {
+      const step = await repair.repair(repairInput(state, config), requireStore(config));
+      return { repairs: { [step.update.clusterId]: step.update }, agentMilliseconds: step.chargedMs };
+    })
+    .addNode("wait_for_repair_quota", async (state: WorkflowStateValue, config: LangGraphRunnableConfig) => {
+      const waiting = Object.values(state.repairs).filter((item) => item.waiting !== null);
+      await repair.waitForQuota(waiting.map((item) => item.waiting!), config.signal);
+      return { repairs: Object.fromEntries(waiting.map((item) => [item.clusterId, { clusterId: item.clusterId, waiting: null }])) };
+    })
+    .addNode("finish_repair", (state: WorkflowStateValue) => ({ repairPath: repair.finish(state.threadId, state.repairs) }))
     .addEdge(START, "build")
     .addConditionalEdges("build", (state: WorkflowStateValue) => {
       if (state.plan.length === 0) throw new SetupError("No case is planned, so nothing can be captured.");
@@ -159,5 +199,18 @@ export function buildWorkflowGraph(steps: WorkflowSteps, diagnosis: DiagnosisSte
     .addEdge("challenge", "route_diagnosis")
     .addEdge("wait_for_quota", "route_diagnosis")
     .addEdge("check", "route_diagnosis")
-    .addEdge("finish_diagnosis", END);
+    .addConditionalEdges("finish_diagnosis", (state: WorkflowStateValue) => (repairs(state.options) ? "prepare_repair" : END), ["prepare_repair", END])
+    .addEdge("prepare_repair", "route_repair")
+    .addConditionalEdges("route_repair", (state: WorkflowStateValue) => {
+      const route = nextRepairRoute(state.repairs);
+      switch (route.kind) {
+        case "repair": return route.clusters.map((clusterId) => new Send("repair", { ...state, clusterId }));
+        case "end": return "finish_repair";
+        default: return route.kind;
+      }
+    }, ["wait_for_repair_quota", "repair", "finish_repair"])
+    // As with diagnosis, the router runs once after every attempt of the step finished.
+    .addEdge("repair", "route_repair")
+    .addEdge("wait_for_repair_quota", "route_repair")
+    .addEdge("finish_repair", END);
 }

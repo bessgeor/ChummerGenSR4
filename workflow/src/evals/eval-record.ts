@@ -36,7 +36,7 @@ const LabelsSchema = z.strictObject({
   hindsight: HindsightLabelSchema.nullable(),
   review: ReviewLabelSchema.nullable(),
   grader: GraderLabelSchema.nullable(),
-  /** Records stored before repair existed have no such label. */
+  /** Set once a repair attempt is archived; empty for every other record, and a stored record without the key reads as empty. */
   repair: RepairLabelSchema.nullable().default(null),
 });
 export type Labels = z.infer<typeof LabelsSchema>;

@@ -26,10 +26,9 @@ export type RunOptions = {
   /** The folder of the certificates: the profile's `certificates`, else `workflow/evals/certificates`. */
   readonly certificates: string;
   /**
-   * Whether confirmed clusters are repaired (null with --no-repair) and each attempt's deadline. A thread stored
-   * before repair existed has no such field and runs no repair.
+   * Whether confirmed clusters are repaired (null with --no-repair) and each attempt's deadline.
    */
-  readonly repair?: RepairSettings | null;
+  readonly repair: RepairSettings | null;
 };
 
 export type RepairSettings = { readonly deadlineMinutes: number };

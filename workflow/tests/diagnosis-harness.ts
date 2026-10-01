@@ -22,6 +22,8 @@ import type { Arguments } from "../src/options/arguments.js";
 import type { CaseDetails } from "../src/steps/case-details.js";
 import type { InputFingerprints } from "../src/steps/input-fingerprints.js";
 import type { StepOutcome } from "../src/steps/step-outcome.js";
+import { RepairService } from "../src/repair/repair-service.js";
+import { FakeRepairHost } from "./repair-fixtures.js";
 import { plannedCase, readReport, repository, runFolders, scratch, triageDocument, type Spot } from "./diagnosis-fixtures.js";
 
 export const hypothesisAnswer = (claim = "The Skills tab label moved in frmCreate."): HypothesisOutput => ({
@@ -159,6 +161,8 @@ export type HarnessOptions = {
   readonly candidateSource?: string;
   /** Runs after triage, before diagnosis, with the fixture repository's folder: an edit made between the build and the diagnosis. */
   readonly afterTriage?: (repository: string) => void;
+  /** Turns repair on (it is off by default here), with this deadline and fake host for builds and narrow checks. */
+  readonly repair?: { readonly deadlineMinutes: number; readonly host: (root: string) => FakeRepairHost };
 };
 
 /** A workflow whose host steps are fakes over fixture run folders, with the real diagnosis service and fake agents. */
@@ -219,9 +223,14 @@ export function diagnosisHarness(options: HarnessOptions) {
       return readReport(runFolder);
     }, checkCapture, createScratchFolder: options.createScratchFolder ?? createScratchFolder, now: () => new Date("2026-10-01T12:00:00Z"), log,
   });
+  const repairHost = options.repair?.host(root) ?? new FakeRepairHost(root);
+  const repair = new RepairService({
+    threadFolder: (threadId) => join(root, "threads", threadId), agents: () => agents, quota, build: repairHost.build, narrowCheck: repairHost.narrowCheck,
+    createScratchFolder: options.createScratchFolder ?? createScratchFolder, now: () => new Date(), log,
+  });
   const checkpointer = options.checkpointer ?? new MemorySaver();
   const store = options.store ?? new InMemoryStore();
-  const graph = buildWorkflowGraph(steps, diagnosis).compile({ checkpointer, store });
+  const graph = buildWorkflowGraph(steps, diagnosis, repair).compile({ checkpointer, store });
   const settings = resolveAgentSettings({ ...(options.budgetMinutes === undefined ? {} : { runBudgetMinutes: options.budgetMinutes }) });
   const dependencies: RunDependencies = {
     graph,
@@ -229,6 +238,7 @@ export function diagnosisHarness(options: HarnessOptions) {
       caseFile: join(root, "cases.json"), cases: [], captures: [], settingsOverlay: null, threshold: null, canonicalCache: "cache",
       canonicalCacheSource: "default", noOcr: false, tessdata: null, only: command.arguments.only, recapture: false,
       diagnosis: !command.arguments.noDiagnosis, agents: settings, unattended: command.arguments.unattended, certificates: join(root, "certificates"),
+      repair: options.repair === undefined || command.arguments.noRepair ? null : { deadlineMinutes: options.repair.deadlineMinutes },
     }),
     planCases: () => ({ cases: cases.filter((item) => folders[item.name] !== undefined), excluded: [] }),
     readCase: () => details,
@@ -238,7 +248,7 @@ export function diagnosisHarness(options: HarnessOptions) {
     ...(options.signal === undefined ? {} : { signal: options.signal }),
   };
   return {
-    root, agents, sleeps, checks, reportReads, lines, store, checkpointer, graph,
+    root, agents, sleeps, checks, reportReads, lines, store, checkpointer, graph, repairHost,
     start: (overrides: Partial<Arguments> = {}) => runWorkflow({ kind: "start", arguments: { ...baseArguments, ...overrides } }, dependencies),
     resume: (threadId: string) => runWorkflow({ kind: "resume", threadId }, dependencies),
     threadId: () => /Thread (wf-\S+):/.exec(lines.join("\n"))?.[1] ?? "",

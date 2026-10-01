@@ -95,7 +95,7 @@ test("the gate names each job kind without a valid certificate for the run's con
   writeCertificate(folder, "challenge");
   deepStrictEqual(certificateProblems(folder, ["hypothesis", "challenge"], settings), []);
   // Stored options that do not state `unattended` are not unattended, whatever the certificates say.
-  const options = { diagnosis: true, only: null, certificates: join(folder, "none"), agents: settings };
+  const options = { diagnosis: true, only: null, repair: null, certificates: join(folder, "none"), agents: settings };
   deepStrictEqual(unattendedProblems(options as unknown as RunOptions), []);
   equal(unattendedProblems({ ...options, unattended: true } as unknown as RunOptions).length, 2);
   deepStrictEqual(dispatchedJobKinds({ diagnosis: false, only: null }), []);

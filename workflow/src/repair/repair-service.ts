@@ -17,8 +17,9 @@ import type { AttemptSummary, CheckExecution, ClusterRepair, RepairStatus, Repai
 import { computePatch, type Patch } from "./patch.js";
 import { guardPatch } from "./patch-guard.js";
 import { repairPrompt } from "./repair-prompt.js";
+import { repairDocument, writeRepairDocument } from "./repair-report.js";
 import { RepairOutputSchema, repairPromptVersion, validateRepair, type RepairOutput } from "./repair-schemas.js";
-import { stageWorkspace, workspaceIn, type AttemptWorkspace } from "./workspace.js";
+import { changesOutsideSource, stageWorkspace, workspaceIn, type AttemptWorkspace } from "./workspace.js";
 
 export type RepairDependencies = {
   readonly threadFolder: (threadId: string) => string;
@@ -77,13 +78,21 @@ export class RepairService {
     await this.dependencies.quota.wait(marks.map((mark) => mark.processId), signal);
   }
 
+  /** Writes the thread's `repair.json` and returns its path. */
+  finish(threadId: string, repairs: Readonly<Record<string, ClusterRepair>>): string {
+    const path = join(this.dependencies.threadFolder(threadId), "repair.json");
+    writeRepairDocument(path, repairDocument(threadId, repairs));
+    return path;
+  }
+
   async repair(input: RepairInput, store: BaseStore): Promise<RepairStep> {
     const { repair, diagnosis, options } = input;
     const clusterId = repair.clusterId;
     const label = `repair ${clusterId}`;
-    const settings = options.repair ?? null;
+    const settings = options.repair;
     const choice = options.agents.jobs.repair;
-    if (settings === null || choice === undefined) throw new SetupError(`${label}: the thread was started without repair settings; start a new thread.`);
+    // A thread whose options lack the field was started by another version of the workflow and cannot be repaired.
+    if (settings === null || settings === undefined || choice === undefined) throw new SetupError(`${label}: the thread was started without repair settings; start a new thread.`);
     const explanation = diagnosis.hypothesis?.output.explanation ?? null;
     if (explanation === null) throw new Error(`${label}: the cluster has no hypothesis to repair from.`);
     const budgetMs = options.agents.runBudgetMinutes * 60_000;
@@ -105,7 +114,7 @@ export class RepairService {
         observations: input.check.observations.filter((item) => predicted.has(`${item.case}/${item.capture}`)),
       };
       this.dependencies.log(`${label}: running on ${choice.provider} (${choice.model ?? "default model"}, effort ${choice.effort}), deadline ${settings.deadlineMinutes} min.`);
-      const result: AgentResult<RepairOutput> | NotStarted = await this.dependencies.agents(options.agents).run<RepairOutput>({
+      const ran: AgentResult<RepairOutput> | NotStarted = await this.dependencies.agents(options.agents).run<RepairOutput>({
         kind: "repair", label, prompt: repairPrompt(brief, { sourceFolder: workspace.source, contextFolder: workspace.context }),
         images: manifest.members.flatMap((member) => [join(workspace.context, member.canonicalCrop), join(workspace.context, member.candidateCrop)]),
         schema: RepairOutputSchema, validate: validateRepair,
@@ -122,7 +131,11 @@ export class RepairService {
         onResult: (outcome) => this.charge(input.threadId, input.spentMs, chargedMilliseconds(label, outcome)),
         ...(input.signal === undefined ? {} : { signal: input.signal }),
       });
-      if (wasNotStarted(result)) return this.budgetExhausted(label, clusterId, options.agents.runBudgetMinutes);
+      if (wasNotStarted(ran)) return this.budgetExhausted(label, clusterId, options.agents.runBudgetMinutes);
+      // Only the source copy may change: a job that touched the context copy or the scratch folder fails as infra, whichever provider ran it.
+      const outside = await changesOutsideSource(workspace, diagnosis.contextFolder);
+      const result: AgentResult<RepairOutput> = outside.length === 0 ? ran
+        : { ok: false, failure: { kind: "infra", message: `${label}: the job changed files outside its source copy: ${outside.join("; ")}.` }, usage: ran.usage, durationMs: ran.durationMs, sessionId: ran.sessionId };
       const finished = this.dependencies.now();
       const record: EvalRecord = {
         schemaVersion: 2, recordId, jobKind: "repair", origin: "workflow", threadId: input.threadId, subject: { kind: "discrepancy-cluster", id: clusterId },
