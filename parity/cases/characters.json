@@ -123,6 +123,17 @@
   ],
   "characters": [
     { "path": "../fixtures/characters/Diego_v_alpha2_by_bessgeor.chum", "mode": "build" },
-    { "path": "../fixtures/characters/Шпала - карьера.chum", "mode": "career" }
+    { "path": "../fixtures/characters/Шпала - карьера.chum", "mode": "career" },
+    { "path": "../fixtures/characters/facemage_Sam.chum", "mode": "build" },
+    { "path": "../fixtures/characters/facemage_Sam_career.chum", "mode": "career" },
+    { "path": "../fixtures/characters/rigger.chum", "mode": "build" },
+    { "path": "../fixtures/characters/rigger_career.chum", "mode": "career" },
+    { "path": "../fixtures/characters/hacker4boegspriet.chum", "mode": "build" },
+    { "path": "../fixtures/characters/technotest.chum", "mode": "build" },
+    { "path": "../fixtures/characters/technotest - career.chum", "mode": "career" },
+    { "path": "../fixtures/characters/test_adept.chum", "mode": "career" },
+    { "path": "../fixtures/characters/spirit.chum", "mode": "build" },
+    { "path": "../fixtures/characters/Skull Carver - precareer.chum", "mode": "build" },
+    { "path": "../fixtures/characters/Skull Carver - career.chum", "mode": "career" }
   ]
 }

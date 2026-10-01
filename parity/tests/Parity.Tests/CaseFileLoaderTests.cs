@@ -14,14 +14,32 @@ public sealed class CaseFileLoaderTests : IDisposable
     public void Dispose() => Directory.Delete(_directory, recursive: true);
 
     [Fact]
-    public void Repository_case_file_loads_both_fixtures()
+    public void Repository_case_file_loads_every_fixture_with_its_declared_mode()
     {
         CaseSuite suite = _loader.Load(RepositoryPaths.CaseFile);
 
         Assert.Equal(3, suite.StartupDelaySeconds);
         Assert.Equal(300, suite.SettleMilliseconds);
+        Assert.Equal(
+            [
+                "build-Diego_v_alpha2_by_bessgeor",
+                "career-Шпала - карьера",
+                "build-facemage_Sam",
+                "career-facemage_Sam_career",
+                "build-rigger",
+                "career-rigger_career",
+                "build-hacker4boegspriet",
+                "build-technotest",
+                "career-technotest - career",
+                "career-test_adept",
+                "build-spirit",
+                "build-Skull Carver - precareer",
+                "career-Skull Carver - career",
+            ],
+            suite.Cases.Select(item => item.Name));
+        Assert.Equal(13, Directory.GetFiles(Path.Combine(RepositoryPaths.Root, "parity", "fixtures", "characters"), "*.chum").Length);
         Assert.Collection(
-            suite.Cases,
+            suite.Cases.Take(2),
             build =>
             {
                 Assert.Equal("build-Diego_v_alpha2_by_bessgeor", build.Name);
