@@ -1,4 +1,5 @@
 using System.Globalization;
+using static Parity.Cases.OptionArguments;
 
 namespace Parity.Capture.Run;
 
@@ -69,17 +70,6 @@ internal sealed class CaptureOptionsParser
         }
 
         return options with { Cases = cases, Captures = captures };
-    }
-
-    private static string Value(IReadOnlyList<string> args, ref int index)
-    {
-        string option = args[index];
-        if (++index >= args.Count || args[index].StartsWith("--", StringComparison.Ordinal))
-        {
-            throw new ArgumentException($"Option '{option}' needs a value.");
-        }
-
-        return args[index];
     }
 
     private static IEnumerable<string> List(string value) =>
