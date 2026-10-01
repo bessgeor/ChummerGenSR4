@@ -12,6 +12,7 @@ import { isGradable, itemFor } from "./hindsight.js";
 import { threadObservations, type ObservationRow } from "./observations.js";
 import { challengedHypothesis, contextExists, missingHypothesisMessage, recordContext } from "./record-context.js";
 import { rootCauseOfExplanation, type RootCause } from "./root-cause.js";
+import type { BaseCheck } from "./snapshot-base.js";
 
 const RootCauseSchema = z.strictObject({
   source: z.string().min(1), mechanism: z.enum(mechanisms),
@@ -111,6 +112,8 @@ export type FreezeInput = {
   readonly threadFolder: (threadId: string) => string;
   readonly records: readonly EvalRecord[];
   readonly benchmark: readonly BenchmarkItem[];
+  /** Whether a record's snapshot is the base of a benchmark item's fix; its ranges give gold only then. */
+  readonly snapshotBase: BaseCheck;
   readonly now: () => Date;
   readonly log: (line: string) => void;
 };
@@ -183,8 +186,13 @@ export async function freezeDataset(input: FreezeInput): Promise<{ folder: strin
       return found;
     });
     const sameContext = input.records.filter((record) => isGradable(record) && record.contextHash === draft.contextHash).sort((left, right) => (left.recordId < right.recordId ? -1 : 1));
-    const fixes = draft.records.flatMap((record) => itemFor(record, input.benchmark) ?? [])
-      .sort((left, right) => Date.parse(left.fix.committedUtc) - Date.parse(right.fix.committedUtc) || (left.itemId < right.itemId ? -1 : 1));
+    // A fix gives gold only to records whose snapshot has its files as the fix's parent has them: its ranges are lines of that commit.
+    const fixes = draft.records.flatMap((record) => {
+      const covering = itemFor(record, input.benchmark);
+      const problem = covering === null ? null : input.snapshotBase(record, covering);
+      if (covering !== null && problem !== null) input.log(`Freeze: benchmark item ${covering.itemId} gives no gold to record ${record.recordId}: ${problem}.`);
+      return covering === null || problem !== null ? [] : [covering];
+    }).sort((left, right) => Date.parse(left.fix.committedUtc) - Date.parse(right.fix.committedUtc) || (left.itemId < right.itemId ? -1 : 1));
     const gold = fixes[0] !== undefined ? rootCauseOfItem(fixes[0]) : sameContext.map((record) => reviewedRootCause(record, input.records)).find((cause) => cause !== null) ?? null;
     if (!existsSync(copies.context(draft.contextHash))) cpSync(draft.contextFolder, copies.context(draft.contextHash), { recursive: true });
     if (!existsSync(copies.source(draft.sourceIdentity))) cpSync(draft.sourceFolder, copies.source(draft.sourceIdentity), { recursive: true });

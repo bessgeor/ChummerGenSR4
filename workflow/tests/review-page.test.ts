@@ -4,10 +4,11 @@ import { request as httpRequest } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { join } from "node:path";
-import { getRecord, listRecords } from "../src/evals/eval-record.js";
+import { getRecord, listRecords, noLabels, putRecord } from "../src/evals/eval-record.js";
 import type { BenchmarkItem } from "../src/evals/benchmark.js";
 import { createReviewServer } from "../src/review/review-server.js";
 import { diagnosisHarness, twoClusters } from "./diagnosis-harness.js";
+import { record } from "./eval-fixtures.js";
 
 /** A review server on a free port over a finished fixture thread. */
 async function served(items: BenchmarkItem[] = []) {
@@ -111,6 +112,25 @@ test("the record page says why a check is not shown", async () => {
     unlinkSync(join(page.harness.root, "threads", page.threadId, "diagnosis.json"));
     const html = await (await page.get(`/record?id=${id}`)).text();
     match(html, /No check to show: The thread has no diagnosis\.json/);
+  } finally {
+    await page.close();
+  }
+});
+
+test("the flow after a verdict skips records the page cannot show", async () => {
+  const page = await served();
+  try {
+    const id = `${page.threadId}/d-0000000000000100/hypothesis/1`;
+    // Both sort before every real record: a disagreement of a thread that is gone, and a challenge that names no hypothesis.
+    const disagreement = { ...noLabels, check: "confirmed" as const, hindsight: { grade: "wrong" as const, item: "i", labelledUtc: "t" } };
+    await putRecord(page.harness.store, record({ recordId: "a-gone/d-1/hypothesis/1", threadId: "a-gone", labels: disagreement }));
+    const real = (await listRecords(page.harness.store)).find((item) => item.jobKind === "challenge")!;
+    await putRecord(page.harness.store, { ...real, recordId: "a-unnamed/challenge/1", challenged: null, labels: disagreement });
+    const response = await page.post({ id, verdict: "unclear" });
+    equal(response.status, 303);
+    const next = decodeURIComponent(response.headers.get("location")!.replace("/record?id=", ""));
+    ok(next.startsWith(page.threadId) && next !== id, next);
+    equal((await page.get(`/record?id=${encodeURIComponent(next)}`)).status, 200);
   } finally {
     await page.close();
   }

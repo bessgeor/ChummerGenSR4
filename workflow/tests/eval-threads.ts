@@ -43,7 +43,7 @@ export async function twoThreads() {
   const lines: string[] = [];
   const input = async (overrides: Partial<FreezeInput> = {}): Promise<FreezeInput> => ({
     name: "diag", jobKind: "hypothesis", seed: "s", testPercent: 50, reason: null, datasetsFolder: join(root, "datasets"),
-    threadFolder: (id) => join(root, "threads", id), records: await listRecords(store), benchmark: [], now: () => new Date("2026-10-02T11:00:00Z"),
+    threadFolder: (id) => join(root, "threads", id), records: await listRecords(store), benchmark: [], snapshotBase: () => null, now: () => new Date("2026-10-02T11:00:00Z"),
     log: (line) => lines.push(line), ...overrides,
   });
   return { root, store, input, lines, threads: [first.threadId(), second.threadId()] };

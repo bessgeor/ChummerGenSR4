@@ -142,7 +142,8 @@ const freeze: Command = async (args, context) => {
   const { folder, dataset } = await freezeDataset({
     name: options.required("name"), jobKind, seed: options.text("seed") ?? "dataset", testPercent: options.number("test-percent", 50, 0, 100, true),
     reason: options.text("reason"), datasetsFolder: join(context.paths.evalsFolder, "datasets"), threadFolder: context.paths.threadFolder,
-    records: await listRecords(context.store), benchmark: readBenchmark(context.paths.benchmark), now: context.now, log: context.log,
+    records: await listRecords(context.store), benchmark: readBenchmark(context.paths.benchmark),
+    snapshotBase: snapshotBaseCheck(context.git, context.paths.threadFolder), now: context.now, log: context.log,
   });
   const count = (partition: string) => dataset.items.filter((item) => item.partition === partition).length;
   context.log(`Dataset ${dataset.name} v${dataset.version} (${jobKind}): ${dataset.items.length} items, ${count("test")} test and ${count("development")} development, `

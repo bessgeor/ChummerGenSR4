@@ -131,7 +131,7 @@ function commitOf(git: Git, reference: string): string {
 
 /** The diff of a commit against its parent, limited to the app's source, data and translations. */
 export function commitPatch(git: Git, base: string, commit: string): string {
-  return git(["diff", "--no-color", "--no-ext-diff", "--no-renames", "-U3", base, commit, "--", ...snapshotFolders]);
+  return git(["diff", "--no-color", "--no-ext-diff", "--no-renames", "--src-prefix=a/", "--dst-prefix=b/", "--diff-algorithm=myers", "--indent-heuristic", "-U3", base, commit, "--", ...snapshotFolders]);
 }
 
 function parentOf(git: Git, commit: string): string {

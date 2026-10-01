@@ -64,6 +64,17 @@ test("gold comes from the earliest covering benchmark item, else from a correct 
   deepStrictEqual(gold("d-0000000000000400")?.files.map((file) => file.path), ["Chummer/frmCreate.cs"]);
 });
 
+test("a benchmark item gives gold only to records whose snapshot is its base", async () => {
+  const fixture = await twoThreads();
+  const benchmark = [benchmarkItem("d-0000000000000100", "2026-10-03T00:00:00.000Z")];
+  const reason = "frmCreate.cs of its snapshot differs from the fix's parent";
+  const { dataset } = await freezeDataset(await fixture.input({ benchmark, snapshotBase: () => reason }));
+  ok(dataset.items.filter((item) => item.clusterId === "d-0000000000000100").every((item) => item.gold === null));
+  equal(fixture.lines.filter((line) => line.includes(`benchmark item d-0000000000000100-fix gives no gold to record`) && line.includes(reason)).length, 2);
+  const matching = await freezeDataset(await fixture.input({ benchmark, name: "other" }));
+  ok(matching.dataset.items.filter((item) => item.clusterId === "d-0000000000000100").every((item) => item.gold?.source === "benchmark:d-0000000000000100-fix"));
+});
+
 test("versions are added, never changed, and a changed copy is refused on load", async () => {
   const fixture = await twoThreads();
   const first = await freezeDataset(await fixture.input());

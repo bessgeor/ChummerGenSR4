@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { SetupError } from "../host/setup-error.js";
 import type { Git } from "../diagnosis/source-snapshot.js";
 import type { BenchmarkItem } from "./benchmark.js";
 import type { EvalRecord } from "./eval-record.js";
@@ -17,7 +18,14 @@ const normalized = (text: string) => text.replaceAll("\r\n", "\n");
 export function snapshotBaseCheck(git: Git, threadFolder: (threadId: string) => string): BaseCheck {
   return (record, item) => {
     if (!contextExists(threadFolder, record)) return "its context or its thread's snapshot no longer exists";
-    const { sourceFolder } = recordContext(threadFolder, record);
+    // A context that changed since the record ran is a reason too, so that one record cannot stop a command that covers many.
+    let sourceFolder: string;
+    try {
+      sourceFolder = recordContext(threadFolder, record).sourceFolder;
+    } catch (error) {
+      if (error instanceof SetupError) return error.message;
+      throw error;
+    }
     for (const file of item.fix.files) {
       const inBase = git(["ls-tree", "--name-only", item.base.commit, "--", file.path]).trim().length > 0;
       const expected = inBase ? normalized(git(["show", `${item.base.commit}:${file.path}`])) : null;

@@ -108,6 +108,18 @@ test("benchmark add writes a replayable item from git and the thread's triage", 
   equal(revert.regression?.commit, repo.regression);
 });
 
+test("a patch does not depend on the machine's diff configuration", () => {
+  const repo = fixRepository();
+  const git = processGit(repo.root);
+  const input = { clusterId: "d-0000000000000100", fix: repo.fix, mechanism: "layout", regression: null, threadId: null, threadsFolder: repo.threads, benchmarkFolder: repo.benchmark };
+  const item = addBenchmarkItem(git, input);
+  repo.git("config", "diff.noprefix", "true");
+  repo.git("config", "diff.algorithm", "histogram");
+  repo.git("config", "diff.mnemonicPrefix", "true");
+  deepStrictEqual(checkBenchmarkItem(git, item), []);
+  deepStrictEqual(addBenchmarkItem(git, { ...input, benchmarkFolder: join(repo.root, "other") }).fix.files, item.fix.files);
+});
+
 test("benchmark add refuses an unknown cluster, commit or mechanism, a merge and an empty patch, and writes nothing", () => {
   const repo = fixRepository();
   const git = processGit(repo.root);
@@ -182,6 +194,12 @@ test("hindsight leaves an answer ungraded when its snapshot is not the fix's par
   match(check(`${snapshotText}// moved\n`)!, /Chummer\/frmCreate.cs of its snapshot differs from the fix's parent a{12}/);
   match(check(null)!, /differs from the fix's parent/);
   match(check(snapshotText, { ...hypothesis, threadId: "wf-gone" })!, /no longer exists/);
+  // A context edited since the record ran is a reason, not an error that stops a command covering many records.
+  const contextPath = join(recordContext(threadFolder, hypothesis).contextFolder, "context.json");
+  const sealed = readFileSync(contextPath, "utf8");
+  writeFileSync(contextPath, sealed.replace("\"known\": false", "\"known\": true"));
+  match(check(snapshotText)!, /differs from the one record .* saw/);
+  writeFileSync(contextPath, sealed);
 
   const summary = await labelHindsight(harness.store, [item], () => new Date("2026-12-02T00:00:00Z"), (record, covering) => snapshotBaseCheck(parent(`${snapshotText}// moved\n`), threadFolder)(record, covering));
   equal(summary.graded, 0);

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { BaseStore } from "@langchain/langgraph-checkpoint";
 import { listRecords, setLabels, verdicts, type EvalRecord } from "../evals/eval-record.js";
 import { isGradable } from "../evals/hindsight.js";
-import { challengedHypothesis, missingHypothesisMessage, recordContext } from "../evals/record-context.js";
+import { challengedHypothesis, contextExists, missingHypothesisMessage, recordContext } from "../evals/record-context.js";
 import { reviewQueue } from "../evals/review-queue.js";
 import { clusterCheck } from "./cluster-check.js";
 import { HttpError } from "./http-error.js";
@@ -57,6 +57,11 @@ function requireOwnOrigin(request: IncomingMessage): void {
   if (!own.includes(request.headers.host ?? "")) throw new HttpError(403, "The request does not address this server by its loopback address.");
   const origin = request.headers.origin;
   if (origin !== undefined && !own.some((host) => origin === `http://${host}`)) throw new HttpError(403, "The request comes from another page.");
+}
+
+/** Whether the record page can show a record: its context is on disk, and a challenge names a hypothesis. The flow to the next record skips the others. */
+function showable(dependencies: ReviewDependencies, all: readonly EvalRecord[], record: EvalRecord): boolean {
+  return contextExists(dependencies.threadFolder, record) && (record.jobKind !== "challenge" || challengedHypothesis(all, record) !== null);
 }
 
 function sameToken(given: string | null, expected: string): boolean {
@@ -114,7 +119,8 @@ export function createReviewServer(dependencies: ReviewDependencies): Server {
         review: { verdict, note: note.length === 0 ? null : note, reviewer: dependencies.reviewer, reviewedUtc: dependencies.now().toISOString() },
       });
       dependencies.log(`Review: ${record.recordId} ${verdict}${note.length === 0 ? "" : ` (${note})`}.`);
-      const next = reviewQueue(await listRecords(dependencies.store), dependencies.queue)[0];
+      const remaining = await listRecords(dependencies.store);
+      const next = reviewQueue(remaining, dependencies.queue).find((entry) => showable(dependencies, remaining, entry.record));
       response.writeHead(303, { location: next === undefined ? "/" : recordLink(next.record.recordId) });
       response.end();
       return;
