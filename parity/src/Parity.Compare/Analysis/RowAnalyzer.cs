@@ -91,19 +91,64 @@ internal sealed class RowAnalyzer(DiscrepancyLocator locator, ImageHasher hasher
                 $"The captures differ in {difference.Count} pixels, a difference of {recomputed}, but the row records {row.Difference}."));
         }
 
-        List<Finding> findings = [];
+        List<DescribedChange> described = [];
         foreach (LocatedChange change in locator.Locate(canonical, candidate, difference))
         {
-            findings.Add(Describe(row, folder, ocr, canonical, candidate, change, findings.Count + 1));
+            described.Add(Describe(row, folder, ocr, canonical, candidate, change, described.Count + 1));
         }
 
+        List<Finding> findings = described.Select(item => item.Finding).ToList();
         long located = findings.Sum(finding => finding.DifferingPixels);
-        return located == difference.Count
-            ? RowAnalysis.Analyzed(row, difference.Count, findings)
-            : RowAnalysis.Failed(row, $"The discrepancies hold {located} differing pixels, but the captures differ in {difference.Count}.");
+        if (located != difference.Count)
+        {
+            return RowAnalysis.Failed(row, $"The discrepancies hold {located} differing pixels, but the captures differ in {difference.Count}.");
+        }
+
+        SaveCrops(described);
+        return RowAnalysis.Analyzed(row, difference.Count, findings);
     }
 
-    private Finding Describe(CaptureResult row, RunFolder folder, IOcrEngine ocr, ArgbImage canonical, ArgbImage candidate, LocatedChange change, int number)
+    /// <summary>
+    /// Writes the row's crop files once the whole row is described. When one cannot be written, the
+    /// crops already written are removed, so a failed row leaves no crop behind.
+    /// </summary>
+    private static void SaveCrops(IReadOnlyList<DescribedChange> described)
+    {
+        List<string> written = [];
+        try
+        {
+            foreach (DescribedChange item in described)
+            {
+                foreach ((string path, ArgbImage image) in new[] { (item.CanonicalPath, item.CanonicalCrop), (item.CandidatePath, item.CandidateCrop) })
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                    written.Add(path);
+                    image.SavePng(path);
+                }
+            }
+        }
+        catch (Exception error)
+        {
+            try
+            {
+                foreach (string path in written.Where(File.Exists))
+                {
+                    File.Delete(path);
+                }
+            }
+            catch (Exception cleanup) when (cleanup is IOException or UnauthorizedAccessException)
+            {
+                throw new IOException($"{error.Message} The crops already written could not be removed: {cleanup.Message}", error);
+            }
+
+            throw;
+        }
+    }
+
+    /// <summary>A discrepancy and the crop images that are written for it once its row is complete.</summary>
+    private sealed record DescribedChange(Finding Finding, string CanonicalPath, ArgbImage CanonicalCrop, string CandidatePath, ArgbImage CandidateCrop);
+
+    private DescribedChange Describe(CaptureResult row, RunFolder folder, IOcrEngine ocr, ArgbImage canonical, ArgbImage candidate, LocatedChange change, int number)
     {
         Rectangle crop = change.Crop;
         OcrReading canonicalText = Read(ocr, canonical.Crop(crop));
@@ -117,10 +162,7 @@ internal sealed class RowAnalyzer(DiscrepancyLocator locator, ImageHasher hasher
 
         string canonicalCrop = folder.CropPath(row.Case, row.Capture, number, "canonical");
         string candidateCrop = folder.CropPath(row.Case, row.Capture, number, "candidate");
-        Directory.CreateDirectory(Path.GetDirectoryName(canonicalCrop)!);
-        canonical.Crop(crop).SavePng(canonicalCrop);
-        candidate.Crop(crop).SavePng(candidateCrop);
-        return new Finding(
+        Finding finding = new(
             $"{row.Case}/{row.Capture}#{number}",
             row.Case,
             row.Capture,
@@ -133,6 +175,7 @@ internal sealed class RowAnalyzer(DiscrepancyLocator locator, ImageHasher hasher
             folder.Relative(candidateCrop),
             canonicalText,
             candidateText);
+        return new DescribedChange(finding, canonicalCrop, canonical.Crop(crop), candidateCrop, candidate.Crop(crop));
     }
 
     /// <summary>Whatever the engine throws while reading a crop is that crop's OCR error, never empty text.</summary>

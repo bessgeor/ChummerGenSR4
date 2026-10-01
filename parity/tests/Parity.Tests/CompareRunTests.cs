@@ -235,6 +235,24 @@ public sealed class CompareRunTests : IDisposable
     }
 
     [Fact]
+    public void A_crop_that_cannot_be_written_leaves_none_of_its_rows_crops()
+    {
+        using Bitmap canonical = CaptureRunFolder.Image(300, 200);
+        using Bitmap candidate = CaptureRunFolder.Image(300, 200);
+        candidate.SetPixel(20, 20, Color.Black);
+        candidate.SetPixel(250, 150, Color.Black);
+        CaptureResult row = _run.Add("common", canonical, candidate, threshold: 0);
+        // A folder where the second discrepancy's canonical crop belongs makes writing that crop fail.
+        Directory.CreateDirectory(Path.Combine(_run.Root, "compare", "crops", "build-test", "common.2.canonical.png"));
+
+        RowAnalysis analysis = Analyzer().Analyze(row, RunFolder.At(_run.Root), Text("x"));
+
+        Assert.Equal(RowStatus.Failed, analysis.Status);
+        Assert.Empty(analysis.Findings);
+        Assert.Empty(Directory.GetFiles(Path.Combine(_run.Root, "compare", "crops"), "*", SearchOption.AllDirectories));
+    }
+
+    [Fact]
     public void A_report_that_cannot_be_printed_stays_written()
     {
         AddChange("common", "40", "45");
