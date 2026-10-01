@@ -17,7 +17,7 @@
 
 ## 4. Fixtures and guidance
 
-- [x] 4.1 Add the ten reviewed archetype fixtures to `parity/fixtures/characters/` and the case file, and document the sourcebook overlay, the cache option and the new run files in `AGENTS.md`. Evidence: the case file loads in a unit test with every declared mode matching its fixture, and a unit test finds no fixture linking another character file.
+- [x] 4.1 Add the eleven reviewed archetype fixtures to `parity/fixtures/characters/` and the case file, and document the sourcebook overlay, the cache option and the new run files in `AGENTS.md`. Evidence: the case file loads in a unit test with every declared mode matching its fixture, and a unit test finds no fixture linking another character file.
 
 ## 5. Verification and archive
 

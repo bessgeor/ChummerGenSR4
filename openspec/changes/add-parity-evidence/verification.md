@@ -4,14 +4,14 @@ Host: Windows 10 Pro 22H2 (10.0.19045), one 1920×1080 display at 150 % scaling,
 
 ## Fixture-tested scope
 
-These checks use no desktop and no live app. They ran on the commit before this file, "Park the pointer on the title bar so hover effects never depend on where it was left".
+These checks use no desktop and no live app. They ran on the commit before this file, "Spell outcomes and sides in completeness details with the contract's names".
 
 | Command | Result |
 |---|---|
 | `npm run openspec:validate` | `✓ change/add-parity-evidence`, `✓ spec/development-process`, `✓ spec/parity-contracts`, `✓ spec/visual-parity-capture`, `✓ spec/visual-parity-compare`, `Totals: 5 passed, 0 failed (5 items)` |
 | `npm run contracts:check` | `Generated contracts are up to date (12 files).` |
 | `npm run contracts:test` | `# tests 7`, `# pass 7`, `# fail 0` |
-| `npm run parity:test` | `Passed! - Failed: 0, Passed: 174, Skipped: 0, Total: 174` |
+| `npm run parity:test` | `Passed! - Failed: 0, Passed: 183, Skipped: 0, Total: 183` |
 | `npm run parity:scripts:test` | `# tests 10`, `# pass 10`, `# fail 0` |
 
 ### Each commit on its own
@@ -33,20 +33,23 @@ Each commit of this change, from the proposal to the commit before this file, wa
 | Build the parity tools without git queries so no commit ID reaches their assemblies | 171 |
 | Clear the technomancer fixtures' link to another character file and test that no fixture links one | 172 |
 | Park the pointer on the title bar so hover effects never depend on where it was left | 174 |
-
+| Apply the capture filter before skipping the actions of an absent optional tab | 175 |
+| Store canonical sides after the final executable check and key them on display scale, OS patch level, colour settings and app options | 183 |
+| Map the repository root in the parity tools' assemblies so their hashes do not depend on the build folder | 183 |
+| Spell outcomes and sides in completeness details with the contract's names | 183 |
 ### What the tests cover
 
 - Contracts: `parity-execution-coverage` and `parity-capture-timing` examples, and the extended summary and compare report examples, round-trip through the generated zod schemas and the C# readers and writers.
 - Coverage audit (`CoverageAuditorTests`): a complete side with an absent optional tab is valid and lists the absence and its skipped actions apart from failures; a missing record, a repeated index and a record naming another action are `action-gap`; a failed action and a startup failure are `failure`; a performed capture without a file is `capture-without-file`; a file for a capture that did not perform and a file for an unplanned capture are `file-without-capture`; a cached side is audited and counted like a live one; coverage round-trips through the contract. `CaptureRunTests` shows that invalid coverage gives status 2 even when every visual row passed, and that execution failures win over visual results.
 - Timing (`TimingTests`, scripted driver and a stepping clock): every operation of a side is measured in order with its target; a throwing call is recorded as failed and the action outcomes do not change; a failed launch is measured and rethrown; per-operation count, failures, total, nearest-rank median and 80th percentile, and maximum; measuring outside a side fails; timing round-trips through the contract.
-- Canonical cache (`CanonicalCaptureCacheTests`): the key is stable and changes with every input; the environment lists screens, DPI, OS, cultures and the runner's assemblies; the runner's assemblies embed no commit ID; a miss runs live and stores, and a hit restores captures and records without launching; a capture with a changed hash, an unreadable entry and a missing capture file fail the restore as setup errors; a failed side is not stored; an existing entry is never replaced; a cache folder inside the repository (outside `out/`) is rejected; the option is parsed; the summary records sources and the cache block.
-- Completeness (`CompletenessTests`): every reported capture is complete; a performed capture without a row is `unaccounted` and gives `analysis-failures`; a capture lost to an execution failure is `execution-lost` and leaves the status alone; filtered and optional-absent captures are accounted for; an optional tab absent on one side only without a row is `unaccounted`; a failed row is `analysis-failed`; a row that no case planned is `unaccounted`; a run without `coverage.json`, with an unreadable one, or with one of another run is a setup error with no report.
+- Canonical cache (`CanonicalCaptureCacheTests`): the key is stable and changes with every input; the environment lists screens with each monitor's DPI, the system DPI, the OS build and patch level, cultures, the Windows colour, theme, system colour, font smoothing, window metric, text scale and high contrast values, the app's registry options and the runner's assemblies, and reads the same twice in a row; the options without recently used files and the Omae account are the ones keyed; the runner's assemblies embed no commit ID; a miss runs live and queues its side, nothing is stored until the run stores its pending sides, and a hit restores captures and records without launching; a capture with a changed hash, an unreadable entry and a missing capture file fail the restore as setup errors; a failed side is not stored; an existing entry is never replaced; a cache folder inside the repository (outside `out/`) is rejected; the option is parsed; the summary records sources and the cache block.
+- Completeness (`CompletenessTests`): every reported capture is complete; a performed capture without a row is `unaccounted` and gives `analysis-failures`; a capture lost to an execution failure is `execution-lost` and leaves the status alone; filtered and optional-absent captures are accounted for; a capture filtered on a side whose optional tab is absent is `filtered` there like on the other side (`SideExecutorTests`); an optional tab absent on one side only without a row is `unaccounted`; a failed row is `analysis-failed`; a row that no case planned is `unaccounted`; a run without `coverage.json`, with an unreadable one, or with one of another run is a setup error with no report.
 - Fixtures (`CaseFileLoaderTests`): the repository case file loads all 13 cases in order with their declared modes, and the folder holds 13 fixtures; no fixture names a linked character file in a `file` or `relative` element. With `technotest.chum` restored from the commit before the fix, that test failed and printed `technotest.chum links C:\Placeholder\Diego_v_alpha2_by_bessgeor.chum` and `technotest.chum links ../C:/Placeholder/Diego_v_alpha2_by_bessgeor.chum`.
 - Pointer (`PointerParkerTests`, `SideExecutorTests`): the parking spot is the middle of the visible bounds horizontally and half the caption height below their top, also on a screen left of the primary one; a pointer moved before a capture fails that capture with the reason `pointer: scripted pointer move`, and the actions after it do not run.
 
 ### The runner's assemblies across a commit
 
-In a detached worktree at the commit before this file, `dotnet build parity/src/Parity.Capture -c Release` produced `Parity.Capture.dll` `2A3DE18AAA409AFE…`, `Parity.Cases.dll` `1E845B9EB5C959C1…` and `Parity.Imaging.dll` `B28E80F5CBE97F2B…` (SHA-256 prefixes). After an empty commit in that worktree, `dotnet build … -c Release --no-incremental` produced the same three hashes, so a commit that changes no code keeps the cache keys. The worktree and its commit were removed afterwards.
+In a detached worktree at the commit before this file, `dotnet build parity/src/Parity.Capture -c Release` produced `Parity.Capture.dll` `2A3DE18AAA409AFE…`, `Parity.Cases.dll` `1E845B9EB5C959C1…` and `Parity.Imaging.dll` `B28E80F5CBE97F2B…` (SHA-256 prefixes). After an empty commit in that worktree, `dotnet build … -c Release --no-incremental` produced the same three hashes, so a commit that changes no code keeps the cache keys. The worktree and its commit were removed afterwards. That build also differed between build folders (the same commit built in the repository gave `d58f335a…` for `Parity.Capture.dll`); `parity/Directory.Build.props` now maps the repository root to a fixed prefix, and `Parity.Capture.dll`, `Parity.Cases.dll` and `Parity.Imaging.dll` built in the worktree and in a copy of the tree in a temporary folder (Debug configuration) had the same SHA-256 prefixes, `66F039EA`, `BB8E4E8A` and `A2F2CD49`.
 
 ## Live evidence
 
@@ -59,16 +62,20 @@ All runs were started from the repository root with `npm.cmd` in PowerShell, eac
 | # | Run | Commit | Arguments after `--settings-overlay out/overlays/fixture-books` | Exit (capture, compare) | Wall time |
 |---|---|---|---|---|---|
 | 1 | `20261001T070935Z-97241689` | Build the parity tools without git queries… | `--canonical-cache out/canonical-cache-masked` | 2 (2, 0) | 36 min 34 s |
-| 2 | `20261001T074918Z-0c4177f0` | Clear the technomancer fixtures' link… | `--case build-technotest --case "career-technotest - career"` | 0 (0, 0) | — |
+| 2 | `20261001T074918Z-0c4177f0` | Clear the technomancer fixtures' link… | `--case build-technotest --case "career-technotest - career"` | 0 (0, 0) | 5 min 24 s |
 | 3 | `20261001T075454Z-aec97540` | Clear the technomancer fixtures' link… | `--canonical-cache out/canonical-cache-b` | 0 (0, 0) | 37 min 44 s |
 | 4 | `20261001T083606Z-e694fb72` | Clear the technomancer fixtures' link… | `--canonical-cache out/canonical-cache-b` | 1 (1, 1) | 19 min 11 s |
-| 5 | `20261001T090029Z-8acbcb70` | Park the pointer on the title bar… | `--case build-Diego_v_alpha2_by_bessgeor` | 0 (0, 0) | — |
+| 5 | `20261001T090029Z-8acbcb70` | Park the pointer on the title bar… | `--case build-Diego_v_alpha2_by_bessgeor` | 0 (0, 0) | 2 min 29 s |
 | 6 | `20261001T090318Z-16624233` | Park the pointer on the title bar… | `--canonical-cache out/canonical-cache-c` | 2 (2, 1) | 36 min 34 s |
 | 7 | `20261001T094320Z-a9818a26` | Park the pointer on the title bar… | `--canonical-cache out/canonical-cache-c` | 0 (0, 0) | 20 min 6 s |
 | 8 | `20261001T100824Z-681985a4` | Park the pointer on the title bar… | `--canonical-cache out/canonical-cache-d` | 0 (0, 0) | 37 min 43 s |
 | 9 | `20261001T104826Z-931e3d84` | Park the pointer on the title bar… | `--canonical-cache out/canonical-cache-d` | 0 (0, 0) | 18 min 53 s |
+| 10 | `20261001T115115Z-fe5e66ba` | Spell outcomes and sides… (key and store order as described above) | `--canonical-cache out/canonical-cache-e` | 0 (0, 0) | 37 min 32 s |
+| 11 | `20261001T123145Z-e2809dd0` | same | `--canonical-cache out/canonical-cache-e` | 0 (0, 0) | 18 min 45 s |
+| 12 | `20261001T130228Z-a66f8193` | Spell outcomes and sides in completeness details… | `--canonical-cache out/canonical-cache-f` | 0 (0, 0) | 37 min 45 s |
+| 13 | `20261001T134100Z-4e2798e7` | same | `--canonical-cache out/canonical-cache-f` | 0 (0, 0) | 19 min 3 s |
 
-Each cache folder was new and empty before the first run that used it. Runs 8 and 9 are the evidence for the finished change; runs 1 to 7 record the two defects found on the way and their fixes.
+The wall times of runs 2, 5 and 10 to 13 are the interval from `startedUtc` to `finishedUtc` in their summaries, which covers the capture only. Each cache folder was new and empty before the first run that used it. Runs 12 and 13 are the evidence for the finished change. Runs 1 to 9 ran on earlier commits and record two defects found on the way and their fixes; runs 10 and 11 ran on the commit before the cache key gained the system colour, font smoothing, window metric, text scale and high contrast lines and the cache stores moved behind the written reports.
 
 ### Run 1: technomancer fixtures that link another character file (execution failure)
 
@@ -185,15 +192,35 @@ The pointer was moved to logical (1262,8), on the close button, before the run a
 - Compare: `clear`, 0 discrepancies, 0 OCR errors; completeness complete, 250 planned, 211 reported, 39 optional absent, 0 unaccounted.
 - Timing: 13 sides (the candidate sides), 1123.3 s of samples; the run took 18 min 53 s instead of run 8's 37 min 43 s.
 
+### Runs 10 and 11: the same suite on the commit before the last cache key lines
+
+Run 10 (whole suite live, new cache folder) and run 11 (the same command again) both exited 0 (capture 0, compare 0): coverage valid, 26 sides, 1448 actions, 0 failed, 78 optional absent, 156 skipped optional; 211 of 211 rows passed; compare `clear`; completeness 250 planned, 211 reported, 39 optional absent, 0 unaccounted. Run 10 stored 13 sides (0 hits, 13 misses); run 11 took all 13 canonical sides from it (13 hits).
+
+### Runs 12 and 13: final evidence
+
+Both runs used `npm.cmd start -- --settings-overlay out/overlays/fixture-books --canonical-cache out/canonical-cache-f`, from the repository root, on the commit before this file, with a new empty cache folder. `bin/ChummerGenSR4.exe` had SHA-256 `9ff30099…` before and after both, and each run printed it for the source and the staged copy before and after. The candidate was `out/candidate/bin/ChummerGenSR4.exe`, SHA-256 `0651a9ef…`.
+
+Run 12 (`20261001T130228Z-a66f8193`), both executables live on every case:
+- Execution (`coverage.json`): valid; 13 cases, 26 sides, all `live`; 1448 actions, 0 failed, 0 startup failures, 0 not run, 78 optional absent, 156 skipped optional, 0 filtered; 211 of 250 planned captures on both sides. These are the counts of the per-case table under run 8.
+- Visual (`results.json`): 211 rows, 211 pass.
+- Compare: `clear`, exit 0; 211 rows passed, 0 discrepancies, 0 OCR errors. Completeness complete: planned 250, reported 211, analysis failed 0, filtered 0, optional absent 39, execution lost 0, unaccounted 0.
+- Cache: 0 hits, 13 misses, 13 stored, each after the canonical hash check and after results, coverage and timing were written.
+
+Run 13 (`20261001T134100Z-4e2798e7`), the same command again:
+- Cache: 13 hits, 0 misses, 0 stored; every canonical side came from run 12 and the canonical executable was not launched. The key's registry, colour, text and DPI lines were the same as when run 12 started, although run 12 had launched the app 13 times.
+- Execution: valid, with the same counts as run 12 and 13 cached sides audited like live ones; 0 failed.
+- Visual: 211 rows, 211 pass. Compare: `clear`, exit 0, 0 discrepancies; completeness with the same totals as run 12.
+
+A stored entry's key lines include `monitor-dpi:\\.\DISPLAY1:144x144`, `os-patch:19045.6466`, 12 `dwm:`, 4 `personalize:`, 31 `system-colour:`, 4 `desktop:`, 22 `window-metric:`, 1 `text-scale:`, 1 `high-contrast:` and 11 `app-option:` lines, and the three runner assemblies (`Parity.Capture.dll` `8c3e9705…`, `Parity.Cases.dll` `6ce5d98f…`, `Parity.Imaging.dll` `203f3cf5…`).
 ## Unverified
 
 - Captures taken before the app finished drawing: in run 6 one candidate capture lacked the text of the selected tab header (1 of 198 rows; the same capture matched in the five other runs that took it). The runner waits for a label in the tab's content and for stable window bounds, not for the tab header to be painted. The cause is not confirmed, the frequency is unmeasured, and nothing tells such a discrepancy apart from a change in the program.
 - Foreground loss: another application taking the foreground at a side's start failed that side in run 6, as designed. Nothing beyond the bounded activation retries protects a run from it.
-- A pointer moved during a side: no live run moved the pointer after the runner parked it, so the `pointer:` failure is covered by the fixture test only. The parking spot was used live only on one display at 150 % scaling; screens with different scaling, a window on a secondary screen, and pen or touch input are untested.
-- The cache key leaves out the app's registry key `HKCU\Software\Chummer` and anything else outside the runner's control besides the pointer. A change there that alters pixels would still hit.
-- Cache entries across a commit: shown by the identical assembly hashes after an empty commit, not by a live run on a later commit. The hashes differ between build folders: the detached worktree built `Parity.Capture.dll` as `2A3DE18A…`, while run 8's cache key records `d58f335a…` for the same commit built in the repository, so an entry is expected to be reused only by a checkout at the same path; reuse from another folder was not tried.
-- Cache failures live: a corrupted or unreadable entry, a missing cached file and two runs storing the same key at once were not hit live; the first three are covered by fixture tests, the last by none.
+- A pointer moved during a side: no live run moved the pointer after the runner parked it, so the `pointer:` failure is covered by the fixture test only. The caption height of the parking spot comes from the system DPI, not from the DPI of the monitor the window is on; the spot was used live only on one display at 150 % scaling; screens with different scaling, a window on a secondary screen, and pen or touch input are untested.
+- The cache key leaves out what the runner cannot read, such as installed fonts and other software that changes how a window is drawn, besides the pointer. A change there that alters pixels would still hit. No run changed one of the keyed inputs (display scale, accent colour, ClearType, text size, an app option) between a store and a hit; the live runs show only that the key is stable on one host.
+- Cache entries across a commit and a build folder: shown by identical assembly hashes (an empty commit, and a copy of the tree in another folder), not by a live run on a later commit or from another checkout.
+- Cache failures live: a corrupted or unreadable entry, a missing cached file and two runs storing the same key at once were not hit live; the first three are covered by fixture tests, the last by none. That a run which ends as a setup error before its reports are written stores nothing is covered by the queue test only, not by a live run; a failure while the pending sides are stored (a full disk, for example) can leave some of them stored.
 - Coverage and completeness states live: no live run produced `action-gap`, `capture-without-file`, `file-without-capture`, `analysis-failed` or `unaccounted`. They are covered by fixture tests only. `failure`, startup failures, `optional-absent` and `execution-lost` were produced live (runs 1 and 6).
 - Timing overhead: the cost of the decorator itself was not measured.
-- Fixture content: the reviewed fixtures carry neutral placeholders instead of some notes, links, one contact name and the face mage portrait. Captures of the originals were not compared with captures of the placeholders.
+- Fixture content: the fixtures are binary files, so the diff does not show what was replaced in them. The case-file test checks only the declared modes and that no fixture names a linked character file; that the free-text notes, links, one contact name and the face mage portrait are neutral placeholders was not checked independently, and captures of the originals were not compared with captures of the placeholders.
 - Other hosts, OS versions, cultures and overlays: every run used this host, the culture `en-US` and the one overlay above.
