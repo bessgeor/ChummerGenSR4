@@ -27,6 +27,7 @@ internal sealed class CaptureRun(
     CoverageAuditor auditor,
     TimingRecorder timingRecorder,
     CacheSessionFactory cacheSessions,
+    CacheEnvironmentReader environmentReader,
     CanonicalCaptureCache cache,
     TimeProvider time)
 {
@@ -48,6 +49,11 @@ internal sealed class CaptureRun(
         {
             Console.WriteLine(CaptureOptionsParser.Usage);
             return 0;
+        }
+
+        if (options.EnvironmentFingerprintFile is not null)
+        {
+            return WriteEnvironmentFingerprint(options);
         }
 
         DateTimeOffset started = time.GetUtcNow();
@@ -162,6 +168,21 @@ internal sealed class CaptureRun(
             writer.Write(layout.SummaryPath, writer.BuildSummary(report, path => DisplayPath(options.RepositoryRoot, path)));
             Console.Error.WriteLine($"ERROR: {error}");
             Console.Error.WriteLine($"Summary: {layout.SummaryPath}");
+            return ExitCode(RunStatus.SetupError);
+        }
+    }
+
+    /// <summary>Writes the fingerprint of the environment the canonical cache keys on, without running a case.</summary>
+    private int WriteEnvironmentFingerprint(CaptureOptions options)
+    {
+        try
+        {
+            File.WriteAllText(options.Resolve(options.EnvironmentFingerprintFile!), environmentReader.Read(screens.Current()).Fingerprint() + "\n");
+            return 0;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            Console.Error.WriteLine($"ERROR: cannot write the environment fingerprint: {error.Message}");
             return ExitCode(RunStatus.SetupError);
         }
     }
