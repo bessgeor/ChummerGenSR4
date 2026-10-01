@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Parity.Capture.Coverage;
 using Parity.Capture.Execution;
 using Parity.Capture.Interop;
 using Parity.Capture.Run;
@@ -46,6 +47,7 @@ internal static class Program
         services.AddSingleton<CaseRunner>();
         services.AddSingleton<ReportWriter>();
         services.AddSingleton<ScreenInventory>();
+        services.AddSingleton<CoverageAuditor>();
         services.AddSingleton<CaptureOptionsParser>();
         services.AddSingleton<CaptureRun>();
         return services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });

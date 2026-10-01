@@ -5,6 +5,8 @@ using Parity.Capture.Staging;
 using Parity.Cases;
 using Parity.Contracts.CaptureSummary;
 using CaptureResult = Parity.Contracts.CaptureResults.CaptureResult;
+using CoverageTotals = Parity.Contracts.ExecutionCoverage.CoverageTotals;
+using ExecutionCoverage = Parity.Contracts.ExecutionCoverage.ExecutionCoverage;
 using ResultReason = Parity.Contracts.CaptureResults.ResultReason;
 
 namespace Parity.Tests;
@@ -76,13 +78,19 @@ public sealed class CaptureRunTests
         CaseRun failed = Run(canonicalFailure: "action 1: boom", passed: true);
         CaseRun visual = Run(canonicalFailure: null, passed: false);
 
-        Assert.Equal(RunStatus.ExecutionFailures, CaptureRun.Status([failed, visual]));
-        Assert.Equal(RunStatus.VisualDifferences, CaptureRun.Status([visual]));
-        Assert.Equal(RunStatus.Passed, CaptureRun.Status([Run(canonicalFailure: null, passed: true)]));
+        Assert.Equal(RunStatus.ExecutionFailures, CaptureRun.Status([failed, visual], Coverage(valid: true)));
+        Assert.Equal(RunStatus.VisualDifferences, CaptureRun.Status([visual], Coverage(valid: true)));
+        Assert.Equal(RunStatus.Passed, CaptureRun.Status([Run(canonicalFailure: null, passed: true)], Coverage(valid: true)));
         Assert.Equal(2, CaptureRun.ExitCode(RunStatus.ExecutionFailures));
         Assert.Equal(1, CaptureRun.ExitCode(RunStatus.VisualDifferences));
         Assert.Equal(0, CaptureRun.ExitCode(RunStatus.Passed));
         Assert.Equal(3, CaptureRun.ExitCode(RunStatus.SetupError));
+    }
+
+    [Fact]
+    public void Invalid_coverage_is_an_execution_failure_even_when_every_row_passed()
+    {
+        Assert.Equal(RunStatus.ExecutionFailures, CaptureRun.Status([Run(canonicalFailure: null, passed: true)], Coverage(valid: false)));
     }
 
     [Fact]
@@ -141,6 +149,15 @@ public sealed class CaptureRunTests
         Assert.Equal("results.json", readBack.Results);
         Assert.Equal("1970-01-01T00:01:00.000Z", readBack.FinishedUtc);
     }
+
+    private static ExecutionCoverage Coverage(bool valid) => new()
+    {
+        RunId = "test-run",
+        Valid = valid,
+        InvalidReasons = valid ? [] : ["action-gap:build-test/candidate"],
+        Cases = [],
+        Totals = new CoverageTotals(),
+    };
 
     private static CaseRun Run(string? canonicalFailure, bool passed)
     {

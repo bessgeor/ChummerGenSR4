@@ -19,6 +19,10 @@ internal sealed record RunLayout(string RunId, string Root)
 
     public string ResultsPath => Path.Combine(Root, "results.json");
 
+    public string CoveragePath => Path.Combine(Root, "coverage.json");
+
+    public string TimingPath => Path.Combine(Root, "timing.json");
+
     public static RunLayout Create(string runsDirectory, DateTimeOffset now)
     {
         string runId = $"{now.UtcDateTime:yyyyMMdd'T'HHmmss'Z'}-{Guid.NewGuid().ToString("N")[..8]}";

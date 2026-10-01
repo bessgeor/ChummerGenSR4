@@ -6,6 +6,7 @@ using Parity.Cases;
 using Parity.Contracts.CaptureSummary;
 using CaptureResultsContract = Parity.Contracts.CaptureResults.CaptureResults;
 using CaptureSummaryContract = Parity.Contracts.CaptureSummary.CaptureSummary;
+using ExecutionCoverageContract = Parity.Contracts.ExecutionCoverage.ExecutionCoverage;
 using CharacterMode = Parity.Cases.CharacterMode;
 using ResultRow = Parity.Contracts.CaptureResults.CaptureResult;
 
@@ -70,6 +71,7 @@ internal sealed class ReportWriter
                 VisualFailed = rows.Count(row => !row.Passed),
             },
             Results = report.Finished is null ? null : report.Layout.Relative(report.Layout.ResultsPath),
+            Coverage = report.Finished is null ? null : report.Layout.Relative(report.Layout.CoveragePath),
         };
     }
 
@@ -85,6 +87,9 @@ internal sealed class ReportWriter
 
     public void Write(string path, CaptureResultsContract results) =>
         File.WriteAllText(path, ContractJson.Write(results) + "\n", Utf8);
+
+    public void Write(string path, ExecutionCoverageContract coverage) =>
+        File.WriteAllText(path, ContractJson.Write(coverage) + "\n", Utf8);
 
     private static SideExecution Side(SideRun run) => new()
     {

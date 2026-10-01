@@ -11,6 +11,9 @@ internal sealed record SideRun(
     string? Failure,
     TimeSpan Duration)
 {
+    /// <summary>Whether the side ran in this run or came from the canonical capture cache.</summary>
+    public SideOrigin Origin { get; init; } = SideOrigin.Live;
+
     public bool Failed => Failure is not null;
 
     /// <summary>The outcome of the capture action with this name.</summary>
