@@ -15,4 +15,4 @@
 ## 3. Verification and archive
 
 - [x] 3.1 Run live on the records of real workflow threads: `records`, `grade` (Claude), `queue` and the review page in a browser, `freeze`, eval runs of both job kinds (one killed and resumed), `compare`, a refused and an issued certificate, and `npm start -- --unattended` refused without certificates and run on one case with them. Record in `verification.md` the canonical hash before and after, execution outcomes apart from visual results, the eval deltas with their intervals, fixture-tested scope apart from live evidence, and what remains unverified.
-- [ ] 3.2 Archive the change with `openspec archive add-agent-evaluation`. Evidence: `npm run openspec:validate` passes after the archive, recorded in `verification.md`.
+- [x] 3.2 Archive the change with `openspec archive add-agent-evaluation`. Evidence: `npm run openspec:validate` passes after the archive, recorded in `verification.md`.
