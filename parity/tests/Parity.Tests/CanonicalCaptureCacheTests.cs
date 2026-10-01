@@ -79,6 +79,17 @@ public sealed class CanonicalCaptureCacheTests : IDisposable
     }
 
     [Fact]
+    public void Runner_assemblies_do_not_embed_the_commit()
+    {
+        foreach (Type type in new[] { typeof(CaseRunner), typeof(ParityCase), typeof(Parity.Imaging.ArgbImage) })
+        {
+            string? version = System.Reflection.CustomAttributeExtensions
+                .GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>(type.Assembly)?.InformationalVersion;
+            Assert.DoesNotContain("+", version);
+        }
+    }
+
+    [Fact]
     public void Miss_runs_live_and_stores_then_a_hit_restores_without_launching()
     {
         CaseRun first = Run("first");

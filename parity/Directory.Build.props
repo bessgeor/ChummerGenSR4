@@ -6,5 +6,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AnalysisLevel>latest</AnalysisLevel>
     <InvariantGlobalization>false</InvariantGlobalization>
+    <!-- The canonical capture cache keys on the runner's assemblies; without the commit ID they change only with the code. -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 </Project>
