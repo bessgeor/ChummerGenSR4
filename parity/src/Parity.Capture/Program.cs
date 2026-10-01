@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Parity.Capture.Cache;
 using Parity.Capture.Coverage;
 using Parity.Capture.Execution;
 using Parity.Capture.Interop;
@@ -46,6 +47,12 @@ internal static class Program
             provider.GetRequiredService<ChummerUiDriver>(),
             provider.GetRequiredService<TimingRecorder>(),
             provider.GetRequiredService<TimeProvider>()));
+
+        services.AddSingleton<FolderFingerprinter>();
+        services.AddSingleton<CacheEnvironmentReader>();
+        services.AddSingleton<CacheSessionFactory>();
+        services.AddSingleton<CacheKeyBuilder>();
+        services.AddSingleton<CanonicalCaptureCache>();
 
         services.AddSingleton<SideExecutor>();
         services.AddSingleton<PixelComparer>();

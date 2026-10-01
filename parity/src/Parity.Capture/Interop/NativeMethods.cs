@@ -107,6 +107,9 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
 
+    [DllImport("user32.dll")]
+    public static extern uint GetDpiForSystem();
+
     [StructLayout(LayoutKind.Sequential)]
     public struct Rect
     {

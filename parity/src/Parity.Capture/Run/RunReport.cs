@@ -1,3 +1,4 @@
+using Parity.Capture.Cache;
 using Parity.Capture.Staging;
 using Parity.Contracts.CaptureSummary;
 
@@ -33,6 +34,8 @@ internal sealed record RunReport
     public StagedRun? Staged { get; init; }
 
     public string? SettingsOverlay { get; init; }
+
+    public CacheSession? Cache { get; init; }
 
     public required IReadOnlyList<ScreenInfo> Screens { get; init; }
 

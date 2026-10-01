@@ -54,6 +54,9 @@ internal sealed class ReportWriter
                     Files = overlay.Select(file => new OverlayFile { Path = file.RelativePath, Sha256 = file.Sha256, Replaced = file.Replaced }).ToList(),
                 }
                 : null,
+            CanonicalCache = report.Cache is { } cache
+                ? new CanonicalCache { Path = displayPath(cache.Directory), Hits = cache.Hits, Misses = cache.Misses, Stored = cache.Stored }
+                : null,
             Screens = report.Screens.ToList(),
             Cases = report.Cases.Select(item => new CaseExecution
             {
@@ -99,7 +102,9 @@ internal sealed class ReportWriter
     private static SideExecution Side(SideRun run) => new()
     {
         Side = run.Side == RunLayout.CanonicalSide ? Parity.Contracts.CaptureSummary.Side.Canonical : Parity.Contracts.CaptureSummary.Side.Candidate,
-        Source = Source.Live,
+        Source = run.Origin.FromCache ? Source.Cache : Source.Live,
+        CacheEntry = run.Origin.CacheKey,
+        CachedFromRun = run.Origin.CachedFromRun,
         Status = run.Failed ? Status.Failed : Status.Completed,
         DurationMilliseconds = (long)run.Duration.TotalMilliseconds,
         Failure = run.Failure,
