@@ -108,20 +108,20 @@ The comparer SHALL print each row that is not `passed`, the group count and the 
 - **THEN** the comparer exits with status 1
 
 ### Requirement: The comparer runs from the root entry points
-`npm run compare -- --run <run folder>` SHALL run the comparer alone. `npm start` SHALL build the candidate, run capture, and then run the comparer on the run folder that capture wrote, passing it `--no-ocr` and `--tessdata <dir>` when they are given. It SHALL run the comparer when capture exits with 0, 1 or 2, and SHALL NOT run it when capture exits with 3. The exit status of `npm start` SHALL be the higher of the two statuses. It SHALL be 3 when the candidate build fails, when the file through which capture reports its run folder cannot be created or read, or when the comparer exits with a status other than 0, 1 or 2 or leaves no `compare/report.json` whose status matches its exit status, for example because the comparer could not be built.
+`npm run compare -- --run <run folder>` SHALL run the comparer alone. `npm start` SHALL run the comparer on each case's run folder as soon as capture has written it, passing it `--no-ocr` and `--tessdata <dir>` when they are given. It SHALL run the comparer when that case's capture exits with 0, 1 or 2, and SHALL NOT run it when capture exits with 3. The exit status of `npm start` SHALL be the highest capture and compare status of its cases. It SHALL be 3 when the candidate build fails, when the file through which capture reports its run folder cannot be created or read, or when the comparer exits with a status other than 0, 1 or 2 or leaves no `compare/report.json` whose status matches its exit status, for example because the comparer could not be built.
 
 #### Scenario: Capture finds visual differences
-- **WHEN** `npm start` runs and capture exits with status 1
-- **THEN** the comparer runs on that run folder
-- **AND** `npm start` exits with the higher of the two statuses
+- **WHEN** `npm start` runs and a case's capture exits with status 1
+- **THEN** the comparer runs on that case's run folder
+- **AND** `npm start` exits with the highest of the statuses
 
 #### Scenario: Capture setup error
-- **WHEN** capture exits with status 3
-- **THEN** the comparer does not run
+- **WHEN** a case's capture exits with status 3
+- **THEN** the comparer does not run for it
 - **AND** `npm start` exits with status 3
 
 #### Scenario: The comparer cannot be built
-- **WHEN** capture exits with status 0 and the comparer fails to build, so it exits with status 1 and writes no report
+- **WHEN** a case's capture exits with status 0 and the comparer exits with status 1 without writing a report
 - **THEN** `npm start` exits with status 3
 
 ### Requirement: The report accounts for every planned capture

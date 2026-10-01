@@ -4,6 +4,8 @@ Host: Windows 10 Pro 22H2 (10.0.19045), .NET SDK 10.0.401, Node 22.17.0. Canonic
 
 The fixture-tested checks below ran on the tree of the commit "Pin CRLF line endings for the parity and generated C# sources so every checkout builds the same tool assemblies", the last commit that changes code, specs or docs of this change. The commits after it add this file and archive the change; they change no source, case, fixture or setting.
 
+Three small workflow changes were made after the live runs, and unit tests cover them: the per-case report no longer runs in the path that prints a resume hint (results that cannot be read after the graph finished give status 3 without it), the build commands carry the run's abort signal, and a derived triage identity that already names another stored identity gets a different id instead of overwriting it. None changes what a run without an interrupt, an unreadable result or an id collision does, which is every run below, so the live evidence still applies. The wording of two comments and of this file also changed.
+
 The live runs were collected in two sets. Set 1 (L1 to L6) ran on an earlier state of the workflow code. Since then only workflow code changed (the desktop lane's refresh and wait handling, aborting and Ctrl+C, the comparer's step key, the capture step's check of the cases it covered, triage's identities, `package.json`); the capture runner, the comparer, the cases, the fixtures, the settings and the app did not. Set 1's capture and compare results therefore still describe the same tools and inputs. The parts of the evidence that the later workflow changes can change were collected again as set 2 (R1 to R6), and R4 and the Ctrl+C attempts ran on the final code of the host runner.
 
 ## Fixture-tested scope
@@ -15,13 +17,13 @@ These checks use no desktop and no live app.
 | `npm ci` | exit 0, `found 0 vulnerabilities` (an earlier run on the same lock file printed `added 232 packages, and audited 234 packages in 23s`) |
 | `npm run openspec:validate` | `✓ change/add-workflow-graph`, `✓ spec/development-process`, `✓ spec/parity-contracts`, `✓ spec/visual-parity-capture`, `✓ spec/visual-parity-compare`, `Totals: 5 passed, 0 failed (5 items)` |
 | `npm run workflow:typecheck` | no output, exit 0 |
-| `npm run workflow:test` | `# tests 64`, `# pass 64`, `# fail 0` |
+| `npm run workflow:test` | `# tests 67`, `# pass 67`, `# fail 0` |
 | `dotnet build parity/Parity.slnx -c Release` | `0 Warning(s)`, `0 Error(s)` |
 | `npm run contracts:check` | `Generated contracts are up to date (12 files).` |
 | `npm run contracts:test` | `# tests 8`, `# pass 8`, `# fail 0` |
 | `npm run parity:test` | `Passed! - Failed: 0, Passed: 185, Skipped: 0, Total: 185` |
 
-The rows run in the order of the CI job (`npm ci`, type check, tests, parity build, contract drift), followed by the contract and parity tests. Every commit of the branch was also type-checked and tested on its own while the history was assembled (`tsc` and `workflow:test` passed at each commit that has the workspace, 64 of 64 tests at the tip).
+The rows run in the order of the CI job (`npm ci`, type check, tests, parity build, contract drift), followed by the contract and parity tests. Every commit of the branch was also type-checked and tested on its own while the history was assembled (`tsc` and `workflow:test` passed at each commit that has the workspace, 67 of 67 tests at the tip).
 
 ### What the workflow tests cover
 
@@ -86,10 +88,6 @@ Pipelining (from file times, run folders `20261001T154624Z-e496d451` to `2026100
 
 **Finding: a paint race in `career-Шпала - карьера/adept-powers`.** The discrepancy (core 66×12 at 261,79, 444 differing pixels) is in the tab strip: OCR read the canonical strip as `… Martial Arts Spells and Spirits Adept Powers …` and the candidate's as `… Marial Ats Spells and Spirks …`, text that was not completely painted when the capture was taken. Re-running only that case once with `--recapture` (L3) passed with 20 of 20 results, so this is a nondeterministic paint race and not a difference between the executables. Runs: L1 `20261001T154852Z-23d5f14c` (difference), L3 `20261001T162750Z-93b1f9ee` (pass).
 
-### L3: `--recapture` on the case with the difference
-
-`npm.cmd start -- --settings-overlay out/overlays/fixture-books --recapture --case "Шпала - карьера"`, thread `wf-20261001T162747Z-59d511be`, exit 0. The step with the same inputs was recorded by L1, and the run printed `capturing again (--recapture)` and captured it again. The canonical side came from the cache (`1 hits, 0 misses, 0 stored`, entry stored by L1); the candidate ran live. Execution: coverage valid and contiguous, 0 failures. Visual: 20 of 20 passed; compare clear, completeness 23 planned / 20 reported / 3 optional absent; triage 0 clusters. The new run replaced the record of that step, so later threads reuse the passing run.
-
 ### L2: an interrupted run resumed
 
 `npm.cmd start -- --settings-overlay out/overlays/fixture-books --case Diego_v_alpha2_by_bessgeor,spirit --threshold 0.00004`, thread `wf-20261001T162942Z-91c47afa`. The explicit default threshold gives the steps new keys, so both cases are captured again, while the capture runner's cache key does not include the threshold, so the canonical sides hit L1's entries.
@@ -98,17 +96,21 @@ Pipelining (from file times, run folders `20261001T154624Z-e496d451` to `2026100
 - `npm.cmd start -- --resume wf-20261001T162942Z-91c47afa`, exit 0: it printed `Resuming thread …` and `Taking over the desktop lane from process 35084, which is no longer running.`, did not capture or compare `build-Diego_v_alpha2_by_bessgeor` again (its run folder is still `20261001T162945Z-662cdb61`), and captured `build-spirit` in run `20261001T163113Z-eabad815` with the canonical side from the cache.
 - Execution: both cases' coverage valid and contiguous, 0 failures. Visual: both passed (13 of 13 and 14 of 14), both compares clear. Triage: 0 clusters. The lock file was gone afterwards.
 
+### L3: `--recapture` on the case with the difference
+
+`npm.cmd start -- --settings-overlay out/overlays/fixture-books --recapture --case "Шпала - карьера"`, thread `wf-20261001T162747Z-59d511be`, exit 0. The step with the same inputs was recorded by L1, and the run printed `capturing again (--recapture)` and captured it again. The canonical side came from the cache (`1 hits, 0 misses, 0 stored`, entry stored by L1); the candidate ran live. Execution: coverage valid and contiguous, 0 failures. Visual: 20 of 20 passed; compare clear, completeness 23 planned / 20 reported / 3 optional absent; triage 0 clusters. The new run replaced the record of that step, so later threads reuse the passing run.
+
 ### L4: waiting for a running owner, then taking over
 
 A hidden process (ID 36292) held the desktop lane: its ID, this host's name and a token were written into `desktop-lane.lock`. `npm.cmd start -- --settings-overlay out/overlays/fixture-books --case spirit --threshold 0.00005`, thread `wf-20261001T163237Z-d5805404`, printed `Waiting for the desktop lane, held by process 36292 on DESKTOP-6J766BQ since 2026-10-01T16:32:36Z` once, and 12 seconds later had not started the capture. After the holder was stopped it printed `Taking over the desktop lane from process 36292, which is no longer running.`, captured `build-spirit` (run `20261001T163256Z-6c7cddef`, canonical side from the cache) and exited 0: coverage valid and contiguous, 14 of 14 passed, compare clear, lock file gone afterwards.
 
-### L6: one case with `--live-canonical`
-
-`npm.cmd start -- --settings-overlay out/overlays/fixture-books --case test_adept --live-canonical`, thread `wf-20261001T163418Z-4a72f062`, exit 0. The thread printed `canonical cache off (--live-canonical)`; the summary of run `20261001T163421Z-7f786eba` has no cache block and both sides have source `live`. Execution: coverage valid and contiguous, 0 failures, 8 optional absent. Visual: 19 of 19 passed; compare clear, completeness 23 planned / 19 reported / 4 optional absent. Triage: 0 clusters.
-
 ### L5: unchanged inputs in a new thread (no desktop use)
 
 `npm.cmd start -- --settings-overlay out/overlays/fixture-books --only triage`, thread `wf-20261001T163724Z-bae63793`, exit 0 (no discrepancy: the record of the `career-Шпала - карьера` step points to the passing run of L3). The tools were rebuilt by the build node, the environment was read for every case, and all 26 steps (13 captures and 13 compares) were reused, each reported with the thread it came from; no candidate build, capture or compare ran. Triage: 13 cases, 0 clusters, 0 other findings.
+
+### L6: one case with `--live-canonical`
+
+`npm.cmd start -- --settings-overlay out/overlays/fixture-books --case test_adept --live-canonical`, thread `wf-20261001T163418Z-4a72f062`, exit 0. The thread printed `canonical cache off (--live-canonical)`; the summary of run `20261001T163421Z-7f786eba` has no cache block and both sides have source `live`. Execution: coverage valid and contiguous, 0 failures, 8 optional absent. Visual: 19 of 19 passed; compare clear, completeness 23 planned / 19 reported / 4 optional absent. Triage: 0 clusters.
 
 ## Set 2: after the later workflow changes
 
@@ -146,6 +148,10 @@ The same arrangement with a launcher that ends on Ctrl+C (and the workflow's out
 - Triage on real reports had a single discrepancy, so clustering across cases and identity reuse for shifted cores are shown only by the unit tests.
 - A changed screen scale or Windows colour or text setting forcing a new capture is shown by the key tests with a fake environment fingerprint, not by changing the machine's settings.
 - The comparer's step key was exercised live only by its change (R5 recompared every case); a replaced OCR library or language file was tested with files in a temporary folder.
+
+## Archive
+
+`npm run openspec:validate` before the archive: `Totals: 5 passed, 0 failed (5 items)`. `npx openspec archive add-workflow-graph -y` printed `+ 1 added` for `development-process`, `+ 1 added` for `parity-contracts`, `+ 7 added` for `parity-workflow` (created), `+ 1 added` and `~ 1 modified` for `visual-parity-capture`, `~ 1 modified` for `visual-parity-compare`, and `Change 'add-workflow-graph' archived as '2026-10-01-add-workflow-graph'.` It counted 7 of 8 tasks because task 4.2 is this archive step; the archived `tasks.md` has every task checked. The new spec's Purpose was the placeholder the archive writes and was replaced with a description of the capability. `npm run openspec:validate` after the archive and the Purpose edit printed `✓ spec/development-process`, `✓ spec/parity-contracts`, `✓ spec/parity-workflow`, `✓ spec/visual-parity-capture`, `✓ spec/visual-parity-compare` and `Totals: 5 passed, 0 failed (5 items)`.
 
 ## Remaining risks
 

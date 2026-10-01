@@ -18,4 +18,4 @@
 ## 4. Verification and archive
 
 - [x] 4.1 Run live `npm start` on the suite with the sourcebook overlay and the default cache, an interrupted run resumed with `--resume`, a run with `--live-canonical` on one case, `--recapture` on one case, and `--only triage`. Record the canonical hash before and after, execution outcomes apart from visual results, the comparer's counts and completeness, the triage clusters against the comparer's groups, step reuse and cache sources in `verification.md`, separating fixture-tested scope from live evidence and naming what remains unverified.
-- [ ] 4.2 Archive the change with `openspec archive add-workflow-graph`. Evidence: `npm run openspec:validate` passes after the archive, recorded in `verification.md`.
+- [x] 4.2 Archive the change with `openspec archive add-workflow-graph`. Evidence: `npm run openspec:validate` passes after the archive, recorded in `verification.md`.
