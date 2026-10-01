@@ -31,7 +31,7 @@ internal static class Program
         services.AddSingleton<RowAnalyzer>();
         services.AddSingleton<DuplicateGrouper>();
         services.AddSingleton<ReportBuilder>();
-        services.AddSingleton<ReportPrinter>();
+        services.AddSingleton(_ => new ReportPrinter(Console.Out));
         services.AddSingleton<CompareOptionsParser>();
         services.AddSingleton<CompareRun>();
         return services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });

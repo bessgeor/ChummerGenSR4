@@ -1,32 +1,33 @@
+using Parity.Cases;
 using Parity.Contracts.CompareReport;
 
 namespace Parity.Compare.Report;
 
 /// <summary>Prints the rows that did not pass, the duplicate groups and the totals.</summary>
-internal sealed class ReportPrinter
+internal sealed class ReportPrinter(TextWriter output)
 {
     public void Print(CompareReport report, string reportPath)
     {
-        Console.WriteLine("Rows:");
+        output.WriteLine("Rows:");
         foreach (ReportRow row in report.Rows.Where(row => row.Status != RowStatus.Passed))
         {
-            Console.WriteLine($"  {Label(row.Status),-6} {row.Case}/{row.Capture}: {Detail(row)}");
+            output.WriteLine($"  {Label(row.Status),-6} {row.Case}/{row.Capture}: {Detail(row)}");
         }
 
         Dictionary<string, Discrepancy> byId = report.Discrepancies.ToDictionary(item => item.Id, StringComparer.Ordinal);
-        Console.WriteLine($"Groups: {report.Groups.Count}");
+        output.WriteLine($"Groups: {report.Groups.Count}");
         foreach (DiscrepancyGroup group in report.Groups)
         {
             Discrepancy representative = byId[group.Representative];
-            Console.WriteLine($"  {group.Members.Count,3} × {group.Representative} {Rect(representative.Core)}: " +
-                              $"{Text(representative.CanonicalOcr)} → {Text(representative.CandidateOcr)}");
+            output.WriteLine($"  {group.Members.Count,3} × {group.Representative} {Rect(representative.Core)}: " +
+                             $"{Text(representative.CanonicalOcr)} → {Text(representative.CandidateOcr)}");
         }
 
         ReportTotals totals = report.Totals;
-        Console.WriteLine($"Totals: rows {totals.Rows}, passed {totals.Passed}, analyzed {totals.Analyzed}, size mismatches {totals.SizeMismatches}, " +
-                          $"missing {totals.Missing}, failed {totals.Failed}, discrepancies {totals.Discrepancies}, groups {totals.Groups}, OCR errors {totals.OcrErrors}");
-        Console.WriteLine($"Status: {Status(report.Status)} (exit {ReportBuilder.ExitCode(report.Status)})");
-        Console.WriteLine($"Report: {reportPath}");
+        output.WriteLine($"Totals: rows {totals.Rows}, passed {totals.Passed}, analyzed {totals.Analyzed}, size mismatches {totals.SizeMismatches}, " +
+                         $"missing {totals.Missing}, failed {totals.Failed}, discrepancies {totals.Discrepancies}, groups {totals.Groups}, OCR errors {totals.OcrErrors}");
+        output.WriteLine($"Status: {ContractJson.Name(report.Status)} (exit {ReportBuilder.ExitCode(report.Status)})");
+        output.WriteLine($"Report: {reportPath}");
     }
 
     private static string Label(RowStatus status) => status switch
@@ -54,13 +55,6 @@ internal sealed class ReportPrinter
         OcrStatus.Error => $"[error: {reading.Error}]",
         OcrStatus.Empty => "[empty]",
         _ => "[disabled]",
-    };
-
-    private static string Status(ReportStatus status) => status switch
-    {
-        ReportStatus.Clear => "clear",
-        ReportStatus.Differences => "differences",
-        _ => "analysis-failures",
     };
 
     private static string Rect(PixelRect rect) => $"({rect.X},{rect.Y} {rect.Width}×{rect.Height})";

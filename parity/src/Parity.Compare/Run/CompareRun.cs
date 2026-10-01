@@ -62,24 +62,14 @@ internal sealed class CompareRun(
             return SetupError;
         }
 
+        CompareReport report;
         using (ocr)
         {
             Console.WriteLine($"Compare run {results.RunId}: {folder.Root}");
             Console.WriteLine(ocr.Language is null ? "OCR: disabled" : $"OCR: {ocr.Language}");
             try
             {
-                if (Directory.Exists(folder.CompareDirectory))
-                {
-                    Directory.Delete(folder.CompareDirectory, recursive: true);
-                }
-
-                Directory.CreateDirectory(folder.CompareDirectory);
-                List<RowAnalysis> rows = results.Results.Select(row => analyzer.Analyze(row, folder, ocr)).ToList();
-                IReadOnlyList<IReadOnlyList<Finding>> groups = grouper.Group(rows.SelectMany(row => row.Findings).ToList());
-                CompareReport report = builder.Build(results, ocr.Language, rows, groups);
-                File.WriteAllText(folder.ReportPath, ContractJson.Write(report) + "\n", Utf8);
-                printer.Print(report, folder.ReportPath);
-                return ReportBuilder.ExitCode(report.Status);
+                report = Analyze(results, folder, ocr);
             }
             catch (Exception error)
             {
@@ -90,6 +80,34 @@ internal sealed class CompareRun(
                 return SetupError;
             }
         }
+
+        try
+        {
+            printer.Print(report, folder.ReportPath);
+        }
+        catch (Exception error)
+        {
+            // The report is complete and stays; only its summary on the console is missing.
+            Console.Error.WriteLine($"ERROR: the report {folder.ReportPath} was written but could not be printed: {error}");
+            return SetupError;
+        }
+
+        return ReportBuilder.ExitCode(report.Status);
+    }
+
+    private CompareReport Analyze(CaptureResults results, RunFolder folder, IOcrEngine ocr)
+    {
+        if (Directory.Exists(folder.CompareDirectory))
+        {
+            Directory.Delete(folder.CompareDirectory, recursive: true);
+        }
+
+        Directory.CreateDirectory(folder.CompareDirectory);
+        List<RowAnalysis> rows = results.Results.Select(row => analyzer.Analyze(row, folder, ocr)).ToList();
+        IReadOnlyList<IReadOnlyList<Finding>> groups = grouper.Group(rows.SelectMany(row => row.Findings).ToList());
+        CompareReport report = builder.Build(results, ocr.Language, rows, groups);
+        File.WriteAllText(folder.ReportPath, ContractJson.Write(report) + "\n", Utf8);
+        return report;
     }
 
     private static void RemovePartialOutput(RunFolder folder)

@@ -235,6 +235,19 @@ public sealed class CompareRunTests : IDisposable
     }
 
     [Fact]
+    public void A_report_that_cannot_be_printed_stays_written()
+    {
+        AddChange("common", "40", "45");
+        _run.WriteResults();
+
+        int exit = Compare(Text("x"), new FailingWriter()).Execute(["--run", _run.Root]);
+
+        Assert.Equal(3, exit);
+        Assert.Equal(ReportStatus.Differences, Report().Status);
+        Assert.Equal(2, Directory.GetFiles(Path.Combine(_run.Root, "compare", "crops"), "*", SearchOption.AllDirectories).Length);
+    }
+
+    [Fact]
     public void An_empty_run_option_is_a_setup_error() =>
         Assert.Equal(3, Compare(Text("x")).Execute(["--run", ""]));
 
@@ -303,13 +316,21 @@ public sealed class CompareRunTests : IDisposable
 
     private static RowAnalyzer Analyzer() => new(new DiscrepancyLocator(new RegionFinder(), new CropExpander()), new ImageHasher());
 
-    private static CompareRun Compare(IOcrEngineFactory ocr) => new(
+    private static CompareRun Compare(IOcrEngineFactory ocr, TextWriter? output = null) => new(
         new CompareOptionsParser(),
         ocr,
         Analyzer(),
         new DuplicateGrouper(),
         new ReportBuilder(),
-        new ReportPrinter());
+        new ReportPrinter(output ?? Console.Out));
+
+    /// <summary>A console that fails on every write.</summary>
+    private sealed class FailingWriter : TextWriter
+    {
+        public override System.Text.Encoding Encoding => System.Text.Encoding.UTF8;
+
+        public override void Write(char value) => throw new IOException("The console is gone.");
+    }
 
     private CompareReport Report() => ContractJson.ReadReport(File.ReadAllText(Path.Combine(_run.Root, "compare", "report.json")));
 }

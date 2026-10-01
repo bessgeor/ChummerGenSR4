@@ -34,6 +34,10 @@ public static class ContractJson
 
     public static string Write(CompareReportContract document) => JsonSerializer.Serialize(document, ReportOptions);
 
+    /// <summary>A report status spelled as the contract writes it in <c>report.json</c>.</summary>
+    public static string Name(Parity.Contracts.CompareReport.ReportStatus status) =>
+        JsonSerializer.SerializeToElement(status, ReportOptions).GetString()!;
+
     private static T Read<T>(string json, JsonSerializerOptions options)
         where T : class =>
         JsonSerializer.Deserialize<T>(json, options)

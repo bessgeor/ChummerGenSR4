@@ -46,6 +46,17 @@ public sealed class ContractRoundTripTests
     }
 
     [Fact]
+    public void Report_status_names_are_the_schema_values()
+    {
+        JsonNode schema = JsonNode.Parse(File.ReadAllText(Path.Combine(RepositoryPaths.Contracts, "schemas", "parity-compare-report.schema.json")))!;
+        string[] values = schema["definitions"]!["ReportStatus"]!["enum"]!.AsArray().Select(value => value!.GetValue<string>()).ToArray();
+
+        string[] names = Enum.GetValues<Parity.Contracts.CompareReport.ReportStatus>().Select(ContractJson.Name).ToArray();
+
+        Assert.Equal(values.Order(StringComparer.Ordinal), names.Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
     public void Summary_reader_rejects_unknown_property()
     {
         string example = File.ReadAllText(Path.Combine(RepositoryPaths.Contracts, "examples", "parity-capture-summary.example.json"));
