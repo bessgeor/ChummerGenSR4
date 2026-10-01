@@ -7,12 +7,11 @@
     "workflow"
   ],
   "scripts": {
-    "start": "node parity/scripts/start.mjs",
+    "start": "node --import tsx workflow/src/main.ts",
     "parity": "dotnet run --project parity/src/Parity.Capture -c Release --",
     "compare": "dotnet run --project parity/src/Parity.Compare -c Release --",
     "build:candidate": "node parity/scripts/build-candidate.mjs",
     "parity:test": "dotnet test parity/Parity.slnx",
-    "parity:scripts:test": "node --test parity/scripts/tests/start.test.mjs",
     "openspec:validate": "openspec validate --all --strict",
     "contracts:generate": "node contracts/scripts/generate.mjs",
     "contracts:check": "node contracts/scripts/generate.mjs --check",
