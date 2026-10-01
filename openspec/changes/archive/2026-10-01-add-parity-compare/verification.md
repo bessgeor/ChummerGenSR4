@@ -168,6 +168,10 @@ Compare: ran after capture's status 2 with `--no-ocr` (the command line `npm sta
 
 Capture completed on both sides (build, 45.9 s and 46.1 s; 25 performed, 3 optional-absent, 6 skipped-optional, 12 filtered by `--capture`, 0 failed, 0 not-run; indexes 0–45), 1 row, `PASS build-Diego_v_alpha2_by_bessgeor/common: 0 (within-threshold)`, exit 0. `npm run compare` then failed to build (`error CS1029: #error: 'Deliberate build failure for the live check'`, `The build failed. Fix the build errors and run again.`) and exited 1. `npm start` printed `Compare exited with 1 but wrote no …\out\runs\20261001T030848Z-16959076\compare\report.json; it did not analyze the run.` and `Capture exit 0, compare exit 3: exit 3.`, and exited 3. The run folder has no `compare/` folder.
 
+## Archive
+
+`npx openspec archive add-parity-compare --yes` printed `Task status: ✓ Complete`, `visual-parity-capture: update` (`~ 1 modified`), `visual-parity-compare: create` (`+ 8 added`) and `Change 'add-parity-compare' archived as '2026-10-01-add-parity-compare'.` Afterwards `npm run openspec:validate` printed `✓ spec/development-process`, `✓ spec/parity-contracts`, `✓ spec/visual-parity-capture`, `✓ spec/visual-parity-compare` and `Totals: 4 passed, 0 failed (4 items)`. This section was added in the archive commit, after the archive ran.
+
 ## Unverified
 
 - Capture-side nondeterminism: run `20261001T014508Z-74a9c1f5` shows that the canonical executable and a candidate built from the unchanged source can produce differing captures (46 pixels at the top of a scroll bar), and the comparer then reports a discrepancy for it like any other. Its cause is unknown, its frequency is unmeasured (one of the three overlay runs with that candidate and this capture code, one capture out of 33 in that run), and nothing in the capture or the comparer tells such a discrepancy apart from a change in the program.
