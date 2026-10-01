@@ -23,14 +23,23 @@ export async function twoThreads() {
   const root = scratch();
   const store = new InMemoryStore();
   // The fake triage step writes triage.json beside the threads; the real one writes it into the thread folder.
-  const run = async () => {
-    const harness = diagnosisHarness({ spots: twoClusters, root, store });
+  // Each thread's fixture repository gets its own commit date, so the two snapshots, and so the contexts, always differ.
+  const run = async (date: string) => {
+    process.env["GIT_AUTHOR_DATE"] = date;
+    process.env["GIT_COMMITTER_DATE"] = date;
+    let harness;
+    try {
+      harness = diagnosisHarness({ spots: twoClusters, root, store });
+    } finally {
+      delete process.env["GIT_AUTHOR_DATE"];
+      delete process.env["GIT_COMMITTER_DATE"];
+    }
     equal(await harness.start(), 1);
     copyFileSync(join(root, "triage.json"), join(root, "threads", harness.threadId(), "triage.json"));
     return harness;
   };
-  const first = await run();
-  const second = await run();
+  const first = await run("2026-09-01T00:00:00Z");
+  const second = await run("2026-09-02T00:00:00Z");
   const lines: string[] = [];
   const input = async (overrides: Partial<FreezeInput> = {}): Promise<FreezeInput> => ({
     name: "diag", jobKind: "hypothesis", seed: "s", testPercent: 50, reason: null, datasetsFolder: join(root, "datasets"),
