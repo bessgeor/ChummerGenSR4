@@ -10,12 +10,18 @@ import type { EvalRecord } from "./eval-record.js";
 /** The sealed context a workflow record's job saw, and the thread's snapshot beside it. */
 export type RecordContext = { readonly contextFolder: string; readonly sourceFolder: string; readonly manifest: ContextManifest };
 
+/** Whether a record's context and its thread's snapshot are still on disk. */
+export function contextExists(threadFolder: (threadId: string) => string, record: EvalRecord): boolean {
+  const folders = diagnosisFolders(threadFolder(record.threadId));
+  return existsSync(join(folders.cluster(record.subject.id), "context.json")) && existsSync(folders.source);
+}
+
 /** Finds a record's context in its thread's folder; a missing or changed context is a setup error naming it. */
 export function recordContext(threadFolder: (threadId: string) => string, record: EvalRecord): RecordContext {
   const folders = diagnosisFolders(threadFolder(record.threadId));
   const contextFolder = folders.cluster(record.subject.id);
   const path = join(contextFolder, "context.json");
-  if (!existsSync(path) || !existsSync(folders.source)) {
+  if (!contextExists(threadFolder, record)) {
     throw new SetupError(`The context of record ${record.recordId} (${contextFolder}) or its snapshot (${folders.source}) no longer exists.`);
   }
   const manifest = readDocument(path, ContextManifestSchema);
@@ -26,18 +32,19 @@ export function recordContext(threadFolder: (threadId: string) => string, record
 }
 
 /**
- * The hypothesis a challenge record challenged: the explanation of the last succeeded hypothesis of its thread
- * and cluster that finished before the challenge started. Null when there is none.
+ * The hypothesis a challenge record challenged, named by the record itself. Null when the challenge names none, or
+ * names a record that is not in `records` or has no explanation.
  */
 export function challengedHypothesis(records: readonly EvalRecord[], challenge: EvalRecord): { record: EvalRecord; explanation: Explanation } | null {
-  const started = Date.parse(challenge.startedUtc);
-  const candidates = records
-    .filter((item) => item.jobKind === "hypothesis" && item.origin === challenge.origin && item.threadId === challenge.threadId
-      && item.subject.id === challenge.subject.id && item.result.status === "succeeded" && Date.parse(item.finishedUtc) <= started)
-    .sort((left, right) => Date.parse(right.finishedUtc) - Date.parse(left.finishedUtc));
-  for (const item of candidates) {
-    const explanation = HypothesisOutputSchema.parse(item.output).explanation;
-    if (explanation !== null) return { record: item, explanation };
-  }
-  return null;
+  const named = challenge.challenged === null ? undefined : records.find((item) => item.recordId === challenge.challenged);
+  if (named === undefined || named.jobKind !== "hypothesis" || named.result.status !== "succeeded") return null;
+  const explanation = HypothesisOutputSchema.parse(named.output).explanation;
+  return explanation === null ? null : { record: named, explanation };
+}
+
+/** Why a challenge record has no hypothesis to show. */
+export function missingHypothesisMessage(challenge: EvalRecord): string {
+  return challenge.challenged === null
+    ? `Challenge record ${challenge.recordId} does not name the hypothesis it challenged.`
+    : `Challenge record ${challenge.recordId} challenged ${challenge.challenged}, which is not a stored hypothesis with an explanation.`;
 }

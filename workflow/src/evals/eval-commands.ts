@@ -19,6 +19,7 @@ import { resumeEvalRun, runPartitions, startEvalRun, summaryLines } from "./eval
 import { gradeRecords } from "./grader.js";
 import { labelHindsight } from "./hindsight.js";
 import { recordSummary } from "./record-summary.js";
+import { snapshotBaseCheck } from "./snapshot-base.js";
 import { defaultQueueOptions, queueLines, reviewQueue } from "./review-queue.js";
 
 export const evalUsage = `Usage: npm run eval -- <command> [options]
@@ -70,9 +71,10 @@ const records: Command = async (args, context) => {
 };
 
 async function hindsightFor(context: EvalContext): Promise<void> {
-  const summary = await labelHindsight(context.store, readBenchmark(context.paths.benchmark), context.now);
+  const summary = await labelHindsight(context.store, readBenchmark(context.paths.benchmark), context.now, snapshotBaseCheck(context.git, context.paths.threadFolder));
   const grades = Object.entries(summary.grades).map(([grade, count]) => `${grade} ${count}`).join(", ");
-  context.log(`Hindsight: ${summary.graded} answers graded (${grades}); ${summary.changed} labels set.`);
+  context.log(`Hindsight: ${summary.graded} answers graded (${grades}); ${summary.changed} labels set; ${summary.ungraded.length} not graded.`);
+  for (const item of summary.ungraded) context.log(`  ${item.recordId} is not graded by ${item.itemId}: ${item.reason}.`);
 }
 
 const hindsight: Command = async (args, context) => {
@@ -110,7 +112,7 @@ const grade: Command = async (args, context) => {
   const options = CommandOptions.parse("grade", args, ["record", "limit"]);
   const settings = context.agentSettings();
   const ids = options.text("record");
-  const { graded, failed } = await gradeRecords({
+  const { graded, failed, skipped } = await gradeRecords({
     store: context.store, agents: context.agents(settings), choice: settings.jobs.grade, quota: context.quota,
     threadFolder: context.paths.threadFolder, logsFolder: join(context.paths.evalsFolder, "grader", "logs"),
     createScratchFolder: context.createScratchFolder, now: context.now, log: context.log,
@@ -119,7 +121,7 @@ const grade: Command = async (args, context) => {
     recordIds: ids === null ? null : ids.split(",").map((id) => id.trim()).filter((id) => id.length > 0),
     limit: options.text("limit") === null ? null : options.number("limit", 0, 1, Number.MAX_SAFE_INTEGER, true),
   });
-  context.log(`Grader: ${graded} graded, ${failed} failed.`);
+  context.log(`Grader: ${graded} graded, ${failed} failed, ${skipped} not graded (context gone or challenged hypothesis unknown).`);
   return failed > 0 ? 2 : 0;
 };
 
@@ -205,7 +207,7 @@ const certify: Command = async (args, context) => {
   }
   const certificate = outcome.certificate;
   context.log(`Certificate for ${certificate.jobKind}: ${certificate.agent.provider} (${certificate.agent.model ?? "default model"}, effort ${certificate.agent.effort}), `
-    + `${certificate.promptVersion}; ${certificate.metric} ${certificate.passes}/${certificate.samples}, 95% Wilson [${certificate.interval.low.toFixed(3)}, ${certificate.interval.high.toFixed(3)}] `
+    + `${certificate.promptVersion}; ${certificate.metric} ${certificate.passes}/${certificate.items} items, 95% Wilson [${certificate.interval.low.toFixed(3)}, ${certificate.interval.high.toFixed(3)}] `
     + `>= ${certificate.thresholds.minPass}; ${join(folder, `${certificate.jobKind}.json`)}`);
   return 0;
 };

@@ -70,6 +70,10 @@ test("versions are added, never changed, and a changed copy is refused on load",
   const second = await freezeDataset(await fixture.input({ reason: "again" }));
   deepStrictEqual([second.dataset.version, second.dataset.previousHash, second.dataset.reason], [2, first.dataset.datasetHash, "again"]);
   deepStrictEqual(readdirSync(join(fixture.root, "datasets", "diag")).sort(), ["v1", "v2"]);
+  // A version with another seed or test share would move clusters between partitions: the next version keeps both.
+  await rejects(freezeDataset(await fixture.input({ seed: "other" })), /v2 was frozen with seed 's' and 50% test; v3 with seed 'other' and 50% test would move clusters between partitions/);
+  await rejects(freezeDataset(await fixture.input({ testPercent: 10 })), /v3 with seed 's' and 10% test would move clusters/);
+  deepStrictEqual(readdirSync(join(fixture.root, "datasets", "diag")).sort(), ["v1", "v2"]);
   const item = first.dataset.items[0]!;
   writeFileSync(join(datasetFolders(first.folder).context(item.contextHash), "evidence", "1-canonical.png"), "edited");
   await rejects(loadDataset(first.folder), (error: unknown) => error instanceof SetupError && error.message.includes(item.itemId));

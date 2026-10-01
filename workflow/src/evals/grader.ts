@@ -7,11 +7,11 @@ import { jobFolderIn, stageJobFolder } from "../diagnosis/job-folder.js";
 import type { Explanation } from "../diagnosis/job-schemas.js";
 import { context, situation, type PromptPaths } from "../diagnosis/prompts.js";
 import type { QuotaWaiter } from "../diagnosis/quota-waiter.js";
-import type { ScratchFolder } from "../host/scratch-folder.js";
+import { removalFailure, type ScratchFolder } from "../host/scratch-folder.js";
 import { SetupError } from "../host/setup-error.js";
 import { listRecords, noLabels, putRecord, recordNamespace, setLabels, type EvalRecord } from "./eval-record.js";
 import { isGradable } from "./hindsight.js";
-import { challengedHypothesis, recordContext } from "./record-context.js";
+import { challengedHypothesis, contextExists, missingHypothesisMessage, recordContext } from "./record-context.js";
 
 export const gradePromptVersion = "grade-v1";
 
@@ -54,6 +54,7 @@ export function gradePrompt(record: EvalRecord, hypothesis: Explanation | null, 
 
 export type GraderDependencies = {
   readonly store: BaseStore;
+  /** The runner holds the model pool: the grade jobs of a batch run side by side up to its size. */
   readonly agents: AgentRunner;
   readonly choice: AgentChoice;
   readonly quota: QuotaWaiter;
@@ -89,74 +90,99 @@ async function nextGradeRecord(store: BaseStore, gradedId: string): Promise<stri
   }
 }
 
-/** Grades the selected records; returns how many were graded and how many grade jobs failed. */
-export async function gradeRecords(dependencies: GraderDependencies, selection: GradeSelection): Promise<{ graded: number; failed: number }> {
+export type GradeSummary = { readonly graded: number; readonly failed: number; readonly skipped: number };
+
+/** Grades the selected records side by side; a record whose context is gone is logged and left ungraded. */
+export async function gradeRecords(dependencies: GraderDependencies, selection: GradeSelection): Promise<GradeSummary> {
   const all = await listRecords(dependencies.store);
   const chosen = recordsToGrade(all, selection);
   const session = `grade-${dependencies.now().toISOString().replace(/[-:.]/g, "")}`;
-  let graded = 0;
-  let failed = 0;
   dependencies.log(`Grader: ${chosen.length} records on ${dependencies.choice.provider} (${dependencies.choice.model ?? "default model"}, effort ${dependencies.choice.effort}).`);
-  for (const record of chosen) {
-    const found = recordContext(dependencies.threadFolder, record);
-    const hypothesis = record.jobKind === "challenge" ? challengedHypothesis(all, record)?.explanation ?? null : null;
-    if (record.jobKind === "challenge" && hypothesis === null) throw new SetupError(`No hypothesis of record ${record.recordId}'s thread and cluster precedes it.`);
-    for (;;) {
-      const recordId = await nextGradeRecord(dependencies.store, record.recordId);
-      const scratch = dependencies.createScratchFolder("workflow-grade-");
-      let started = dependencies.now();
-      let result: AgentResult<GradeOutput> | { started: false };
-      try {
-        const staged = jobFolderIn(scratch, record.subject.id);
-        const label = `grade ${record.recordId}`;
-        result = await dependencies.agents.run<GradeOutput>({
-          kind: "grade", label, choice: dependencies.choice, schema: GradeOutputSchema, validate: validateGrade,
-          prompt: gradePrompt(record, hypothesis, found.manifest, { contextFolder: staged.context, snapshotFolder: staged.source }),
-          images: found.manifest.members.flatMap((member) => [join(staged.context, member.canonicalCrop), join(staged.context, member.candidateCrop)]),
-          workspace: { folder: staged.context, readOnly: [staged.source] },
-          logFile: join(dependencies.logsFolder, `${recordId.replaceAll("/", "-")}.jsonl`),
-          mayStart: () => {
-            stageJobFolder(staged, found.contextFolder, found.sourceFolder);
-            started = dependencies.now();
-            return true;
-          },
-          ...(dependencies.signal === undefined ? {} : { signal: dependencies.signal }),
-        });
-      } finally {
-        try {
-          scratch.remove();
-        } catch (error) {
-          dependencies.log(`grade ${record.recordId}: the scratch copy ${scratch.path} could not be removed (${(error as Error).message}); remove it by hand.`);
-        }
-      }
-      if (wasNotStarted(result)) throw new Error(`The grade job of ${record.recordId} was not started.`);
-      if (!Number.isFinite(result.durationMs) || result.durationMs < 0) throw new SetupError(`grade ${record.recordId}: the agent runner reported the duration ${result.durationMs} ms.`);
-      const finished = dependencies.now();
-      await putRecord(dependencies.store, {
-        schemaVersion: 2, recordId, jobKind: "grade", origin: "grader", threadId: session, subject: { kind: "eval-record", id: record.recordId },
-        contextHash: record.contextHash, promptVersion: gradePromptVersion,
-        agent: { provider: dependencies.choice.provider, model: dependencies.choice.model, effort: dependencies.choice.effort },
-        startedUtc: started.toISOString(), finishedUtc: finished.toISOString(), durationMs: Math.round(result.durationMs), usage: result.usage,
-        result: result.ok ? { status: "succeeded", message: null } : { status: result.failure.kind, message: result.failure.message },
-        output: result.ok ? result.output : null, labels: noLabels,
-      });
-      if (result.ok) {
-        dependencies.quota.reset();
-        await setLabels(dependencies.store, record, { grader: { score: result.output.score, rationale: result.output.rationale, record: recordId, gradedUtc: finished.toISOString() } });
-        dependencies.log(`grade ${record.recordId}: ${result.output.score}`);
-        graded++;
-        break;
-      }
-      const failure = result.failure;
-      dependencies.log(`grade ${record.recordId}: ${failure.kind}: ${failure.message}`);
-      if (failure.kind === "quota_exhausted") {
-        await dependencies.quota.wait([dependencies.quota.processId], dependencies.signal);
-        continue;
-      }
-      if (failure.kind === "infra") throw new SetupError(`grade ${record.recordId} failed: ${failure.message} (record ${recordId})`);
-      failed++;
-      break;
+  // An infra failure stops the jobs still running beside it before the batch ends.
+  const stop = new AbortController();
+  const signal = dependencies.signal === undefined ? stop.signal : AbortSignal.any([dependencies.signal, stop.signal]);
+  const failure: { error?: unknown } = {};
+  const outcomes = await Promise.allSettled(chosen.map(async (record) => {
+    try {
+      return await gradeOne(dependencies, all, record, session, signal);
+    } catch (error) {
+      if (!("error" in failure)) failure.error = error;
+      stop.abort();
+      throw error;
     }
+  }));
+  if ("error" in failure) throw failure.error;
+  const results = outcomes.map((outcome) => (outcome as PromiseFulfilledResult<"graded" | "failed" | "skipped">).value);
+  const count = (result: string) => results.filter((item) => item === result).length;
+  return { graded: count("graded"), failed: count("failed"), skipped: count("skipped") };
+}
+
+async function gradeOne(
+  dependencies: GraderDependencies, all: readonly EvalRecord[], record: EvalRecord, session: string, signal: AbortSignal,
+): Promise<"graded" | "failed" | "skipped"> {
+  if (!contextExists(dependencies.threadFolder, record)) {
+    dependencies.log(`grade ${record.recordId}: not graded: its context or its thread's snapshot no longer exists.`);
+    return "skipped";
   }
-  return { graded, failed };
+  const found = recordContext(dependencies.threadFolder, record);
+  const hypothesis = record.jobKind === "challenge" ? challengedHypothesis(all, record)?.explanation ?? null : null;
+  if (record.jobKind === "challenge" && hypothesis === null) {
+    dependencies.log(`grade ${record.recordId}: not graded: ${missingHypothesisMessage(record)}`);
+    return "skipped";
+  }
+  for (;;) {
+    const recordId = await nextGradeRecord(dependencies.store, record.recordId);
+    const scratch = dependencies.createScratchFolder("workflow-grade-");
+    const label = `grade ${record.recordId}`;
+    let started = dependencies.now();
+    let result: AgentResult<GradeOutput> | { started: false };
+    try {
+      const staged = jobFolderIn(scratch, record.subject.id);
+      result = await dependencies.agents.run<GradeOutput>({
+        kind: "grade", label, choice: dependencies.choice, schema: GradeOutputSchema, validate: validateGrade,
+        prompt: gradePrompt(record, hypothesis, found.manifest, { contextFolder: staged.context, snapshotFolder: staged.source }),
+        images: found.manifest.members.flatMap((member) => [join(staged.context, member.canonicalCrop), join(staged.context, member.candidateCrop)]),
+        workspace: { folder: staged.context, readOnly: [staged.source] },
+        logFile: join(dependencies.logsFolder, `${recordId.replaceAll("/", "-")}.jsonl`),
+        mayStart: () => {
+          stageJobFolder(staged, found.contextFolder, found.sourceFolder);
+          started = dependencies.now();
+          return true;
+        },
+        signal,
+      });
+    } catch (error) {
+      const leftover = removalFailure(scratch);
+      if (leftover !== null) dependencies.log(`${label}: ${leftover.message}`);
+      throw error;
+    }
+    // The grade is stored first; a copy that stays then fails the batch.
+    const leftover = removalFailure(scratch);
+    if (wasNotStarted(result)) throw leftover ?? new Error(`The grade job of ${record.recordId} was not started.`);
+    if (!Number.isFinite(result.durationMs) || result.durationMs < 0) throw new SetupError(`${label}: the agent runner reported the duration ${result.durationMs} ms.`);
+    const finished = dependencies.now();
+    await putRecord(dependencies.store, {
+      schemaVersion: 2, recordId, jobKind: "grade", origin: "grader", threadId: session, subject: { kind: "eval-record", id: record.recordId }, challenged: null,
+      contextHash: record.contextHash, promptVersion: gradePromptVersion,
+      agent: { provider: dependencies.choice.provider, model: dependencies.choice.model, effort: dependencies.choice.effort },
+      startedUtc: started.toISOString(), finishedUtc: finished.toISOString(), durationMs: Math.round(result.durationMs), usage: result.usage,
+      result: result.ok ? { status: "succeeded", message: null } : { status: result.failure.kind, message: result.failure.message },
+      output: result.ok ? result.output : null, labels: noLabels,
+    });
+    if (leftover !== null) throw leftover;
+    if (result.ok) {
+      dependencies.quota.reset();
+      await setLabels(dependencies.store, record, { grader: { score: result.output.score, rationale: result.output.rationale, record: recordId, gradedUtc: finished.toISOString() } });
+      dependencies.log(`${label}: ${result.output.score}`);
+      return "graded";
+    }
+    const failure = result.failure;
+    dependencies.log(`${label}: ${failure.kind}: ${failure.message}`);
+    if (failure.kind === "quota_exhausted") {
+      await dependencies.quota.wait([dependencies.quota.processId], signal);
+      continue;
+    }
+    if (failure.kind === "infra") throw new SetupError(`${label} failed: ${failure.message} (record ${recordId})`);
+    return "failed";
+  }
 }

@@ -11,11 +11,11 @@ import {
 import { challengePrompt, hypothesisPrompt } from "../diagnosis/prompts.js";
 import type { QuotaWaiter } from "../diagnosis/quota-waiter.js";
 import { validateChallenge, validateHypothesis } from "../diagnosis/validation.js";
-import type { ScratchFolder } from "../host/scratch-folder.js";
+import { removalFailure, type ScratchFolder } from "../host/scratch-folder.js";
 import { SetupError } from "../host/setup-error.js";
 import { readDocument } from "../steps/read-document.js";
 import { datasetFolders, loadDataset, type Dataset, type DatasetItem } from "./dataset.js";
-import { noLabels, putRecord } from "./eval-record.js";
+import { noLabels, putRecord, recordNamespace } from "./eval-record.js";
 import { failedScores, scoreChallenge, scoreHypothesis, type Scores } from "./scoring.js";
 import { wilsonInterval } from "./statistics.js";
 
@@ -54,6 +54,7 @@ export const SampleSchema = z.strictObject({
 });
 export type Sample = z.infer<typeof SampleSchema>;
 
+/** A metric over the items of a run: `count` items have a value, `passes` is the sum of their pass shares over their repetitions. */
 export type MetricSummary = { readonly passes: number; readonly count: number; readonly rate: number | null; readonly interval: { low: number; high: number } | null };
 
 export type RunSummary = {
@@ -71,16 +72,26 @@ export function runFolders(folder: string) {
   return { settings: join(folder, "run.json"), samples: join(folder, "samples"), sample: (key: string) => join(folder, "samples", `${key}.json`), summary: join(folder, "summary.json") };
 }
 
-function metric(values: readonly (boolean | null)[]): MetricSummary {
-  const known = values.filter((value) => value !== null);
-  const passes = known.filter((value) => value).length;
-  return { passes, count: known.length, rate: known.length === 0 ? null : passes / known.length, interval: wilsonInterval(passes, known.length) };
+/** The share of an item's repetitions that pass a metric, by item; items without a value leave out. Repetitions of one item are not independent samples. */
+export function itemShares(samples: readonly Sample[], value: (sample: Sample) => boolean | null): Map<string, number> {
+  const byItem = new Map<string, boolean[]>();
+  for (const sample of samples) {
+    const known = value(sample);
+    if (known !== null) byItem.set(sample.itemId, [...(byItem.get(sample.itemId) ?? []), known]);
+  }
+  return new Map([...byItem].map(([itemId, values]) => [itemId, values.filter((known) => known).length / values.length]));
+}
+
+function metric(samples: readonly Sample[], value: (sample: Sample) => boolean | null): MetricSummary {
+  const shares = [...itemShares(samples, value).values()];
+  const passes = shares.reduce((sum, share) => sum + share, 0);
+  return { passes, count: shares.length, rate: shares.length === 0 ? null : passes / shares.length, interval: wilsonInterval(passes, shares.length) };
 }
 
 export function summarize(runId: string, samples: readonly Sample[], finished: Date): RunSummary {
   return {
     runId, samples: samples.length,
-    metrics: { prediction: metric(samples.map((sample) => sample.prediction)), rootCause: metric(samples.map((sample) => sample.rootCause)) },
+    metrics: { prediction: metric(samples, (sample) => sample.prediction), rootCause: metric(samples, (sample) => sample.rootCause) },
     failures: { invalid_output: samples.filter((sample) => sample.status === "invalid_output").length, refused: samples.filter((sample) => sample.status === "refused").length },
     modelMs: samples.reduce((sum, sample) => sum + sample.durationMs, 0),
     costUsd: samples.reduce((sum, sample) => sum + (sample.costUsd ?? 0), 0),
@@ -162,10 +173,10 @@ async function runSamples(dependencies: EvalRunDependencies, folder: string, set
   dependencies.signal?.addEventListener("abort", stopOnSignal, { once: true });
   if (dependencies.signal?.aborted === true) throw new SetupError(`Eval run ${settings.runId} was stopped before its jobs started.`);
   const outcomes = await Promise.allSettled(missing.map(async (key) => {
-    const separator = key.lastIndexOf("-");
-    const item = dataset.items.find((entry) => entry.itemId === key.slice(0, separator));
-    if (item === undefined) throw new SetupError(`Eval run ${settings.runId} names sample ${key}, whose item the dataset does not have.`);
     try {
+      const separator = key.lastIndexOf("-");
+      const item = dataset.items.find((entry) => entry.itemId === key.slice(0, separator));
+      if (item === undefined) throw new SetupError(`Eval run ${settings.runId} names sample ${key}, whose item the dataset does not have.`);
       const sample = await runSample(dependencies, runner, settings, item, manifests.get(item.itemId)!, Number(key.slice(separator + 1)), stop.signal);
       writeFileSync(paths.sample(key), `${JSON.stringify(sample, null, 2)}\n`);
     } catch (error) {
@@ -182,14 +193,23 @@ async function runSamples(dependencies: EvalRunDependencies, folder: string, set
   return summary;
 }
 
+/** The first attempt of a sample without a stored record: attempts stored by an earlier invocation of the run are never replaced. */
+async function nextAttempt(store: BaseStore, settings: RunSettings, itemId: string, repetition: number): Promise<{ recordId: string; attempt: number }> {
+  for (let attempt = 1; ; attempt++) {
+    const recordId = `${settings.runId}/${itemId}/${repetition}/${attempt}`;
+    if ((await store.get(recordNamespace(settings.jobKind), recordId)) === null) return { recordId, attempt };
+  }
+}
+
 async function runSample(
   dependencies: EvalRunDependencies, runner: AgentRunner, settings: RunSettings, item: DatasetItem, manifest: ContextManifest, repetition: number, signal: AbortSignal,
 ): Promise<Sample> {
   const copies = datasetFolders(settings.dataset.folder);
   const sourceCopy = copies.source(item.sourceIdentity);
   const label = `${settings.jobKind} ${item.itemId}#${repetition}`;
-  for (let attempt = 1; ; attempt++) {
-    const recordId = `${settings.runId}/${item.itemId}/${repetition}/${attempt}`;
+  for (;;) {
+    // Every attempt keeps its record: a resumed run, or a retry after a usage limit, continues after the stored ones.
+    const { recordId, attempt } = await nextAttempt(dependencies.store, settings, item.itemId, repetition);
     const scratch = dependencies.createScratchFolder("workflow-eval-");
     const staged = { context: join(scratch.path, item.clusterId), source: join(scratch.path, "source") };
     let started = dependencies.now();
@@ -214,14 +234,14 @@ async function runSample(
           validate: (output) => validateHypothesis(output, manifest, sourceCopy) })
         : await runner.run<ChallengeOutput>({ ...common, prompt: challengePrompt(manifest, item.hypothesis!, paths), schema: ChallengeOutputSchema,
           validate: (output) => validateChallenge(output, item.hypothesis!, manifest, sourceCopy) });
-    } finally {
-      try {
-        scratch.remove();
-      } catch (error) {
-        dependencies.log(`${label}: the scratch copy ${scratch.path} could not be removed (${(error as Error).message}); remove it by hand.`);
-      }
+    } catch (error) {
+      const leftover = removalFailure(scratch);
+      if (leftover !== null) dependencies.log(`${label}: ${leftover.message}`);
+      throw error;
     }
-    if (wasNotStarted(result)) throw new Error(`${label} was not started.`);
+    // The job's result is stored first; a copy that stays then fails the sample.
+    const leftover = removalFailure(scratch);
+    if (wasNotStarted(result)) throw leftover ?? new Error(`${label} was not started.`);
     if (!Number.isFinite(result.durationMs) || result.durationMs < 0) throw new SetupError(`${label}: the agent runner reported the duration ${result.durationMs} ms.`);
     const durationMs = Math.round(result.durationMs);
     await putRecord(dependencies.store, {
@@ -230,8 +250,9 @@ async function runSample(
       agent: { provider: settings.choice.provider, model: settings.choice.model, effort: settings.choice.effort },
       startedUtc: started.toISOString(), finishedUtc: dependencies.now().toISOString(), durationMs, usage: result.usage,
       result: result.ok ? { status: "succeeded", message: null } : { status: result.failure.kind, message: result.failure.message },
-      output: result.ok ? result.output : null, labels: noLabels,
+      output: result.ok ? result.output : null, challenged: null, labels: noLabels,
     });
+    if (leftover !== null) throw leftover;
     const common = { key: `${item.itemId}-${repetition}`, itemId: item.itemId, clusterId: item.clusterId, repetition, recordId, durationMs, costUsd: result.usage?.costUsd ?? null };
     if (result.ok) {
       dependencies.quota.reset();
@@ -254,7 +275,7 @@ async function runSample(
 
 /** Summary lines of a finished run. */
 export function summaryLines(summary: RunSummary): string[] {
-  const line = (name: string, value: MetricSummary) => `  ${name}: ${value.passes}/${value.count}`
+  const line = (name: string, value: MetricSummary) => `  ${name}: ${Number.isInteger(value.passes) ? value.passes : value.passes.toFixed(2)}/${value.count} items`
     + (value.rate === null ? " (no samples)" : ` = ${value.rate.toFixed(3)}, 95% Wilson [${value.interval!.low.toFixed(3)}, ${value.interval!.high.toFixed(3)}]`);
   return [
     `Eval run ${summary.runId}: ${summary.samples} samples.`,

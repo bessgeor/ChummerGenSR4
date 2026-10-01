@@ -3,15 +3,19 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { InMemoryStore } from "@langchain/langgraph";
-import { processGit } from "../src/diagnosis/source-snapshot.js";
+import { processGit, type Git } from "../src/diagnosis/source-snapshot.js";
 import { addBenchmarkItem, checkBenchmarkItem, isRevert, parsePatch, readBenchmark, rootCauseOfItem, type BenchmarkItem } from "../src/evals/benchmark.js";
 import { getRecord, listRecords, noLabels, putRecord, readRecord, recordNamespace, setLabels } from "../src/evals/eval-record.js";
 import { runEvalCommand } from "../src/evals/eval-commands.js";
-import { labelHindsight } from "../src/evals/hindsight.js";
+import { isGradable, labelHindsight } from "../src/evals/hindsight.js";
+import { challengedHypothesis, missingHypothesisMessage, recordContext } from "../src/evals/record-context.js";
+import { snapshotBaseCheck } from "../src/evals/snapshot-base.js";
 import { gradeExplanation, rootCauseOfExplanation, type RootCause } from "../src/evals/root-cause.js";
 import { SetupError } from "../src/host/setup-error.js";
 import { workflowPaths } from "../src/paths.js";
+import { diagnosisHarness, twoClusters } from "./diagnosis-harness.js";
 import { challengeOutput, evalContext, explanation, fixRepository, hypothesisOutput, record } from "./eval-fixtures.js";
+import { benchmarkItem } from "./eval-threads.js";
 
 const root: RootCause = {
   source: "benchmark:x", mechanism: "layout",
@@ -19,7 +23,7 @@ const root: RootCause = {
 };
 
 test("a version-1 record is read as a workflow record with empty labels, and setting a label keeps the rest", async () => {
-  const { schemaVersion: _version, origin: _origin, labels: _labels, ...rest } = record();
+  const { schemaVersion: _version, origin: _origin, challenged: _challenged, labels: _labels, ...rest } = record();
   const old = { ...rest, schemaVersion: 1, labels: { check: "confirmed" } };
   const upgraded = readRecord(old);
   equal(upgraded.schemaVersion, 2);
@@ -149,7 +153,7 @@ test("hindsight grades the answers before the earliest fix of their cluster, and
   await putRecord(store, record({ recordId: "failed", result: { status: "invalid_output", message: "m" }, output: null }));
   await putRecord(store, record({ recordId: "eval", origin: "eval-run" }));
   await putRecord(store, record({ recordId: "other", subject: { kind: "discrepancy-cluster", id: "d-other" } }));
-  const summary = await labelHindsight(store, [later, item], () => new Date("2026-12-02T00:00:00Z"));
+  const summary = await labelHindsight(store, [later, item], () => new Date("2026-12-02T00:00:00Z"), () => null);
   const grade = async (id: string, kind: "hypothesis" | "challenge" = "hypothesis") => (await getRecord(store, kind, id)).labels.hindsight;
   deepStrictEqual(await grade("right"), { grade: "symbol", item: item.itemId, labelledUtc: "2026-12-02T00:00:00.000Z" });
   equal((await grade("file"))?.grade, "file");
@@ -158,8 +162,51 @@ test("hindsight grades the answers before the earliest fix of their cluster, and
   // Finished after the first fix: graded by the later item only.
   deepStrictEqual(await grade("after-first"), { grade: "symbol", item: "later", labelledUtc: "2026-12-02T00:00:00.000Z" });
   for (const id of ["after-all", "failed", "eval", "other"]) equal(await grade(id), null, id);
-  deepStrictEqual(summary, { graded: 5, changed: 5, grades: { symbol: 2, file: 1, mechanism: 0, wrong: 1, abstained: 1 } });
-  equal((await labelHindsight(store, [later, item], () => new Date())).changed, 0);
+  deepStrictEqual(summary, { graded: 5, changed: 5, grades: { symbol: 2, file: 1, mechanism: 0, wrong: 1, abstained: 1 }, ungraded: [] });
+  equal((await labelHindsight(store, [later, item], () => new Date(), () => null)).changed, 0);
+});
+
+test("hindsight leaves an answer ungraded when its snapshot is not the fix's parent in the files the fix touches", async () => {
+  const harness = diagnosisHarness({ spots: twoClusters });
+  equal(await harness.start(), 1);
+  const threadFolder = (id: string) => join(harness.root, "threads", id);
+  const records = await listRecords(harness.store);
+  const hypothesis = records.find((item) => item.jobKind === "hypothesis" && item.subject.id === "d-0000000000000100")!;
+  const snapshotText = readFileSync(join(recordContext(threadFolder, hypothesis).sourceFolder, "Chummer", "frmCreate.cs"), "utf8");
+  const parent = (text: string | null): Git => (args) => (args[0] === "ls-tree" ? (text === null ? "" : "Chummer/frmCreate.cs\n") : text ?? "");
+  const item = benchmarkItem("d-0000000000000100", "2099-01-01T00:00:00.000Z");
+  const check = (text: string | null, other = hypothesis) => snapshotBaseCheck(parent(text), threadFolder)(other, item);
+  equal(check(snapshotText), null);
+  // Line endings of the checkout do not matter.
+  equal(check(snapshotText.replaceAll("\n", "\r\n")), null);
+  match(check(`${snapshotText}// moved\n`)!, /Chummer\/frmCreate.cs of its snapshot differs from the fix's parent a{12}/);
+  match(check(null)!, /differs from the fix's parent/);
+  match(check(snapshotText, { ...hypothesis, threadId: "wf-gone" })!, /no longer exists/);
+
+  const summary = await labelHindsight(harness.store, [item], () => new Date("2026-12-02T00:00:00Z"), (record, covering) => snapshotBaseCheck(parent(`${snapshotText}// moved\n`), threadFolder)(record, covering));
+  equal(summary.graded, 0);
+  deepStrictEqual(summary.ungraded.map((entry) => entry.recordId).sort(), records.filter((record) => isGradable(record) && record.subject.id === "d-0000000000000100").map((record) => record.recordId).sort());
+  ok(summary.ungraded.every((entry) => entry.itemId === item.itemId && /differs from the fix's parent/.test(entry.reason)));
+  equal((await getRecord(harness.store, "hypothesis", hypothesis.recordId)).labels.hindsight, null);
+  const graded = await labelHindsight(harness.store, [item], () => new Date("2026-12-02T00:00:00Z"), (record, covering) => snapshotBaseCheck(parent(snapshotText), threadFolder)(record, covering));
+  deepStrictEqual([graded.graded > 0, graded.ungraded], [true, []]);
+});
+
+test("a challenge record names the hypothesis it challenged; a record without one has none", async () => {
+  const harness = diagnosisHarness({ spots: twoClusters });
+  equal(await harness.start(), 1);
+  const records = await listRecords(harness.store);
+  const challenge = records.find((item) => item.jobKind === "challenge" && item.subject.id === "d-0000000000000100")!;
+  const hypothesis = records.find((item) => item.jobKind === "hypothesis" && item.subject.id === "d-0000000000000100")!;
+  equal(challenge.challenged, hypothesis.recordId);
+  equal(hypothesis.challenged, null);
+  equal(challengedHypothesis(records, challenge)?.record.recordId, hypothesis.recordId);
+  // A newer hypothesis of the same thread and cluster does not change which one was challenged.
+  const newer = { ...hypothesis, recordId: `${hypothesis.recordId}-newer`, finishedUtc: "2099-01-01T00:00:00.000Z", output: hypothesisOutput(explanation({ claim: "Another claim." })) };
+  equal(challengedHypothesis([...records, newer], challenge)?.record.recordId, hypothesis.recordId);
+  equal(challengedHypothesis(records, { ...challenge, challenged: null }), null);
+  equal(challengedHypothesis(records, { ...challenge, challenged: "nope" }), null);
+  match(missingHypothesisMessage({ ...challenge, challenged: null }), /does not name the hypothesis/);
 });
 
 test("eval records counts records by origin and job kind with their labels", async () => {

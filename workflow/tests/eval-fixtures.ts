@@ -31,7 +31,7 @@ export const challengeOutput = (value: Explanation | null): ChallengeOutput =>
 export function record(overrides: Partial<EvalRecord> = {}): EvalRecord {
   return {
     schemaVersion: 2, recordId: "wf-1/d-0000000000000100/hypothesis/1", jobKind: "hypothesis", origin: "workflow", threadId: "wf-1",
-    subject: { kind: "discrepancy-cluster", id: "d-0000000000000100" }, contextHash: hash("c"), promptVersion: "hypothesis-v1",
+    subject: { kind: "discrepancy-cluster", id: "d-0000000000000100" }, challenged: null, contextHash: hash("c"), promptVersion: "hypothesis-v1",
     agent: { provider: "claude", model: null, effort: "medium" }, startedUtc: "2026-10-01T10:00:00.000Z", finishedUtc: "2026-10-01T10:01:00.000Z",
     durationMs: 60_000, usage: { inputTokens: 10, cachedInputTokens: 0, outputTokens: 5, costUsd: 0.1 },
     result: { status: "succeeded", message: null }, output: hypothesisOutput(), labels: noLabels,

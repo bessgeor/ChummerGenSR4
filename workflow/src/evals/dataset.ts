@@ -10,7 +10,7 @@ import { rootCauseOfItem, type BenchmarkItem } from "./benchmark.js";
 import type { EvalRecord } from "./eval-record.js";
 import { isGradable, itemFor } from "./hindsight.js";
 import { threadObservations, type ObservationRow } from "./observations.js";
-import { challengedHypothesis, recordContext } from "./record-context.js";
+import { challengedHypothesis, contextExists, missingHypothesisMessage, recordContext } from "./record-context.js";
 import { rootCauseOfExplanation, type RootCause } from "./root-cause.js";
 
 const RootCauseSchema = z.strictObject({
@@ -134,14 +134,16 @@ export async function freezeDataset(input: FreezeInput): Promise<{ folder: strin
   if (!/^[a-z0-9][a-z0-9-]*$/.test(input.name)) throw new SetupError(`A dataset name is lower-case letters, digits and dashes, got '${input.name}'.`);
   const drafts = new Map<string, Draft>();
   for (const record of input.records.filter((item) => isGradable(item) && item.jobKind === input.jobKind)) {
-    const contextFolder = join(input.threadFolder(record.threadId), "diagnosis", record.subject.id);
-    if (!existsSync(join(contextFolder, "context.json"))) {
-      input.log(`Freeze: record ${record.recordId} is left out: its context ${contextFolder} no longer exists.`);
+    if (!contextExists(input.threadFolder, record)) {
+      input.log(`Freeze: record ${record.recordId} is left out: its context or its thread's snapshot no longer exists.`);
       continue;
     }
     const found = recordContext(input.threadFolder, record);
     const hypothesis = record.jobKind === "challenge" ? challengedHypothesis(input.records, record)?.explanation ?? null : null;
-    if (record.jobKind === "challenge" && hypothesis === null) throw new SetupError(`No hypothesis of record ${record.recordId}'s thread and cluster precedes it.`);
+    if (record.jobKind === "challenge" && hypothesis === null) {
+      input.log(`Freeze: ${missingHypothesisMessage(record)} It is left out.`);
+      continue;
+    }
     const itemId = sha256Text(`${record.contextHash}:${hypothesis === null ? "" : canonicalJson(hypothesis)}`).slice(0, 16);
     const draft = drafts.get(itemId) ?? {
       clusterId: record.subject.id, contextHash: record.contextHash, sourceIdentity: found.manifest.source.identity, hypothesis, records: [],
@@ -155,7 +157,14 @@ export async function freezeDataset(input: FreezeInput): Promise<{ folder: strin
   const nameFolder = join(input.datasetsFolder, input.name);
   const versions = existsSync(nameFolder) ? readdirSync(nameFolder).map((entry) => /^v(\d+)$/.exec(entry)).flatMap((match) => (match === null ? [] : [Number(match[1])])) : [];
   const previous = versions.length === 0 ? 0 : Math.max(...versions);
-  const previousHash = previous === 0 ? null : readDocument(join(nameFolder, `v${previous}`, "dataset.json"), DatasetSchema).datasetHash;
+  const before = previous === 0 ? null : readDocument(join(nameFolder, `v${previous}`, "dataset.json"), DatasetSchema);
+  // A cluster keeps its partition across versions only while the seed and the share stay: a prompt tuned on the development partition of
+  // one version must never meet its clusters in the test partition of the next.
+  if (before !== null && (before.seed !== input.seed || before.testPercent !== input.testPercent)) {
+    throw new SetupError(`Dataset ${input.name} v${previous} was frozen with seed '${before.seed}' and ${before.testPercent}% test; `
+      + `v${previous + 1} with seed '${input.seed}' and ${input.testPercent}% test would move clusters between partitions. Keep them, or freeze under a new --name.`);
+  }
+  const previousHash = before === null ? null : before.datasetHash;
   const version = previous + 1;
   const partial = join(nameFolder, `v${version}.partial`);
   rmSync(partial, { recursive: true, force: true });

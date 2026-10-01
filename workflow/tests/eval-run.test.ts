@@ -90,10 +90,11 @@ test("an eval run scores every sample of the partition, records each job and wri
   deepStrictEqual([settings.jobKind, settings.partition, settings.repeat, settings.choice.provider, settings.promptVersion, settings.samples.length], ["hypothesis", "test", 2, "claude", "hypothesis-v1", 8]);
   // Two samples answered without an explanation: invalid output.
   deepStrictEqual(summary.failures, { invalid_output: 2, refused: 0 });
-  deepStrictEqual([summary.metrics.prediction.passes, summary.metrics.prediction.count], [6, 8]);
-  // Gold exists for cluster 100 only: four samples, all right.
-  deepStrictEqual([summary.metrics.rootCause.passes, summary.metrics.rootCause.count], [4, 4]);
-  close(summary.metrics.prediction.interval?.low, wilsonInterval(6, 8)!.low);
+  // Repetitions of an item are one sample: the two items of cluster 400 pass half of their repetitions, the two of cluster 100 all of them.
+  deepStrictEqual([summary.metrics.prediction.passes, summary.metrics.prediction.count], [3, 4]);
+  // Gold exists for cluster 100 only: two items, all right.
+  deepStrictEqual([summary.metrics.rootCause.passes, summary.metrics.rootCause.count], [2, 2]);
+  close(summary.metrics.prediction.interval?.low, wilsonInterval(3, 4)!.low);
   close(summary.costUsd, 0.08);
   equal(summary.unknownCosts, 0);
   const records = (await listRecords(run.fixture.store)).filter((record) => record.origin === "eval-run");
@@ -130,6 +131,53 @@ test("a stopped run resumes only its missing samples with the settings it starte
   await rejects(resumeEvalRun(run.dependencies(second), "er-9"), /There is no eval run er-9/);
 });
 
+test("a resumed run keeps the records of its earlier attempts, an infra failure included", async () => {
+  const run = await evalFixture();
+  const start = { datasetFolder: run.folder, partition: "test" as const, repeat: 1, name: null, settings: resolveAgentSettings(undefined) };
+  const failing = new FakeAgents((call): Reply => (call.prompt.includes("d-0000000000000400") ? { failure: { kind: "infra", message: "crash" } } : { answer: hypothesisAnswer() }));
+  await rejects(startEvalRun(run.dependencies(failing), start), (error: unknown) => error instanceof SetupError && /crash/.test(error.message));
+  const failed = (await listRecords(run.fixture.store)).filter((record) => record.origin === "eval-run" && record.result.status === "infra");
+  ok(failed.length >= 1 && failed.every((record) => /\/1\/1$/.test(record.recordId)));
+  await resumeEvalRun(run.dependencies(new FakeAgents()), "er-1");
+  const after = await listRecords(run.fixture.store);
+  for (const record of failed) {
+    deepStrictEqual(after.find((item) => item.recordId === record.recordId), record, record.recordId);
+    const retry = after.find((item) => item.recordId === record.recordId.replace(/\/1$/, "/2"));
+    equal(retry?.result.status, "succeeded", record.recordId);
+  }
+});
+
+test("a scratch copy that cannot be removed fails the sample after its record is stored", async () => {
+  const run = await evalFixture();
+  const stuck: string[] = [];
+  const dependencies = {
+    ...run.dependencies(new FakeAgents()),
+    createScratchFolder: (prefix: string) => {
+      const real = createScratchFolder(prefix);
+      stuck.push(real.path);
+      return { path: real.path, remove: () => { throw new Error("locked by another process"); } };
+    },
+  };
+  try {
+    await rejects(startEvalRun(dependencies, { datasetFolder: run.folder, partition: "test", repeat: 1, name: null, settings: resolveAgentSettings(undefined) }),
+      (error: unknown) => error instanceof SetupError && /could not be removed: locked by another process/.test(error.message));
+    ok((await listRecords(run.fixture.store)).some((record) => record.origin === "eval-run" && record.result.status === "succeeded"));
+    equal(readdirSync(runFolders(join(run.runsFolder, "er-1")).samples).length, 0);
+  } finally {
+    for (const path of stuck) rmSync(path, { recursive: true, force: true });
+  }
+});
+
+test("a run whose sample names an item the dataset lacks fails with a setup error", async () => {
+  const run = await evalFixture();
+  const start = { datasetFolder: run.folder, partition: "test" as const, repeat: 1, name: null, settings: resolveAgentSettings(undefined) };
+  await startEvalRun(run.dependencies(new FakeAgents()), start);
+  const folder = join(run.runsFolder, "er-1");
+  const settings = JSON.parse(readFileSync(runFolders(folder).settings, "utf8")) as RunSettings;
+  writeFileSync(runFolders(folder).settings, JSON.stringify({ ...settings, samples: [...settings.samples, "unknown-1"] }));
+  await rejects(resumeEvalRun(run.dependencies(new FakeAgents()), "er-1"), (error: unknown) => error instanceof SetupError && /sample unknown-1, whose item the dataset does not have/.test(error.message));
+});
+
 test("a challenge run scores the challenger's verdict on each item's hypothesis", async () => {
   const run = await evalFixture("challenge");
   const agents = new FakeAgents((call): Reply => (call.prompt.includes("d-0000000000000100") ? { answer: challengeAnswer() } : { answer: { outcome: "no_alternative", reason: "r", alternative: null } }));
@@ -155,6 +203,12 @@ test("the paired comparison gives the t interval and verdict, and refuses runs i
   equal(comparison.verdict, "no-difference");
   deepStrictEqual(comparison.configurationDifferences, [{ field: "effort", baseline: "medium", candidate: "high" }]);
   deepStrictEqual(comparison.cost, { pairs: 4, meanDifferenceUsd: 0 });
+
+  // Repetitions of an item are one pair: the same five items repeated three times give the same interval, not fifteen pairs.
+  writeRun(join(root, "a3"), { repeat: 3 }, [false, true, false, false, true], 3);
+  writeRun(join(root, "b3"), { repeat: 3 }, [true, true, false, true, true], 3);
+  const repeated = compareRuns(join(root, "a3"), join(root, "b3"), "prediction", new Date("2026-10-02T00:00:00Z"));
+  deepStrictEqual([repeated.pairs, repeated.meanDifference, repeated.interval], [5, comparison.meanDifference, comparison.interval]);
 
   writeRun(join(root, "all"), {}, [true, true, true, true, true]);
   writeRun(join(root, "none"), {}, [false, false, false, false, false]);

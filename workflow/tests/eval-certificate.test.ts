@@ -3,10 +3,10 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { join } from "node:path";
 import { test } from "node:test";
 import { resolveAgentSettings } from "../src/agents/agent-settings.js";
-import { certificatePath, certificateProblems, certify, dispatchedJobKinds, type Certificate } from "../src/evals/certificate.js";
+import { certificatePath, certificateProblems, certify, dispatchedJobKinds, unattendedProblems, type Certificate } from "../src/evals/certificate.js";
 import { runEvalCommand } from "../src/evals/eval-commands.js";
 import { parseArguments } from "../src/options/arguments.js";
-import { resolveRunOptions } from "../src/options/run-options.js";
+import { resolveRunOptions, type RunOptions } from "../src/options/run-options.js";
 import { workflowPaths } from "../src/paths.js";
 import { scratch } from "./diagnosis-fixtures.js";
 import { diagnosisHarness, FakeAgents, twoClusters } from "./diagnosis-harness.js";
@@ -21,11 +21,22 @@ test("a certificate is issued when the interval's lower bound meets the threshol
   const outcome = certify(join(root, "runs", "er-1"), { metric: "prediction", minPass: 0.8, maxMeanCostUsd: null }, join(root, "certificates"), now);
   ok("certificate" in outcome);
   const certificate = outcome.certificate;
-  deepStrictEqual([certificate.jobKind, certificate.agent, certificate.promptVersion, certificate.run, certificate.samples, certificate.passes, certificate.rate],
+  deepStrictEqual([certificate.jobKind, certificate.agent, certificate.promptVersion, certificate.run, certificate.items, certificate.passes, certificate.rate],
     ["hypothesis", { provider: "claude", model: null, effort: "medium" }, "hypothesis-v1", "er-1", 20, 20, 1]);
   ok(certificate.interval.low > 0.83 && certificate.interval.low < 0.84);
   equal(certificate.meanCostUsd, null);
   deepStrictEqual(JSON.parse(readFileSync(certificatePath(join(root, "certificates"), "hypothesis"), "utf8")), certificate);
+});
+
+test("repetitions of an item are one sample: ten items repeated five times certify like ten items", () => {
+  const root = scratch("workflow-certify-");
+  writeRun(join(root, "runs", "ten"), {}, Array.from({ length: 10 }, () => true), 5);
+  const outcome = certify(join(root, "runs", "ten"), { metric: "prediction", minPass: 0.75, maxMeanCostUsd: null }, join(root, "certificates"), now);
+  // Fifty samples would give a lower bound of 0.929; the ten items give 0.722.
+  ok("refused" in outcome && /lower bound 0.72\d of the 95% interval of prediction \(10.00\/10 items\)/.test(outcome.refused.join()), JSON.stringify(outcome));
+  const issued = certify(join(root, "runs", "ten"), { metric: "prediction", minPass: 0.7, maxMeanCostUsd: null }, join(root, "certificates"), now);
+  ok("certificate" in issued);
+  equal(issued.certificate.items, 10);
 });
 
 test("a certificate is refused for a small sample, another partition, an incomplete run or an unknown or high cost, and nothing is written", async () => {
@@ -36,7 +47,7 @@ test("a certificate is refused for a small sample, another partition, an incompl
     return "refused" in outcome ? outcome.refused.join("\n") : "";
   };
   writeRun(join(root, "runs", "three"), {}, [true, true, true]);
-  match(refused("three", 0.8), /lower bound 0.43\d of the 95% interval of prediction \(3\/3\) is below 0.8/);
+  match(refused("three", 0.8), /lower bound 0.43\d of the 95% interval of prediction \(3\.00\/3 items\) is below 0.8/);
   writeRun(join(root, "runs", "development"), { partition: "development" }, Array.from({ length: 20 }, () => true));
   match(refused("development", 0.5), /development partition, not test/);
   writeRun(join(root, "runs", "incomplete"), {}, Array.from({ length: 20 }, () => true));
@@ -60,7 +71,7 @@ function writeCertificate(folder: string, jobKind: "hypothesis" | "challenge", o
   const certificate: Certificate = {
     schemaVersion: 1, jobKind, agent: { provider: jobKind === "hypothesis" ? "claude" : "codex", model: null, effort: "medium" },
     promptVersion: `${jobKind}-v1`, run: "er-1", dataset: { name: "d", version: 1, hash: "h", partition: "test" }, metric: "prediction",
-    samples: 20, passes: 20, rate: 1, interval: { low: 0.84, high: 1 }, thresholds: { minPass: 0.8, maxMeanCostUsd: null }, meanCostUsd: null, issuedUtc: "t",
+    items: 20, passes: 20, rate: 1, interval: { low: 0.84, high: 1 }, thresholds: { minPass: 0.8, maxMeanCostUsd: null }, meanCostUsd: null, issuedUtc: "t",
     ...overrides,
   };
   mkdirSync(folder, { recursive: true });
@@ -83,6 +94,10 @@ test("the gate names each job kind without a valid certificate for the run's con
   writeCertificate(folder, "hypothesis");
   writeCertificate(folder, "challenge");
   deepStrictEqual(certificateProblems(folder, ["hypothesis", "challenge"], settings), []);
+  // Stored options that do not state `unattended` are not unattended, whatever the certificates say.
+  const options = { diagnosis: true, only: null, certificates: join(folder, "none"), agents: settings };
+  deepStrictEqual(unattendedProblems(options as unknown as RunOptions), []);
+  equal(unattendedProblems({ ...options, unattended: true } as unknown as RunOptions).length, 2);
   deepStrictEqual(dispatchedJobKinds({ diagnosis: false, only: null }), []);
   deepStrictEqual(dispatchedJobKinds({ diagnosis: true, only: "triage" }), []);
   deepStrictEqual(dispatchedJobKinds({ diagnosis: true, only: "diagnose" }), ["hypothesis", "challenge"]);

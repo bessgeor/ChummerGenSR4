@@ -16,8 +16,10 @@ export const CertificateSchema = z.strictObject({
   run: z.string().min(1),
   dataset: z.strictObject({ name: z.string(), version: z.number().int(), hash: z.string(), partition: z.literal("test") }),
   metric: z.enum(metrics),
-  samples: z.number().int().positive(),
-  passes: z.number().int().nonnegative(),
+  /** The items with a value of the metric: repetitions of one item count once. */
+  items: z.number().int().positive(),
+  /** The sum over the items of the share of their repetitions that pass. */
+  passes: z.number().nonnegative(),
   rate: z.number().min(0).max(1),
   interval: z.strictObject({ low: z.number(), high: z.number() }),
   thresholds: z.strictObject({ minPass: z.number().min(0).max(1), maxMeanCostUsd: z.number().positive().nullable() }),
@@ -43,7 +45,7 @@ export function certify(runFolder: string, thresholds: Thresholds, certificatesF
   const metric = summary.metrics[thresholds.metric];
   if (metric.interval === null) reasons.push(`no sample has a value of ${thresholds.metric}`);
   else if (metric.interval.low < thresholds.minPass) {
-    reasons.push(`the lower bound ${metric.interval.low.toFixed(3)} of the 95% interval of ${thresholds.metric} (${metric.passes}/${metric.count}) is below ${thresholds.minPass}`);
+    reasons.push(`the lower bound ${metric.interval.low.toFixed(3)} of the 95% interval of ${thresholds.metric} (${metric.passes.toFixed(2)}/${metric.count} items) is below ${thresholds.minPass}`);
   }
   const meanCostUsd: number | null = samples.length > 0 && summary.unknownCosts === 0 ? summary.costUsd / samples.length : null;
   if (thresholds.maxMeanCostUsd !== null) {
@@ -56,7 +58,7 @@ export function certify(runFolder: string, thresholds: Thresholds, certificatesF
     agent: { provider: settings.choice.provider, model: settings.choice.model, effort: settings.choice.effort },
     promptVersion: settings.promptVersion, run: settings.runId,
     dataset: { name: settings.dataset.name, version: settings.dataset.version, hash: settings.dataset.hash, partition: settings.partition },
-    metric: thresholds.metric, samples: metric.count, passes: metric.passes, rate: metric.rate, interval: metric.interval,
+    metric: thresholds.metric, items: metric.count, passes: metric.passes, rate: metric.rate, interval: metric.interval,
     thresholds: { minPass: thresholds.minPass, maxMeanCostUsd: thresholds.maxMeanCostUsd }, meanCostUsd, issuedUtc: now.toISOString(),
   });
   mkdirSync(certificatesFolder, { recursive: true });
@@ -108,8 +110,11 @@ export function dispatchedJobKinds(options: Pick<RunOptions, "diagnosis" | "only
   return ["hypothesis", "challenge"];
 }
 
-/** Why an unattended run may not start; empty for a run that is not unattended (a thread from before the option included). */
+/** The one field of a run's stored options the gate reads; options that do not state `unattended` are not unattended. */
+const UnattendedFlagSchema = z.looseObject({ unattended: z.boolean().default(false) });
+
+/** Why an unattended run may not start; empty for a run that is not unattended. */
 export function unattendedProblems(options: RunOptions): string[] {
-  if ((options.unattended as boolean | undefined) !== true) return [];
+  if (!UnattendedFlagSchema.parse(options).unattended) return [];
   return certificateProblems(options.certificates, dispatchedJobKinds(options), options.agents);
 }

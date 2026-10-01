@@ -1,5 +1,5 @@
 import { deepStrictEqual, equal, match, ok, rejects } from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { InMemoryStore } from "@langchain/langgraph";
@@ -39,6 +39,8 @@ test("the grader grades every answer in a scratch copy of its context and stores
   const { threadId, grader, context, harness } = await gradedThread(() => ({ answer: { score: 0.8, rationale: "The cited label moved." } }));
   equal(await runEvalCommand(["grade"], context), 0);
   equal(grader.calls.length, 4);
+  // The grade jobs of a batch run side by side (the runner holds the pool).
+  ok(grader.peak > 1, `peak ${grader.peak}`);
   for (const call of grader.calls) {
     ok(!call.workspace.folder.startsWith(harness.root), call.workspace.folder);
     deepStrictEqual([...call.workspace.contextFiles].sort(), ["context.json", "evidence"]);
@@ -82,10 +84,33 @@ test("a usage limit waits and grades again; infra and a changed context are setu
   await rejects(runEvalCommand(["grade"], broken.context), (error: unknown) => error instanceof SetupError && /CLI crashed/.test(error.message));
 
   const changed = await gradedThread(() => ({ answer: { score: 0.5, rationale: "r" } }));
-  const path = join(changed.harness.root, "threads", changed.threadId, "diagnosis", "d-0000000000000100", "context.json");
-  writeFileSync(path, readFileSync(path, "utf8").replace("\"known\": false", "\"known\": true"));
+  for (const cluster of ["d-0000000000000100", "d-0000000000000400"]) {
+    const path = join(changed.harness.root, "threads", changed.threadId, "diagnosis", cluster, "context.json");
+    const original = readFileSync(path, "utf8");
+    writeFileSync(path, original.replace("\"known\": false", "\"known\": true"));
+    ok(readFileSync(path, "utf8") !== original, cluster);
+  }
   await rejects(runEvalCommand(["grade"], changed.context), (error: unknown) => error instanceof SetupError && error.message.includes(join("diagnosis", "d-0000000000000100")));
   equal(changed.grader.calls.length, 0);
+});
+
+test("a record whose context is gone is logged and left ungraded, and the others are graded", async () => {
+  const { context, harness, threadId, grader, lines } = await gradedThread(() => ({ answer: { score: 0.6, rationale: "r" } }));
+  rmSync(join(harness.root, "threads", threadId, "diagnosis", "d-0000000000000400"), { recursive: true, force: true });
+  equal(await runEvalCommand(["grade"], context), 0);
+  equal(grader.calls.length, 2);
+  equal(lines.filter((line) => /^grade .*d-0000000000000400.*not graded: its context or its thread.s snapshot no longer exists/.test(line)).length, 2);
+  ok(lines.includes("Grader: 2 graded, 0 failed, 2 not graded (context gone or challenged hypothesis unknown)."));
+  const graded = (await workflowRecords(context)).filter((item) => item.labels.grader !== null).map((item) => item.subject.id);
+  deepStrictEqual([...new Set(graded)], ["d-0000000000000100"]);
+});
+
+test("a challenge that names no hypothesis is not graded", async () => {
+  const { context, lines } = await gradedThread(() => ({ answer: { score: 0.6, rationale: "r" } }));
+  for (const item of (await workflowRecords(context)).filter((entry) => entry.jobKind === "challenge")) await putRecord(context.store, { ...item, challenged: null });
+  equal(await runEvalCommand(["grade"], context), 0);
+  equal(lines.filter((line) => /not graded: Challenge record .* does not name the hypothesis it challenged/.test(line)).length, 2);
+  ok(lines.includes("Grader: 2 graded, 0 failed, 2 not graded (context gone or challenged hypothesis unknown)."));
 });
 
 test("the queue holds disagreements first, then a sample per stratum ordered by the grader's uncertainty", () => {

@@ -1,5 +1,5 @@
 import { SetupError } from "../host/setup-error.js";
-import { readRun, type RunSettings, type Sample } from "./eval-run.js";
+import { itemShares, readRun, type RunSettings, type Sample } from "./eval-run.js";
 import { mean, pairedStatistics, type Interval } from "./statistics.js";
 
 export const metrics = ["prediction", "rootCause"] as const;
@@ -15,7 +15,7 @@ export type Comparison = {
   readonly jobKind: RunSettings["jobKind"];
   readonly partition: RunSettings["partition"];
   readonly metric: Metric;
-  /** Pairs where both runs have a value of the metric. */
+  /** Items where both runs have a value of the metric; repetitions of an item are one pair. */
   readonly pairs: number;
   readonly baselineRate: number | null;
   readonly candidateRate: number | null;
@@ -57,9 +57,14 @@ export function compareRuns(baselineFolder: string, candidateFolder: string, met
   if (problems.length > 0) throw new SetupError(`Eval runs ${baseline.settings.runId} and ${candidate.settings.runId} cannot be paired: ${problems.join("; ")}.`);
 
   const pairs = baseline.settings.samples.map((key) => ({ baseline: baseline.samples.get(key)!, candidate: candidate.samples.get(key)! }));
-  const valued = pairs.filter((pair) => pair.baseline[metric] !== null && pair.candidate[metric] !== null);
-  const rate = (side: "baseline" | "candidate") => mean(valued.map((pair) => Number(pair[side][metric])));
-  const statistics = pairedStatistics(valued.map((pair) => Number(pair.candidate[metric]) - Number(pair.baseline[metric])));
+  // The unit of a pair is an item: its repetitions are not independent samples, so each side gives the share of them that pass.
+  const shares = {
+    baseline: itemShares([...baseline.samples.values()], (sample) => sample[metric]),
+    candidate: itemShares([...candidate.samples.values()], (sample) => sample[metric]),
+  };
+  const valued = [...shares.baseline].filter(([itemId]) => shares.candidate.has(itemId)).map(([itemId, share]) => ({ baseline: share, candidate: shares.candidate.get(itemId)! }));
+  const rate = (side: "baseline" | "candidate") => mean(valued.map((pair) => pair[side]));
+  const statistics = pairedStatistics(valued.map((pair) => pair.candidate - pair.baseline));
   const verdict: Verdict = statistics.interval === null ? "too-few-pairs"
     : statistics.interval.low > 0 ? "improved" : statistics.interval.high < 0 ? "worse" : "no-difference";
   const costed = pairs.filter((pair) => pair.baseline.costUsd !== null && pair.candidate.costUsd !== null);
@@ -83,7 +88,7 @@ const number = (value: number | null, digits = 3) => (value === null ? "n/a" : v
 export function comparisonLines(comparison: Comparison): string[] {
   return [
     `Comparison of ${comparison.candidate} against ${comparison.baseline} on ${comparison.dataset.name} v${comparison.dataset.version} (${comparison.jobKind}, ${comparison.partition}), metric ${comparison.metric}:`,
-    `  ${comparison.pairs} pairs; pass rate ${number(comparison.baselineRate)} -> ${number(comparison.candidateRate)}; mean paired difference ${number(comparison.meanDifference)}, `
+    `  ${comparison.pairs} item pairs; pass rate ${number(comparison.baselineRate)} -> ${number(comparison.candidateRate)}; mean paired difference ${number(comparison.meanDifference)}, `
       + `standard error ${number(comparison.standardError)}, 95% t interval ${comparison.interval === null ? "n/a" : `[${number(comparison.interval.low)}, ${number(comparison.interval.high)}]`}: ${comparison.verdict}`,
     `  model time: mean paired difference ${number(comparison.modelTime.meanDifferenceMs === null ? null : comparison.modelTime.meanDifferenceMs / 1000, 1)} s; `
       + `cost: mean paired difference ${number(comparison.cost.meanDifferenceUsd, 4)} USD over ${comparison.cost.pairs} pairs with both costs known`,

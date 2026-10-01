@@ -251,6 +251,7 @@ export class DiagnosisService {
     const finished = this.dependencies.now();
     const record: EvalRecord = {
       schemaVersion: 2, recordId, jobKind: kind, origin: "workflow", threadId: input.threadId, subject: { kind: "discrepancy-cluster", id: cluster.clusterId },
+      challenged: kind === "challenge" ? cluster.hypothesis!.recordId : null,
       contextHash: cluster.contextHash, promptVersion: kind === "hypothesis" ? hypothesisPromptVersion : challengePromptVersion,
       agent: { provider: choice.provider, model: choice.model, effort: choice.effort },
       startedUtc: started.toISOString(), finishedUtc: finished.toISOString(), durationMs: measuredDuration(label, result),

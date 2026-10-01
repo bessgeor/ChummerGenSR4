@@ -60,6 +60,8 @@ export const EvalRecordSchema = z.strictObject({
   ...common,
   origin: z.enum(origins),
   subject: z.strictObject({ kind: z.enum(["discrepancy-cluster", "eval-record"]), id: z.string().min(1) }),
+  /** For a workflow challenge: the ID of the hypothesis record it challenged; null for every other job. */
+  challenged: z.string().min(1).nullable().default(null),
   labels: LabelsSchema,
 });
 export type EvalRecord = z.infer<typeof EvalRecordSchema>;
@@ -77,7 +79,7 @@ export function readRecord(value: unknown): EvalRecord {
   const version = (value as { schemaVersion?: unknown } | null)?.schemaVersion;
   if (version === 1) {
     const old = EvalRecordV1Schema.parse(value);
-    return { ...old, schemaVersion: 2, origin: "workflow", labels: { ...noLabels, check: old.labels.check } };
+    return { ...old, schemaVersion: 2, origin: "workflow", challenged: null, labels: { ...noLabels, check: old.labels.check } };
   }
   return EvalRecordSchema.parse(value);
 }
