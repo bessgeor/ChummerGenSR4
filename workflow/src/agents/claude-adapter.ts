@@ -155,10 +155,12 @@ export class ClaudeAdapter implements AgentRunner {
         clearTimeout(timer);
         job.signal?.removeEventListener("abort", abort);
         if (pending.length > 0) onLine(pending);
-        log.end();
         state.code = code;
-        if (aborted) reject(new SetupError(`${job.label}: the Claude job was stopped because the run was stopped.`));
-        else resolve(state);
+        // The log is complete before the job's result is used.
+        log.end(() => {
+          if (aborted) reject(new SetupError(`${job.label}: the Claude job was stopped because the run was stopped.`));
+          else resolve(state);
+        });
       };
       // A CLI that cannot start reports an error and may never close.
       child.on("error", (error) => {
