@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using System.Xml.Linq;
 using Parity.Cases;
 
 namespace Parity.Tests;
@@ -54,6 +55,18 @@ public sealed class CaseFileLoaderTests : IDisposable
                 Assert.Equal(67, career.Actions.Count);
                 Assert.Equal(23, career.Actions.OfType<CaptureAction>().Count());
             });
+    }
+
+    [Fact]
+    public void Fixtures_link_no_other_character_file()
+    {
+        foreach (string fixture in Directory.GetFiles(Path.Combine(RepositoryPaths.Root, "parity", "fixtures", "characters"), "*.chum"))
+        {
+            XDocument document = XDocument.Load(fixture);
+            Assert.All(
+                document.Descendants().Where(element => element.Name.LocalName is "file" or "relative"),
+                element => Assert.True(element.Value.Length == 0, $"{Path.GetFileName(fixture)} links {element.Value}"));
+        }
     }
 
     [Fact]

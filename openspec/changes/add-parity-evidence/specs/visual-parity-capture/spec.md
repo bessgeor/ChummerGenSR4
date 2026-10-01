@@ -49,9 +49,13 @@ The capture runner SHALL measure every launch, activation, tab selection, label 
 - **AND** the action's outcome is the same as without the decorator
 
 ### Requirement: The character suite covers the main archetypes
-The case file SHALL include, each with its declared mode, a build and a career face mage, a build and a career rigger, a hacker, a build and a career technomancer, an adept, a free spirit, and a pre-career build and a career Skull Carver, besides the existing build and career characters. Each fixture SHALL be reviewed for names, notes, links and images before it is added. `AGENTS.md` SHALL name the sourcebooks the suite needs and describe the overlay that enables them.
+The case file SHALL include, each with its declared mode, a build and a career face mage, a build and a career rigger, a hacker, a build and a career technomancer, an adept, a free spirit, and a pre-career build and a career Skull Carver, besides the existing build and career characters. Each fixture SHALL be reviewed for names, notes, links and images before it is added, and no fixture SHALL link another character file. `AGENTS.md` SHALL name the sourcebooks the suite needs and describe the overlay that enables them.
 
 #### Scenario: Suite with its overlay
 - **WHEN** a contributor runs `npm start -- --settings-overlay <dir>` with the documented sourcebooks enabled
 - **THEN** every case opens on both executables
 - **AND** the comparer's completeness accounts for every planned capture
+
+#### Scenario: Fixture with a linked character file
+- **WHEN** a fixture's contact or spirit names a linked character file
+- **THEN** the fixture test fails and names the fixture and the link
