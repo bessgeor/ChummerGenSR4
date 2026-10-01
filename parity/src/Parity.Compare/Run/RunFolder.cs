@@ -21,7 +21,9 @@ internal sealed record RunFolder(string Root)
     public string Resolve(string relativePath)
     {
         string full = Path.GetFullPath(Path.Combine(Root, relativePath));
-        return full.StartsWith(Root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+        // A drive root such as D:\ keeps its separator after trimming.
+        string prefix = Path.EndsInDirectorySeparator(Root) ? Root : Root + Path.DirectorySeparatorChar;
+        return full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && full.Length > prefix.Length
             ? full
             : throw new CompareSetupException($"The capture path '{relativePath}' in {ResultsPath} leaves the run folder.");
     }

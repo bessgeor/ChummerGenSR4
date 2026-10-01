@@ -144,6 +144,19 @@ public sealed class CompareRunTests : IDisposable
     }
 
     [Fact]
+    public void A_drive_root_run_folder_resolves_its_capture_paths()
+    {
+        RunFolder root = RunFolder.At(@"Z:\");
+
+        Assert.Equal(@"Z:\captures\build\common.png", root.Resolve("captures/build/common.png"));
+        Assert.Equal(@"Z:\compare\report.json", root.ReportPath);
+    }
+
+    [Fact]
+    public void A_sibling_folder_with_the_same_prefix_leaves_the_run_folder() =>
+        Assert.Throws<CompareSetupException>(() => RunFolder.At(@"Z:\runs\a").Resolve("../ab/common.png"));
+
+    [Fact]
     public void Missing_run_option_is_a_setup_error() =>
         Assert.Equal(3, Compare(Text("x")).Execute([]));
 
