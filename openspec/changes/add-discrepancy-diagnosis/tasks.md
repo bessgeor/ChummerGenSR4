@@ -3,7 +3,7 @@
 ## 1. Agent runner
 
 - [x] 1.1 Add the agent runner port with typed failures, the failure classification, the model pool and the `agents` part of the local profile (per-job-kind provider, model, effort and time limit, pool size, run budget, executables). Evidence: unit tests for the classification of usage-limit, sign-in, refusal and other texts, the pool's bound, profile defaults and an invalid profile, pass.
-- [ ] 1.2 Add the Claude CLI adapter. Evidence: unit tests with a fake CLI for the argument list, the environment without API-key variables, the init event's API-key source guard, structured output, an error result, a malformed answer, a timeout and a crash, pass.
+- [x] 1.2 Add the Claude CLI adapter. Evidence: unit tests with a fake CLI for the argument list, the environment without API-key variables, the init event's API-key source guard, structured output, an error result, a malformed answer, a timeout and a crash, pass.
 - [ ] 1.3 Add the Codex SDK adapter with the pinned `@openai/codex-sdk`. Evidence: unit tests with a fake client for the thread options, the environment and config, the sign-in check, images as input, usage, a failed turn, a command execution and an invalid answer, pass.
 
 ## 2. Diagnosis
