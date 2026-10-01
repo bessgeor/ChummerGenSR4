@@ -4,7 +4,8 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { canonicalJson, ContextManifestSchema, contextHash, sealContext, type ContextInput } from "../src/diagnosis/context.js";
-import { createSourceSnapshot, processGit, type SourceSnapshot } from "../src/diagnosis/source-snapshot.js";
+import { sha256Lines } from "../src/steps/fingerprint.js";
+import { createSourceSnapshot, processGit, sourceLines, type SourceSnapshot } from "../src/diagnosis/source-snapshot.js";
 import { SetupError } from "../src/host/setup-error.js";
 import { plannedCase, readReport, repository, runFolders, scratch, triageDocument, write, type Spot } from "./diagnosis-fixtures.js";
 
@@ -38,6 +39,15 @@ function contextInput(root: string): ContextInput {
   };
 }
 
+test("the source lines of the working tree, without copying, give the identity of its snapshot; any change to a data or source file changes it", async () => {
+  const root = repository();
+  const git = processGit(root);
+  const snapshot = await createSourceSnapshot(root, join(scratch(), "source"), git);
+  equal(sha256Lines(await sourceLines(root, git)), snapshot.identity);
+  // A data file is part of the identity, though it is not an input of the build.
+  write(root, "bin/data/skills.xml", "<skills><skill/></skills>");
+  ok(sha256Lines(await sourceLines(root, git)) !== snapshot.identity);
+});
 test("a sealed context holds the members, scenarios, vocabulary and source identity, with copied crops", async () => {
   const root = scratch();
   const folder = join(root, "diagnosis", "d-0000000000000100");

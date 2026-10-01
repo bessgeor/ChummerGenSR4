@@ -121,6 +121,12 @@ test("failed turns are classified: usage limit and other errors; a thrown stream
   equal(failureOf(error.result).kind, "infra");
   const thrown = await runWith([], environment, job(), { throws: "Codex Exec exited with code 1: usage_limit_reached" });
   equal(failureOf(thrown.result).kind, "quota_exhausted");
+  // The SDK throws the CLI's exit error after the failed turn; it must not replace the turn's own message.
+  const afterTurn = await runWith([{ type: "turn.failed", error: { message: "You've hit your usage limit. Try again in 3 hours." } }], environment, job(),
+    { throws: "Codex Exec exited with code 1: see the log" });
+  equal(failureOf(afterTurn.result).kind, "quota_exhausted");
+  const afterStreamError = await runWith([{ type: "error", message: "stream disconnected" }, { type: "turn.failed", error: { message: "You've hit your usage limit." } }], environment);
+  equal(failureOf(afterStreamError.result).kind, "quota_exhausted");
 });
 
 test("a file change, MCP tool call or web search stops the job as infra; read commands are allowed", async () => {

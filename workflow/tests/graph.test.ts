@@ -14,7 +14,7 @@ import type { InputFingerprints } from "../src/steps/input-fingerprints.js";
 import type { StepContext, StepOutcome } from "../src/steps/step-outcome.js";
 
 const fingerprints: InputFingerprints = {
-  canonicalExecutable: "e", canonicalSupport: "s", canonicalSupportStat: "ss", tessdata: "default", candidate: "c", overlay: "none", captureTools: "ct", compareTools: "mt",
+  canonicalExecutable: "e", canonicalSupport: "s", canonicalSupportStat: "ss", tessdata: "default", candidate: "c", overlay: "none", captureTools: "ct", compareTools: "mt", source: "src",
 };
 
 function plannedCase(name: string): PlannedCase {

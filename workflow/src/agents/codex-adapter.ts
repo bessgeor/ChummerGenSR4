@@ -92,7 +92,9 @@ export class CodexAdapter implements AgentRunner {
     mkdirSync(dirname(job.logFile), { recursive: true });
     const log = createWriteStream(job.logFile);
     let answer: string | null = null;
-    let turnFailure: string | null = null;
+    // The failed turn's own message comes first; a stream error or the SDK's exit error after it is only a fallback.
+    let failedTurn: string | null = null;
+    let streamFailure: string | null = null;
     try {
       const input: Input = [{ type: "text", text: job.prompt }, ...job.images.map((path) => ({ type: "local_image" as const, path }))];
       const turn = await client.startThread(codexThreadOptions(job)).runStreamed(input, { outputSchema: jsonSchemaOf(job.schema), signal: controller.signal });
@@ -103,9 +105,9 @@ export class CodexAdapter implements AgentRunner {
         } else if (event.type === "turn.completed") {
           usage = usageOf(event.usage);
         } else if (event.type === "turn.failed") {
-          turnFailure = event.error.message;
+          failedTurn ??= event.error.message;
         } else if (event.type === "error") {
-          turnFailure = event.message;
+          streamFailure ??= event.message;
         } else if (event.type !== "turn.started") {
           const item = event.item;
           // Codex reads files with commands, which the read-only sandbox keeps from writing or reaching the network.
@@ -118,7 +120,8 @@ export class CodexAdapter implements AgentRunner {
         }
       }
     } catch (error) {
-      if (stopped === null && guard === null) turnFailure = (error as Error).message;
+      // The SDK throws the CLI's exit error after a failed turn.
+      if (stopped === null && guard === null) streamFailure ??= (error as Error).message;
     } finally {
       clearTimeout(timer);
       job.signal?.removeEventListener("abort", abort);
@@ -128,6 +131,7 @@ export class CodexAdapter implements AgentRunner {
     if (stopped === "run") throw new SetupError(`${job.label}: the Codex job was stopped because the run was stopped.`);
     if (guard !== null) return failed(guard);
     if (stopped === "timeout") return failed(failure("infra", `${job.label}: the Codex job ran longer than ${job.choice.timeoutMinutes} minutes and was stopped.`));
+    const turnFailure = failedTurn ?? streamFailure;
     if (turnFailure !== null) return failed(failure(classifyFailure(turnFailure), `${job.label}: ${turnFailure}`));
     if (answer === null) return failed(failure("invalid_output", `${job.label}: the Codex turn ended without an answer.`));
     const parsed = parseAnswer(answer);

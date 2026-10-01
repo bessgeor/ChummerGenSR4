@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
@@ -11,7 +11,8 @@ import type { CheckCapture, CheckCaptureRequest } from "../src/diagnosis/check-c
 import { DiagnosisService } from "../src/diagnosis/diagnosis-service.js";
 import type { ChallengeOutput, HypothesisOutput } from "../src/diagnosis/job-schemas.js";
 import { QuotaWaiter, type Sleep } from "../src/diagnosis/quota-waiter.js";
-import { processGit } from "../src/diagnosis/source-snapshot.js";
+import { processGit, sourceLines } from "../src/diagnosis/source-snapshot.js";
+import { sha256Lines } from "../src/steps/fingerprint.js";
 import { buildWorkflowGraph, type WorkflowSteps } from "../src/graph/workflow-graph.js";
 import { runWorkflow, type RunDependencies } from "../src/graph/run-workflow.js";
 import type { WorkflowStateValue } from "../src/graph/workflow-state.js";
@@ -62,6 +63,8 @@ const delay = (milliseconds: number) => new Promise((resolve) => setTimeout(reso
 export class FakeAgents implements AgentRunner {
   readonly calls: JobCall[] = [];
   readonly events: string[] = [];
+  /** For each job `mayStart` refused: whether a copy of its folders existed anyway. */
+  readonly refusedWithCopy: boolean[] = [];
   running = 0;
   peak = 0;
   private readonly queue: (() => void)[] = [];
@@ -88,6 +91,7 @@ export class FakeAgents implements AgentRunner {
     await this.place();
     this.peak = Math.max(this.peak, this.running);
     if (job.mayStart?.() === false) {
+      this.refusedWithCopy.push(existsSync(job.workspace.folder) || existsSync(job.workspace.readOnly[0]!));
       this.release();
       return notStarted;
     }
@@ -121,9 +125,9 @@ export class FakeAgents implements AgentRunner {
   }
 }
 
-const fingerprints: InputFingerprints = {
-  canonicalExecutable: "e", canonicalSupport: "s", canonicalSupportStat: "ss", tessdata: "default", candidate: "candidate", overlay: "none", captureTools: "ct", compareTools: "mt",
-};
+const fingerprints = (source: string): InputFingerprints => ({
+  canonicalExecutable: "e", canonicalSupport: "s", canonicalSupportStat: "ss", tessdata: "default", candidate: "candidate", overlay: "none", captureTools: "ct", compareTools: "mt", source,
+});
 
 const baseArguments: Arguments = {
   cases: [], captures: [], settingsOverlay: null, threshold: null, caseFile: null, canonicalCache: null,
@@ -149,6 +153,10 @@ export type HarnessOptions = {
   /** What the check capture observes per `case/capture`; anything not named passes. */
   readonly observed?: Readonly<Record<string, "passed" | "failed" | "missing-candidate" | "missing">>;
   readonly checkStatus?: 0 | 1 | 2;
+  /** Makes the scratch folders of the model jobs; by default real ones. */
+  readonly createScratchFolder?: typeof createScratchFolder;
+  /** The source fingerprint the build step reports; by default that of the fixture repository, as it is. */
+  readonly source?: string;
 };
 
 /** A workflow whose host steps are fakes over fixture run folders, with the real diagnosis service and fake agents. */
@@ -163,7 +171,7 @@ export function diagnosisHarness(options: HarnessOptions) {
   const lines: string[] = [];
   const log = (line: string) => lines.push(line);
   const steps: WorkflowSteps = {
-    build: async () => fingerprints,
+    build: async () => fingerprints(options.source ?? sha256Lines(await sourceLines(sourceRepository, processGit(sourceRepository)))),
     capture: async (_context, item): Promise<StepOutcome> => ({ case: item.name, status: 1, runFolder: folders[item.name] ?? join(root, "runs", item.name), key: "k", reusedFrom: null }),
     compare: async (_context, capture) => capture,
     triage: async (input) => {
@@ -174,6 +182,7 @@ export function diagnosisHarness(options: HarnessOptions) {
     ...options.extraSteps,
   };
   const checks: CheckCaptureRequest[] = [];
+  const reportReads: string[] = [];
   const checkCapture: CheckCapture = async (request) => {
     checks.push(request);
     const runFolder = join(root, "check-runs", String(checks.length));
@@ -201,7 +210,10 @@ export function diagnosisHarness(options: HarnessOptions) {
   }), log);
   const diagnosis = new DiagnosisService({
     repositoryRoot: sourceRepository, threadFolder: (threadId) => join(root, "threads", threadId), agents: () => agents, quota,
-    git: processGit(sourceRepository), allCases: () => cases, readReport, checkCapture, createScratchFolder, now: () => new Date("2026-10-01T12:00:00Z"), log,
+    git: processGit(sourceRepository), allCases: () => cases, readReport: (runFolder) => {
+      reportReads.push(runFolder);
+      return readReport(runFolder);
+    }, checkCapture, createScratchFolder: options.createScratchFolder ?? createScratchFolder, now: () => new Date("2026-10-01T12:00:00Z"), log,
   });
   const checkpointer = options.checkpointer ?? new MemorySaver();
   const store = options.store ?? new InMemoryStore();
@@ -221,7 +233,7 @@ export function diagnosisHarness(options: HarnessOptions) {
     ...(options.signal === undefined ? {} : { signal: options.signal }),
   };
   return {
-    root, agents, sleeps, checks, lines, store, checkpointer, graph,
+    root, agents, sleeps, checks, reportReads, lines, store, checkpointer, graph,
     start: (overrides: Partial<Arguments> = {}) => runWorkflow({ kind: "start", arguments: { ...baseArguments, ...overrides } }, dependencies),
     resume: (threadId: string) => runWorkflow({ kind: "resume", threadId }, dependencies),
     threadId: () => /Thread (wf-\S+):/.exec(lines.join("\n"))?.[1] ?? "",

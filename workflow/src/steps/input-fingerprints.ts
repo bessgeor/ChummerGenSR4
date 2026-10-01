@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { SetupError } from "../host/setup-error.js";
 import type { RunOptions } from "../options/run-options.js";
 import type { WorkflowPaths } from "../paths.js";
+import { processGit, sourceLines } from "../diagnosis/source-snapshot.js";
 import { fingerprintFiles, fingerprintFolder, listFiles, sha256File, sha256Lines } from "./fingerprint.js";
 
 /** The folders and files the capture runner's stager copies from the canonical app folder. */
@@ -83,6 +84,8 @@ export const compareInputs: readonly ChangeableInput[] = ["compareTools", "tessd
 export type InputFingerprints = { readonly [Name in ChangeableInput]: string } & {
   /** The canonical support files by content; the stat fingerprint above guards them while the thread runs. */
   readonly canonicalSupport: string;
+  /** The app's source and data files by content (what a diagnosis snapshot holds), when the inputs were taken. */
+  readonly source: string;
 };
 
 export async function currentFingerprints<Name extends ChangeableInput>(
@@ -99,6 +102,7 @@ export async function fingerprintInputs(paths: WorkflowPaths, options: Pick<RunO
   return {
     ...(await currentFingerprints(paths, options, Object.keys(changeable) as ChangeableInput[])) as { readonly [N in ChangeableInput]: string },
     canonicalSupport: await canonicalSupport(paths.canonicalApp),
+    source: sha256Lines(await sourceLines(paths.repositoryRoot, processGit(paths.repositoryRoot))),
   };
 }
 

@@ -107,7 +107,7 @@ export function buildWorkflowGraph(steps: WorkflowSteps, diagnosis: DiagnosisSte
     .addNode("prepare_diagnosis", async (state: WorkflowStateValue) => {
       if (state.triageSummary === null || state.fingerprints === null) throw new Error("Diagnosis ran before triage.");
       const clusters = await diagnosis.prepare({
-        threadId: state.threadId, triagePath: state.triageSummary.path, caseFile: state.options.caseFile, candidate: state.fingerprints.candidate,
+        threadId: state.threadId, triagePath: state.triageSummary.path, caseFile: state.options.caseFile, candidate: state.fingerprints.candidate, source: state.fingerprints.source,
       });
       return { clusters };
     })
@@ -146,7 +146,7 @@ export function buildWorkflowGraph(steps: WorkflowSteps, diagnosis: DiagnosisSte
       (state.options.diagnosis && nodeMode("diagnose", state.options.only) !== "skip" ? "prepare_diagnosis" : END), ["prepare_diagnosis", END])
     .addEdge("prepare_diagnosis", "route_diagnosis")
     .addConditionalEdges("route_diagnosis", (state: WorkflowStateValue) => {
-      const route = nextDiagnosisRoute(state.clusters, state.diagnosisCheck !== null);
+      const route = nextDiagnosisRoute(state.clusters, (state.diagnosisCheck ?? null) !== null);
       switch (route.kind) {
         case "hypothesize":
         case "challenge": return route.clusters.map((clusterId) => new Send(route.kind, { ...state, clusterId }));

@@ -6,7 +6,7 @@ import type { AgentRunners } from "../agents/agent-runners.js";
 import type { PlannedCase } from "../cases/case-plan.js";
 import { CaptureResultsSchema } from "../../../contracts/generated/typescript/parity-capture-results.js";
 import { ExecutionCoverageSchema } from "../../../contracts/generated/typescript/parity-execution-coverage.js";
-import { labelRecord, putRecord, recordNamespace, type EvalRecord } from "../evals/eval-record.js";
+import { labelRecordById, putRecord, recordNamespace, type EvalRecord } from "../evals/eval-record.js";
 import type { ScratchFolder } from "../host/scratch-folder.js";
 import { SetupError } from "../host/setup-error.js";
 import type { RunOptions } from "../options/run-options.js";
@@ -17,14 +17,14 @@ import type { CheckCapture } from "./check-capture.js";
 import type { ClusterDiagnosis, ClusterUpdate, QuotaWaitMark } from "./cluster-diagnosis.js";
 import { diagnosisDocument, writeDiagnosisDocument } from "./diagnosis-document.js";
 import { ContextManifestSchema, contextHash, sealContext, type ContextManifest } from "./context.js";
-import { stageJobFolder } from "./job-folder.js";
+import { jobFolderIn, stageJobFolder } from "./job-folder.js";
 import {
   ChallengeOutputSchema, challengePromptVersion, HypothesisOutputSchema, hypothesisPromptVersion,
   type ChallengeOutput, type Explanation, type HypothesisOutput,
 } from "./job-schemas.js";
 import { challengePrompt, hypothesisPrompt } from "./prompts.js";
 import type { QuotaWaiter } from "./quota-waiter.js";
-import { createSourceSnapshot, type Git } from "./source-snapshot.js";
+import { createSourceSnapshot, snapshotFolders, type Git } from "./source-snapshot.js";
 import { validateChallenge, validateHypothesis } from "./validation.js";
 
 /** Where a thread's diagnosis lives: the snapshot, a context folder per cluster, and the agents' logs. */
@@ -49,7 +49,7 @@ export type DiagnosisDependencies = {
   readonly log: (line: string) => void;
 };
 
-export type PrepareInput = { readonly threadId: string; readonly triagePath: string; readonly caseFile: string; readonly candidate: string };
+export type PrepareInput = { readonly threadId: string; readonly triagePath: string; readonly caseFile: string; readonly candidate: string; readonly source: string };
 
 export type JobInput = {
   readonly threadId: string;
@@ -82,11 +82,26 @@ export class DiagnosisService {
     if (triage.clusters.length === 0) return {};
     const folders = diagnosisFolders(this.dependencies.threadFolder(input.threadId));
     const snapshot = await createSourceSnapshot(this.dependencies.repositoryRoot, folders.source, this.dependencies.git);
+    // The models explain this source, so it must be the source the thread captured: its files by content, as fingerprinted when the build step ended.
+    if (snapshot.identity !== input.source) {
+      throw new SetupError(`The source under ${snapshotFolders.join(", ")} changed since the thread's build step (identity ${input.source.slice(0, 12)}, now ${snapshot.identity.slice(0, 12)}); `
+        + `the pixels do not show this source. Start a new thread.`);
+    }
     this.dependencies.log(`Diagnosis: source snapshot of ${snapshot.files} files at ${snapshot.commit.slice(0, 12)}; ${triage.clusters.length} clusters.`);
     const cases = this.dependencies.allCases(input.caseFile);
+    // Clusters share run folders, and a report is large: read and validate each once.
+    const reports = new Map<string, CompareReport>();
+    const readReport = (runFolder: string): CompareReport => {
+      let report = reports.get(runFolder);
+      if (report === undefined) {
+        report = this.dependencies.readReport(runFolder);
+        reports.set(runFolder, report);
+      }
+      return report;
+    };
     const clusters: Record<string, ClusterDiagnosis> = {};
     for (const cluster of triage.clusters) {
-      const sealed = await sealContext({ triage, clusterId: cluster.id, cases, readReport: this.dependencies.readReport, snapshot, candidate: input.candidate },
+      const sealed = await sealContext({ triage, clusterId: cluster.id, cases, readReport, snapshot, candidate: input.candidate },
         folders.cluster(cluster.id));
       clusters[cluster.id] = {
         clusterId: cluster.id, contextFolder: sealed.folder, contextHash: sealed.hash, status: "pending",
@@ -123,8 +138,8 @@ export class DiagnosisService {
       const cluster = input.clusters[id]!;
       const checked = judge(cluster, observations);
       clusters[id] = checked;
-      if (cluster.hypothesis !== null) await labelRecord(store, "hypothesis", cluster.hypothesis.recordId, checked.outcome);
-      if (cluster.challenge !== null) await labelRecord(store, "challenge", cluster.challenge.recordId, checked.outcome);
+      // Every job of the cluster, the quota and interrupted attempts included.
+      for (const recordId of cluster.records) await labelRecordById(store, recordId, checked.outcome);
       this.dependencies.log(`Diagnosis check: ${id} ${checked.outcome}.`);
     }
     return {
@@ -149,11 +164,20 @@ export class DiagnosisService {
     return manifest;
   }
 
-  private async recordId(store: BaseStore, threadId: string, cluster: ClusterDiagnosis, kind: JobKind): Promise<string> {
-    // A job that a stopped run interrupted, or that failed with infra, may have stored a record the state never saw.
+  /**
+   * The ID of the next record of a kind, and the earlier records of that kind the state never saw: a job that failed
+   * with `infra` stored its record and then ended the run, so only the store knows it.
+   */
+  private async nextRecord(store: BaseStore, threadId: string, cluster: ClusterDiagnosis, kind: JobKind): Promise<{ recordId: string; unlisted: string[] }> {
+    // The listed records of a kind are attempts 1 to n, so a stored record the state does not list comes after them.
+    const unlisted: string[] = [];
     let attempt = cluster.records.filter((id) => id.includes(`/${kind}/`)).length + 1;
-    while ((await store.get(recordNamespace(kind), `${threadId}/${cluster.clusterId}/${kind}/${attempt}`)) !== null) attempt++;
-    return `${threadId}/${cluster.clusterId}/${kind}/${attempt}`;
+    for (;; attempt++) {
+      const id = `${threadId}/${cluster.clusterId}/${kind}/${attempt}`;
+      if ((await store.get(recordNamespace(kind), id)) === null) break;
+      unlisted.push(id);
+    }
+    return { recordId: `${threadId}/${cluster.clusterId}/${kind}/${attempt}`, unlisted };
   }
 
   /** Model time charged to a thread: the state's total, or more when finished jobs of the same step are not in it yet. */
@@ -180,21 +204,23 @@ export class DiagnosisService {
     const folders = diagnosisFolders(this.dependencies.threadFolder(input.threadId));
     const hypothesis: Explanation | null = cluster.hypothesis?.output.explanation ?? null;
     if (kind === "challenge" && hypothesis === null) throw new Error(`${label}: there is no hypothesis to challenge.`);
-    const recordId = await this.recordId(store, input.threadId, cluster, kind);
+    const { recordId, unlisted } = await this.nextRecord(store, input.threadId, cluster, kind);
     const choice = options.agents.jobs[kind];
     const scratch = this.dependencies.createScratchFolder("workflow-job-");
     let started = this.dependencies.now();
     let result: AgentResult<unknown> | NotStarted;
     try {
-      const staged = stageJobFolder(scratch, cluster.clusterId, cluster.contextFolder, folders.source);
+      const staged = jobFolderIn(scratch, cluster.clusterId);
       const paths = { contextFolder: staged.context, snapshotFolder: staged.source };
       const common = {
         kind, label, choice, images: manifest.members.flatMap((member) => [join(staged.context, member.canonicalCrop), join(staged.context, member.candidateCrop)]),
         workspace: { folder: staged.context, readOnly: [staged.source] },
         logFile: join(folders.logs, `${recordId.split("/").slice(1).join("-")}.jsonl`),
-        // Asked when the job gets its place in the model pool, after the jobs queued before it were charged.
+        // Asked when the job gets its place in the model pool, after the jobs queued before it were charged. The
+        // copy is made only now, so jobs that wait or are refused hold none.
         mayStart: () => {
           if (budgetSpent()) return false;
+          stageJobFolder(staged, cluster.contextFolder, folders.source);
           started = this.dependencies.now();
           return true;
         },
@@ -209,7 +235,12 @@ export class DiagnosisService {
         : await runner.run<ChallengeOutput>({ ...common, prompt: challengePrompt(manifest, hypothesis!, paths), schema: ChallengeOutputSchema,
           validate: (output) => validateChallenge(output, hypothesis!, manifest, folders.source) });
     } finally {
-      scratch.remove();
+      // A leftover copy is not a failure of the job: its result is still recorded, and the copy is named for the operator.
+      try {
+        scratch.remove();
+      } catch (error) {
+        this.dependencies.log(`${label}: the scratch copy ${scratch.path} could not be removed (${(error as Error).message}); remove it by hand.`);
+      }
     }
     if (wasNotStarted(result)) return this.budgetExhausted(label, cluster.clusterId, options.agents.runBudgetMinutes);
     const finished = this.dependencies.now();
@@ -224,7 +255,7 @@ export class DiagnosisService {
       labels: { check: null },
     };
     await putRecord(store, record);
-    const records = [...cluster.records, recordId];
+    const records = [...cluster.records, ...unlisted, recordId];
     if (result.ok) {
       this.dependencies.quota.reset();
       const answer = { recordId, provider: choice.provider, model: choice.model, effort: choice.effort };

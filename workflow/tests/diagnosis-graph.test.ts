@@ -8,6 +8,7 @@ import { nextDiagnosisRoute } from "../src/diagnosis/cluster-diagnosis.js";
 import { QuotaWaiter } from "../src/diagnosis/quota-waiter.js";
 import { EvalRecordSchema, recordNamespace } from "../src/evals/eval-record.js";
 import { nodeMode } from "../src/graph/workflow-graph.js";
+import { createScratchFolder } from "../src/host/scratch-folder.js";
 import { scratch, triageDocument } from "./diagnosis-fixtures.js";
 import { challengeAnswer, diagnosisHarness, FakeAgents, hypothesisAnswer, twoClusters, type Reply } from "./diagnosis-harness.js";
 
@@ -98,9 +99,11 @@ test("an infra failure ends the run with 3; the resumed thread runs that job aga
   equal(await harness.resume(threadId), 1);
   deepStrictEqual(agents.calls.map((call) => call.kind), ["hypothesis", "challenge", "challenge"]);
   const cluster = Object.values(await clustersOf(harness))[0]!;
-  deepStrictEqual(cluster.records, [`${threadId}/d-0000000000000100/hypothesis/1`, `${threadId}/d-0000000000000100/challenge/2`]);
+  // The failed attempt's record was stored before the run ended; it is listed and labelled like the others.
+  deepStrictEqual(cluster.records, [`${threadId}/d-0000000000000100/hypothesis/1`, `${threadId}/d-0000000000000100/challenge/1`, `${threadId}/d-0000000000000100/challenge/2`]);
   const first = EvalRecordSchema.parse((await harness.store.get(recordNamespace("challenge"), `${threadId}/d-0000000000000100/challenge/1`))!.value);
   equal(first.result.status, "infra");
+  deepStrictEqual(first.labels, { check: "confirmed" });
 });
 
 test("a usage limit waits 1, 2 and 5 minutes, retries the job, and is never charged to the budget", async () => {
@@ -115,6 +118,11 @@ test("a usage limit waits 1, 2 and 5 minutes, retries the job, and is never char
   equal((await harness.state(harness.threadId())).agentMilliseconds, 2000);
   const record = EvalRecordSchema.parse((await harness.store.get(recordNamespace("hypothesis"), cluster.records[0]!))!.value);
   equal(record.result.status, "quota_exhausted");
+  // The check labels every job of the cluster, the quota attempts too.
+  for (const id of cluster.records) {
+    const kind = id.includes("/hypothesis/") ? "hypothesis" : "challenge";
+    deepStrictEqual(EvalRecordSchema.parse((await harness.store.get(recordNamespace(kind), id))!.value).labels, { check: "confirmed" }, id);
+  }
 });
 
 test("a long usage limit keeps waiting: the graph's step limit does not end the run", async () => {
@@ -195,8 +203,17 @@ test("a job that waited in the model pool does not start once the jobs before it
   deepStrictEqual(harness.agents.calls.map((call) => call.kind), ["hypothesis"]);
   deepStrictEqual(Object.values(await clustersOf(harness)).map((cluster) => cluster.status), ["budget_exhausted", "budget_exhausted"]);
   ok(harness.lines.some((line) => /the run budget of .* is spent; not started/.test(line)));
+  // A job that waits for its place, or is refused it, holds no copy of the source.
+  deepStrictEqual(harness.agents.refusedWithCopy, [false]);
   const state = await harness.state(harness.threadId());
   equal(state.agentMilliseconds, 1000);
+});
+
+test("diagnosis refuses a source that differs from the one fingerprinted when the build step ended, and no job runs", async () => {
+  const harness = diagnosisHarness({ spots: [twoClusters[0]!], source: "0".repeat(64) });
+  equal(await harness.start(), 3);
+  equal(harness.agents.calls.length, 0);
+  ok(harness.lines.some((line) => /Setup error: The source under Chummer, bin\/data, bin\/lang changed since the thread's build step .*Start a new thread/.test(line)), harness.lines.join("\n"));
 });
 
 test("a job sees a copy of its context and the snapshot outside the repository and the thread, which is removed afterwards", async () => {
@@ -218,6 +235,31 @@ test("a duration or cost the agent runner reports below zero fails the run inste
   const harness = diagnosisHarness({ spots: [twoClusters[0]!], agents: new FakeAgents(undefined, Number.POSITIVE_INFINITY, -5) });
   equal(await harness.start(), 3);
   ok(harness.lines.some((line) => /reported the duration -5 ms/.test(line)));
+});
+
+test("a scratch copy that cannot be removed is named in the log and does not replace the job's result", async () => {
+  const real: ReturnType<typeof createScratchFolder>[] = [];
+  const failing = (prefix: string) => {
+    const folder = createScratchFolder(prefix);
+    real.push(folder);
+    return { ...folder, remove: () => { throw new Error("EBUSY: resource busy or locked"); } };
+  };
+  const harness = diagnosisHarness({ spots: [twoClusters[0]!], createScratchFolder: failing });
+  equal(await harness.start(), 1);
+  for (const folder of real) folder.remove();
+  equal(Object.values(await clustersOf(harness))[0]!.status, "challenged");
+  ok(harness.lines.some((line) => /scratch copy .* could not be removed \(EBUSY: resource busy or locked\); remove it by hand/.test(line)));
+});
+
+test("each run folder's report is read once for all clusters", async () => {
+  const spots = [
+    { case: "build-alpha", capture: "skills", x: 100 }, { case: "build-alpha", capture: "common", x: 100 },
+    { case: "build-alpha", capture: "skills", x: 400 }, { case: "build-alpha", capture: "common", x: 400 },
+  ];
+  const harness = diagnosisHarness({ spots });
+  equal(await harness.start(), 1);
+  equal(Object.keys(await clustersOf(harness)).length, 2);
+  equal(harness.reportReads.length, new Set(harness.reportReads).size);
 });
 
 test("--no-diagnosis and --only triage run no model job; no cluster ends the run after preparing nothing", async () => {

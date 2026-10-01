@@ -30,17 +30,30 @@ export function processGit(repositoryRoot: string): Git {
   };
 }
 
+/** The tracked and untracked, not ignored, files of the snapshot folders that exist in the working tree, sorted. */
+function sourcePaths(repositoryRoot: string, git: Git): string[] {
+  const listed = git(["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", ...snapshotFolders])
+    .split("\0").filter((path) => path.length > 0);
+  const paths = [...new Set(listed)].filter((path) => existsSync(join(repositoryRoot, path)))
+    .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+  if (paths.length === 0) throw new SetupError(`git lists no file under ${snapshotFolders.join(", ")} in ${repositoryRoot}.`);
+  return paths;
+}
+
+/** The lines (`path<TAB>SHA-256`) whose hash is the identity of the snapshot the working tree would give now, without copying anything. */
+export async function sourceLines(repositoryRoot: string, git: Git): Promise<string[]> {
+  const lines: string[] = [];
+  for (const path of sourcePaths(repositoryRoot, git)) lines.push(`${path}\t${await sha256File(join(repositoryRoot, path))}`);
+  return lines;
+}
+
 /**
  * Copies the tracked and untracked, not ignored, files of the snapshot folders as they are in the working tree
  * (the state the candidate is built from) into `folder`, replacing what was there. Files git tracks but the
  * working tree deleted are not part of it.
  */
 export async function createSourceSnapshot(repositoryRoot: string, folder: string, git: Git): Promise<SourceSnapshot> {
-  const listed = git(["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", ...snapshotFolders])
-    .split("\0").filter((path) => path.length > 0);
-  const paths = [...new Set(listed)].filter((path) => existsSync(join(repositoryRoot, path)))
-    .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
-  if (paths.length === 0) throw new SetupError(`git lists no file under ${snapshotFolders.join(", ")} in ${repositoryRoot}.`);
+  const paths = sourcePaths(repositoryRoot, git);
   rmSync(folder, { recursive: true, force: true });
   const lines: string[] = [];
   for (const path of paths) {

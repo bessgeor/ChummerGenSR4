@@ -62,7 +62,8 @@ function report(state: WorkflowStateValue, readCase: RunDependencies["readCase"]
     log(`Triage: ${triage.discrepancies} discrepancies in ${triage.clusters} clusters (${triage.newClusters} new), `
       + `${triage.otherFindings} other findings; ${triage.path}`);
   }
-  for (const line of describeDiagnosis(state.clusters, state.diagnosisCheck, state.diagnosisPath)) log(line);
+  // A thread checkpointed before diagnosis existed has no such fields at all.
+  for (const line of describeDiagnosis(state.clusters ?? {}, state.diagnosisCheck ?? null, state.diagnosisPath ?? null)) log(line);
 }
 
 async function start(command: Extract<Command, { kind: "start" }>, dependencies: RunDependencies): Promise<{ threadId: string; input: WorkflowStateValue }> {

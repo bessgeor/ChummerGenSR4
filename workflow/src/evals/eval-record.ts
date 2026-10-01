@@ -48,3 +48,14 @@ export async function labelRecord(store: BaseStore, jobKind: EvalRecord["jobKind
   const record = await getRecord(store, jobKind, recordId);
   await putRecord(store, { ...record, labels: { ...record.labels, check } });
 }
+
+/** Sets the check label of a stored record whose job kind is not known: the record says it, in its own namespace. */
+export async function labelRecordById(store: BaseStore, recordId: string, check: CheckLabel): Promise<void> {
+  for (const jobKind of jobKinds) {
+    if ((await store.get(recordNamespace(jobKind), recordId)) !== null) {
+      await labelRecord(store, jobKind, recordId, check);
+      return;
+    }
+  }
+  throw new SetupError(`The eval record ${recordId} is in no job kind's namespace of the store.`);
+}

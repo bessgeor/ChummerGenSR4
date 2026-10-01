@@ -167,3 +167,42 @@ test("the resolved program is the one that starts", async () => {
   ok((await adapter.run(job())).ok);
   equal(fake.calls[0]!.command, "C:/found/claude.exe");
 });
+
+test("a crash without a result is classified from the CLI's own words, not from model text or file contents in the stream", async () => {
+  const read = JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", content: "// the usage limit reached message, weekly limit, content policy" }] } });
+  const said = JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "I hit your usage limit" }] } });
+  const crash = await runWith([{ lines: [init(), read, said], stderr: "Segmentation fault", code: 3 }]);
+  equal(failureOf(crash.result).kind, "infra");
+  const reported = await runWith([{ lines: [init(), JSON.stringify({ type: "error", error: { message: "Claude AI usage limit reached|1790886000" } })], code: 1 }]);
+  equal(failureOf(reported.result).kind, "quota_exhausted");
+});
+
+/** The stream lines of Read calls: the assistant's requests, then the user event with their results (`failed` ones are errors). */
+const reads = (paths: string[], failed: string[] = []) => [
+  JSON.stringify({ type: "assistant", message: { content: paths.map((file_path, index) => ({ type: "tool_use", id: `read-${index}`, name: "Read", input: { file_path } })) } }),
+  JSON.stringify({ type: "user", message: { content: paths.map((file_path, index) => ({ type: "tool_result", tool_use_id: `read-${index}`, ...(failed.includes(file_path) ? { is_error: true } : {}) })) } }),
+];
+
+test("the evidence images are listed in the prompt and the model must open every one with a Read that succeeds", async () => {
+  const folder = mkdtempSync(join(tmpdir(), "workflow-claude-"));
+  const images = [join(folder, "evidence", "1-canonical.png"), join(folder, "evidence", "1-candidate.png")];
+  const answer = result({ structured_output: { answer: 1 } });
+  const seen = await runWith([{ lines: [init(), ...reads(images), answer], code: 0 }], {}, job({ images }));
+  ok(seen.result.ok);
+  ok(seen.calls[0]!.input.startsWith("What is the answer?") && images.every((image) => seen.calls[0]!.input.includes(`- ${image}`)));
+  // A relative path counts when it names the file, whatever its letter case on Windows.
+  const relative = await runWith([{ lines: [init(), ...reads(["evidence/1-canonical.png", images[1]!.toUpperCase()]), answer], code: 0 }], {}, job({ images, workspace: { folder, readOnly: [] } }));
+  ok(relative.result.ok);
+  const skipped = await runWith([{ lines: [init(), ...reads([images[0]!]), answer], code: 0 }], {}, job({ images }));
+  const failure = failureOf(skipped.result);
+  equal(failure.kind, "invalid_output");
+  ok(/without a successful Read of 1 of 2 evidence images/.test(failure.message) && failure.message.includes("1-candidate.png"));
+  // A Read that was requested and failed (a denial, an unreadable image) did not show the model the crop.
+  const failed = await runWith([{ lines: [init(), ...reads(images, [images[1]!]), answer], code: 0 }], {}, job({ images }));
+  const failedFailure = failureOf(failed.result);
+  equal(failedFailure.kind, "invalid_output");
+  ok(/1 of 2 evidence images/.test(failedFailure.message) && failedFailure.message.includes("1-candidate.png"));
+  // A request that never got a result does not count either.
+  const unanswered = await runWith([{ lines: [init(), reads(images)[0]!, answer], code: 0 }], {}, job({ images }));
+  equal(failureOf(unanswered.result).kind, "invalid_output");
+});

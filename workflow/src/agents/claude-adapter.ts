@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createWriteStream, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 import { killTree } from "../host/host-runner.js";
 import { SetupError } from "../host/setup-error.js";
 import type { AgentFailure, AgentJob, AgentResult, AgentRunner, AgentUsage } from "./agent-job.js";
@@ -56,8 +56,32 @@ function parseEvent(line: string): Record<string, unknown> | null {
   }
 }
 
+/** The prompt, followed by the images the model is shown: the CLI is given text only, so the model opens them with Read. */
+export function promptWithImages<T>(job: AgentJob<T>): string {
+  if (job.images.length === 0) return job.prompt;
+  return `${job.prompt}\n\nEvidence images: before you answer, open each of these with the Read tool and look at it.\n${job.images.map((image) => `- ${image}`).join("\n")}\n`;
+}
+
+type ContentBlock = { type?: string; id?: string; name?: string; input?: { file_path?: unknown }; tool_use_id?: string; is_error?: boolean };
+
+function contentOf(event: Record<string, unknown>): ContentBlock[] {
+  const content = (event["message"] as { content?: unknown } | undefined)?.content;
+  return Array.isArray(content) ? content as ContentBlock[] : [];
+}
+
+/** The Read requests of an assistant event: the tool call ID with the absolute, lower-case path. */
+function readRequests(event: Record<string, unknown>, folder: string): [string, string][] {
+  return contentOf(event).flatMap((block) => block.type === "tool_use" && block.name === "Read" && block.id !== undefined && typeof block.input?.file_path === "string"
+    ? [[block.id, resolve(folder, block.input.file_path).toLowerCase()] as [string, string]] : []);
+}
+
+/** The IDs of the tool calls a user event answers without an error: a request that failed did not show the model its file. */
+function succeededCalls(event: Record<string, unknown>): string[] {
+  return contentOf(event).flatMap((block) => (block.type === "tool_result" && block.tool_use_id !== undefined && block.is_error !== true ? [block.tool_use_id] : []));
+}
+
 /** How a run of the CLI ended, before its answer is judged. */
-type Ending = { result: ResultEvent | null; guard: AgentFailure | null; timedOut: boolean; code: number | null; stderr: string; tail: string[] };
+type Ending = { result: ResultEvent | null; guard: AgentFailure | null; timedOut: boolean; code: number | null; stderr: string; diagnostics: string[]; read: string[] };
 
 /**
  * Runs a job with the Claude Code CLI in headless mode, under the user's Claude subscription: read-only tools,
@@ -89,7 +113,8 @@ export class ClaudeAdapter implements AgentRunner {
     if (ending.timedOut) return failed(failure("infra", `${job.label}: the Claude job ran longer than ${job.choice.timeoutMinutes} minutes and was stopped.`));
     const result = ending.result;
     if (result === null) {
-      const text = `${ending.stderr}\n${ending.tail.join("\n")}`.trim();
+      // The CLI's own words only: stderr, stdout lines that are no events, and error events. Model text and file contents are not.
+      const text = `${ending.stderr}\n${ending.diagnostics.join("\n")}`.trim();
       return failed(failure(classifyFailure(text), `${job.label}: claude exited with ${ending.code} without a result: ${text}`));
     }
     if (result.subtype?.startsWith("error_max_structured_output") === true) {
@@ -99,6 +124,11 @@ export class ClaudeAdapter implements AgentRunner {
     if (result.is_error === true) {
       const text = `${result.result ?? ""} (${result.subtype ?? "error"}, status ${result.api_error_status ?? "none"})`;
       return failed(failure(classifyFailure(text, result.api_error_status ?? null), `${job.label}: ${text}`));
+    }
+    // The Codex adapter attaches the crops; Claude has to open them, so both providers work from the same evidence.
+    const unseen = job.images.filter((image) => !ending.read.includes(resolve(image).toLowerCase()));
+    if (unseen.length > 0) {
+      return failed(failure("invalid_output", `${job.label}: the model answered without a successful Read of ${unseen.length} of ${job.images.length} evidence images (${unseen.join(", ")}).`));
     }
     if (result.structured_output === undefined) {
       return failed(failure("invalid_output", `${job.label}: the result has no structured output: ${(result.result ?? "").slice(0, 500)}`));
@@ -118,14 +148,17 @@ export class ClaudeAdapter implements AgentRunner {
       const env = childEnvironment(this.environment, billingVariables, { CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" });
       const child = this.spawnProcess(program, claudeArguments(job),
         { cwd: job.workspace.folder, env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
-      const state: Ending & { sessionId: string | null } = { result: null, guard: null, timedOut: false, code: null, stderr: "", tail: [], sessionId: null };
+      const state: Ending & { sessionId: string | null } = { result: null, guard: null, timedOut: false, code: null, stderr: "", diagnostics: [], read: [], sessionId: null };
       let aborted = false;
       let pending = "";
+      const requested = new Map<string, string>();
       const onLine = (line: string) => {
-        state.tail.push(line);
-        if (state.tail.length > 20) state.tail.shift();
         const event = parseEvent(line);
-        if (event === null) return;
+        if (event === null) {
+          if (line.trim().length > 0) state.diagnostics.push(line);
+          if (state.diagnostics.length > 20) state.diagnostics.shift();
+          return;
+        }
         if (event["type"] === "system" && event["subtype"] === "init") {
           state.sessionId = typeof event["session_id"] === "string" ? event["session_id"] : null;
           if (event["apiKeySource"] !== "none") {
@@ -134,6 +167,17 @@ export class ClaudeAdapter implements AgentRunner {
           }
         } else if (event["type"] === "result") {
           state.result = event as ResultEvent;
+        } else if (event["type"] === "assistant") {
+          for (const [id, path] of readRequests(event, job.workspace.folder)) requested.set(id, path);
+        } else if (event["type"] === "user") {
+          // A path counts as opened when its Read call got a result that is no error.
+          for (const id of succeededCalls(event)) {
+            const path = requested.get(id);
+            if (path !== undefined) state.read.push(path);
+          }
+        } else if (event["type"] === "error") {
+          state.diagnostics.push(JSON.stringify(event["error"] ?? event["message"] ?? event));
+          if (state.diagnostics.length > 20) state.diagnostics.shift();
         }
       };
       child.stdout?.setEncoding("utf8").on("data", (chunk: string) => {
@@ -174,7 +218,7 @@ export class ClaudeAdapter implements AgentRunner {
         settle(null);
       });
       child.on("close", (code) => settle(code));
-      child.stdin?.on("error", () => undefined).end(job.prompt);
+      child.stdin?.on("error", () => undefined).end(promptWithImages(job));
     });
   }
 }
