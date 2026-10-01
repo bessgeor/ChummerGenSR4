@@ -1,6 +1,6 @@
 import { SetupError } from "../host/setup-error.js";
 
-export const nodeNames = ["capture", "compare", "triage"] as const;
+export const nodeNames = ["capture", "compare", "triage", "diagnose"] as const;
 export type NodeName = (typeof nodeNames)[number];
 
 /** The command line as given, before the profile and the environment fill in defaults. */
@@ -16,6 +16,7 @@ export type Arguments = {
   readonly tessdata: string | null;
   readonly only: NodeName | null;
   readonly recapture: boolean;
+  readonly noDiagnosis: boolean;
 };
 
 export type Command =
@@ -38,8 +39,9 @@ export const usage = `Usage: npm start -- [options]
     --no-ocr
     --tessdata <dir>
   Workflow:
-    --only <node>              capture, compare or triage; earlier nodes must find their completed steps
+    --only <node>              capture, compare, triage or diagnose; earlier nodes must find their completed steps
     --recapture                capture every planned case again, ignoring recorded capture steps (not with --only compare or triage)
+    --no-diagnosis             end the run after triage: no model job and no check capture
     --resume <thread>          continue a thread that stopped, with the options it was started with
     --help
 
@@ -98,7 +100,7 @@ export function parseArguments(args: readonly string[]): Command {
   const captures: string[] = [];
   let parsed: Omit<Arguments, "cases" | "captures"> = {
     settingsOverlay: null, threshold: null, caseFile: null, canonicalCache: null,
-    liveCanonical: false, noOcr: false, tessdata: null, only: null, recapture: false,
+    liveCanonical: false, noOcr: false, tessdata: null, only: null, recapture: false, noDiagnosis: false,
   };
   for (let index = 0; index < args.length; index++) {
     const option = args[index]!;
@@ -114,6 +116,7 @@ export function parseArguments(args: readonly string[]): Command {
       case "--tessdata": parsed = { ...parsed, tessdata: value(args, index++) }; break;
       case "--only": parsed = { ...parsed, only: nodeName(value(args, index++)) }; break;
       case "--recapture": parsed = { ...parsed, recapture: true }; break;
+      case "--no-diagnosis": parsed = { ...parsed, noDiagnosis: true }; break;
       default:
         throw new SetupError(workflowOwned.has(option)
           ? `Option '${option}' is set by the workflow; run npm run parity to use it.`
@@ -124,8 +127,11 @@ export function parseArguments(args: readonly string[]): Command {
   if (parsed.liveCanonical && parsed.canonicalCache !== null) {
     throw new SetupError("--live-canonical and --canonical-cache contradict each other; give one of them.");
   }
-  if (parsed.recapture && (parsed.only === "compare" || parsed.only === "triage")) {
+  if (parsed.recapture && parsed.only !== null && parsed.only !== "capture") {
     throw new SetupError(`--recapture needs the capture node, which --only ${parsed.only} does not run.`);
+  }
+  if (parsed.noDiagnosis && parsed.only === "diagnose") {
+    throw new SetupError("--only diagnose and --no-diagnosis contradict each other; give one of them.");
   }
   return { kind: "start", arguments: { ...parsed, cases, captures } };
 }

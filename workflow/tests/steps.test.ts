@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { resolveAgentSettings } from "../src/agents/agent-settings.js";
 import type { PlannedCase } from "../src/cases/case-plan.js";
 import type { HostCommand, HostRunner } from "../src/host/host-runner.js";
 import { SetupError } from "../src/host/setup-error.js";
@@ -25,6 +26,7 @@ const fingerprints: InputFingerprints = {
 const options: RunOptions = {
   caseFile: "cases.json", cases: [], captures: [], settingsOverlay: null, threshold: null, canonicalCache: "C:/cache",
   canonicalCacheSource: "option", noOcr: false, tessdata: null, only: null, recapture: false,
+  diagnosis: false, agents: resolveAgentSettings(undefined),
 };
 
 function scratch(): string {

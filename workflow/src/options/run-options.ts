@@ -1,4 +1,5 @@
 import { join, resolve } from "node:path";
+import { resolveAgentSettings, type AgentSettings } from "../agents/agent-settings.js";
 import type { Arguments, NodeName } from "./arguments.js";
 import { localDataFolder, type Environment, type Profile } from "./profile.js";
 
@@ -17,6 +18,9 @@ export type RunOptions = {
   readonly only: NodeName | null;
   /** Capture every planned case again even when a completed step with the same inputs exists. */
   readonly recapture: boolean;
+  /** Whether triage's clusters are diagnosed (--no-diagnosis turns it off). */
+  readonly diagnosis: boolean;
+  readonly agents: AgentSettings;
 };
 
 function cacheFolder(args: Arguments, profile: Profile, env: Environment): Pick<RunOptions, "canonicalCache" | "canonicalCacheSource"> {
@@ -46,5 +50,7 @@ export function resolveRunOptions(args: Arguments, profile: Profile, env: Enviro
     tessdata: absolute(args.tessdata),
     only: args.only,
     recapture: args.recapture,
+    diagnosis: !args.noDiagnosis,
+    agents: resolveAgentSettings(profile.agents),
   };
 }

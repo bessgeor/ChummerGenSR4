@@ -2,6 +2,7 @@ import { deepStrictEqual, equal, ok } from "node:assert/strict";
 import { test } from "node:test";
 import { InMemoryStore, MemorySaver } from "@langchain/langgraph";
 import type { PlannedCase } from "../src/cases/case-plan.js";
+import { resolveAgentSettings } from "../src/agents/agent-settings.js";
 import { buildWorkflowGraph, nodeMode, type WorkflowSteps } from "../src/graph/workflow-graph.js";
 import { exitStatus, runWorkflow, type RunDependencies } from "../src/graph/run-workflow.js";
 import { SetupError } from "../src/host/setup-error.js";
@@ -83,7 +84,7 @@ function fakeDetails(runFolder: string, compared: boolean): CaseDetails {
 
 const baseArguments: Arguments = {
   cases: [], captures: [], settingsOverlay: null, threshold: null, caseFile: null, canonicalCache: null,
-  liveCanonical: false, noOcr: false, tessdata: null, only: null, recapture: false,
+  liveCanonical: false, noOcr: false, tessdata: null, only: null, recapture: false, noDiagnosis: false,
 };
 
 function harness(cases: string[], steps = new FakeSteps(), checkpointer = new MemorySaver(), signal?: AbortSignal) {
@@ -95,6 +96,7 @@ function harness(cases: string[], steps = new FakeSteps(), checkpointer = new Me
     resolveOptions: (command) => ({
       caseFile: "cases.json", cases: [], captures: [], settingsOverlay: null, threshold: null, canonicalCache: "cache",
       canonicalCacheSource: "default", noOcr: false, tessdata: null, only: command.arguments.only, recapture: false,
+      diagnosis: false, agents: resolveAgentSettings(undefined),
     }),
     planCases: () => ({ cases: cases.map(plannedCase), excluded: [] }),
     readCase: (runFolder, compared) => {
