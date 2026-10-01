@@ -1,5 +1,20 @@
 import * as z from "zod";
 
+// reported: its row is in the report and did not fail; analysis-failed: its row failed;
+// filtered: both sides filtered it; optional-absent: each side skipped it because an
+// optional tab was absent; execution-lost: no row, and a side's capture action failed or
+// did not run; unaccounted: none of these.
+
+export const CompletenessStateSchema = z.enum([
+    "analysis-failed",
+    "execution-lost",
+    "filtered",
+    "optional-absent",
+    "reported",
+    "unaccounted",
+]);
+export type CompletenessState = z.infer<typeof CompletenessStateSchema>;
+
 // text: text was read; empty: no text was read; error: reading failed; disabled: OCR was
 // turned off for the run.
 
@@ -30,7 +45,8 @@ export const RowStatusSchema = z.enum([
 export type RowStatus = z.infer<typeof RowStatusSchema>;
 
 // clear: every row passed; differences: differences reported and nothing failed;
-// analysis-failures: a row failed or an OCR result is an error.
+// analysis-failures: a row failed, an OCR result is an error or a planned capture is
+// unaccounted.
 
 export const ReportStatusSchema = z.enum([
     "analysis-failures",
@@ -38,6 +54,25 @@ export const ReportStatusSchema = z.enum([
     "differences",
 ]);
 export type ReportStatus = z.infer<typeof ReportStatusSchema>;
+
+export const CompletenessEntrySchema = z.object({
+    "capture": z.string(),
+    "case": z.string(),
+    "detail": z.string().optional(),
+    "state": CompletenessStateSchema,
+});
+export type CompletenessEntry = z.infer<typeof CompletenessEntrySchema>;
+
+export const CompletenessTotalsSchema = z.object({
+    "analysisFailed": z.number(),
+    "executionLost": z.number(),
+    "filtered": z.number(),
+    "optionalAbsent": z.number(),
+    "planned": z.number(),
+    "reported": z.number(),
+    "unaccounted": z.number(),
+});
+export type CompletenessTotals = z.infer<typeof CompletenessTotalsSchema>;
 
 export const OcrReadingSchema = z.object({
     "error": z.string().optional(),
@@ -85,6 +120,13 @@ export const ReportTotalsSchema = z.object({
 });
 export type ReportTotals = z.infer<typeof ReportTotalsSchema>;
 
+export const CompletenessSchema = z.object({
+    "complete": z.boolean(),
+    "entries": z.array(CompletenessEntrySchema),
+    "totals": CompletenessTotalsSchema,
+});
+export type Completeness = z.infer<typeof CompletenessSchema>;
+
 export const DiscrepancySchema = z.object({
     "candidateCrop": z.string(),
     "candidateOcr": OcrReadingSchema,
@@ -119,6 +161,7 @@ export const ReportRowSchema = z.object({
 export type ReportRow = z.infer<typeof ReportRowSchema>;
 
 export const CompareReportSchema = z.object({
+    "completeness": CompletenessSchema,
     "discrepancies": z.array(DiscrepancySchema),
     "groups": z.array(DiscrepancyGroupSchema),
     "ocr": OcrSettingsSchema,

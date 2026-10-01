@@ -5,7 +5,7 @@
   "description": "The comparer's analysis of one capture run: one row per results row, the discrepancies found in the raw pixel difference, and their duplicate groups.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["runId", "threshold", "ocr", "status", "rows", "discrepancies", "groups", "totals"],
+  "required": ["runId", "threshold", "ocr", "status", "rows", "discrepancies", "groups", "totals", "completeness"],
   "properties": {
     "runId": { "type": "string", "minLength": 1 },
     "threshold": {
@@ -30,11 +30,12 @@
       "type": "array",
       "items": { "$ref": "#/definitions/DiscrepancyGroup" }
     },
-    "totals": { "$ref": "#/definitions/ReportTotals" }
+    "totals": { "$ref": "#/definitions/ReportTotals" },
+    "completeness": { "$ref": "#/definitions/Completeness" }
   },
   "definitions": {
     "ReportStatus": {
-      "description": "clear: every row passed; differences: differences reported and nothing failed; analysis-failures: a row failed or an OCR result is an error.",
+      "description": "clear: every row passed; differences: differences reported and nothing failed; analysis-failures: a row failed, an OCR result is an error or a planned capture is unaccounted.",
       "type": "string",
       "enum": ["clear", "differences", "analysis-failures"]
     },
@@ -185,6 +186,51 @@
       "properties": {
         "width": { "type": "integer", "minimum": 1 },
         "height": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "Completeness": {
+      "description": "What became of every capture the run's cases planned, from the run's coverage.json and this report's rows.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["complete", "entries", "totals"],
+      "properties": {
+        "complete": { "description": "True when no entry is unaccounted.", "type": "boolean" },
+        "entries": {
+          "description": "One entry per planned capture, cases and captures in plan order, then one per row that no case planned.",
+          "type": "array",
+          "items": { "$ref": "#/definitions/CompletenessEntry" }
+        },
+        "totals": { "$ref": "#/definitions/CompletenessTotals" }
+      }
+    },
+    "CompletenessEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["case", "capture", "state"],
+      "properties": {
+        "case": { "type": "string", "minLength": 1 },
+        "capture": { "type": "string", "minLength": 1 },
+        "state": { "$ref": "#/definitions/CompletenessState" },
+        "detail": { "description": "Why an entry is execution-lost or unaccounted.", "type": "string", "minLength": 1 }
+      }
+    },
+    "CompletenessState": {
+      "description": "reported: its row is in the report and did not fail; analysis-failed: its row failed; filtered: both sides filtered it; optional-absent: each side skipped it because an optional tab was absent; execution-lost: no row, and a side's capture action failed or did not run; unaccounted: none of these.",
+      "type": "string",
+      "enum": ["reported", "analysis-failed", "filtered", "optional-absent", "execution-lost", "unaccounted"]
+    },
+    "CompletenessTotals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["planned", "reported", "analysisFailed", "filtered", "optionalAbsent", "executionLost", "unaccounted"],
+      "properties": {
+        "planned": { "description": "Planned captures over all cases.", "type": "integer", "minimum": 0 },
+        "reported": { "type": "integer", "minimum": 0 },
+        "analysisFailed": { "type": "integer", "minimum": 0 },
+        "filtered": { "type": "integer", "minimum": 0 },
+        "optionalAbsent": { "type": "integer", "minimum": 0 },
+        "executionLost": { "type": "integer", "minimum": 0 },
+        "unaccounted": { "type": "integer", "minimum": 0 }
       }
     },
     "ReportTotals": {

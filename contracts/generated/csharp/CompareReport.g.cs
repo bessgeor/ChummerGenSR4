@@ -26,6 +26,10 @@ namespace Parity.Contracts.CompareReport
     /// </summary>
     public partial class CompareReport
     {
+        [JsonRequired]
+        [JsonPropertyName("completeness")]
+        public Completeness Completeness { get; set; }
+
         /// <summary>
         /// Every discrepancy, in report order: rows in order, then top to bottom and left to right.
         /// </summary>
@@ -71,6 +75,91 @@ namespace Parity.Contracts.CompareReport
         [JsonRequired]
         [JsonPropertyName("totals")]
         public ReportTotals Totals { get; set; }
+    }
+
+    /// <summary>
+    /// What became of every capture the run's cases planned, from the run's coverage.json and
+    /// this report's rows.
+    /// </summary>
+    public partial class Completeness
+    {
+        /// <summary>
+        /// True when no entry is unaccounted.
+        /// </summary>
+        [JsonRequired]
+        [JsonPropertyName("complete")]
+        public bool Complete { get; set; }
+
+        /// <summary>
+        /// One entry per planned capture, cases and captures in plan order, then one per row that no
+        /// case planned.
+        /// </summary>
+        [JsonRequired]
+        [JsonPropertyName("entries")]
+        public List<CompletenessEntry> Entries { get; set; }
+
+        [JsonRequired]
+        [JsonPropertyName("totals")]
+        public CompletenessTotals Totals { get; set; }
+    }
+
+    public partial class CompletenessEntry
+    {
+        [JsonRequired]
+        [JsonPropertyName("capture")]
+        [JsonConverter(typeof(MinMaxLengthCheckConverter))]
+        public string Capture { get; set; }
+
+        [JsonRequired]
+        [JsonPropertyName("case")]
+        [JsonConverter(typeof(MinMaxLengthCheckConverter))]
+        public string Case { get; set; }
+
+        /// <summary>
+        /// Why an entry is execution-lost or unaccounted.
+        /// </summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        [JsonPropertyName("detail")]
+        [JsonConverter(typeof(MinMaxLengthCheckConverter))]
+        public string? Detail { get; set; }
+
+        [JsonRequired]
+        [JsonPropertyName("state")]
+        public CompletenessState State { get; set; }
+    }
+
+    public partial class CompletenessTotals
+    {
+        [JsonRequired]
+        [JsonPropertyName("analysisFailed")]
+        public long AnalysisFailed { get; set; }
+
+        [JsonRequired]
+        [JsonPropertyName("executionLost")]
+        public long ExecutionLost { get; set; }
+
+        [JsonRequired]
+        [JsonPropertyName("filtered")]
+        public long Filtered { get; set; }
+
+        [JsonRequired]
+        [JsonPropertyName("optionalAbsent")]
+        public long OptionalAbsent { get; set; }
+
+        /// <summary>
+        /// Planned captures over all cases.
+        /// </summary>
+        [JsonRequired]
+        [JsonPropertyName("planned")]
+        public long Planned { get; set; }
+
+        [JsonRequired]
+        [JsonPropertyName("reported")]
+        public long Reported { get; set; }
+
+        [JsonRequired]
+        [JsonPropertyName("unaccounted")]
+        public long Unaccounted { get; set; }
     }
 
     public partial class Discrepancy
@@ -360,6 +449,14 @@ namespace Parity.Contracts.CompareReport
     }
 
     /// <summary>
+    /// reported: its row is in the report and did not fail; analysis-failed: its row failed;
+    /// filtered: both sides filtered it; optional-absent: each side skipped it because an
+    /// optional tab was absent; execution-lost: no row, and a side's capture action failed or
+    /// did not run; unaccounted: none of these.
+    /// </summary>
+    public enum CompletenessState { AnalysisFailed, ExecutionLost, Filtered, OptionalAbsent, Reported, Unaccounted };
+
+    /// <summary>
     /// text: text was read; empty: no text was read; error: reading failed; disabled: OCR was
     /// turned off for the run.
     /// </summary>
@@ -371,7 +468,8 @@ namespace Parity.Contracts.CompareReport
 
     /// <summary>
     /// clear: every row passed; differences: differences reported and nothing failed;
-    /// analysis-failures: a row failed or an OCR result is an error.
+    /// analysis-failures: a row failed, an OCR result is an error or a planned capture is
+    /// unaccounted.
     /// </summary>
     public enum ReportStatus { AnalysisFailures, Clear, Differences };
 
@@ -391,6 +489,7 @@ namespace Parity.Contracts.CompareReport
         {
             Converters =
             {
+                CompletenessStateConverter.Singleton,
                 OcrStatusConverter.Singleton,
                 ModeConverter.Singleton,
                 RowStatusConverter.Singleton,
@@ -427,6 +526,60 @@ namespace Parity.Contracts.CompareReport
         }
 
         public static readonly MinMaxLengthCheckConverter Singleton = new MinMaxLengthCheckConverter();
+    }
+
+    internal class CompletenessStateConverter : JsonConverter<CompletenessState>
+    {
+        public override bool CanConvert(Type t) => t == typeof(CompletenessState);
+
+        public override CompletenessState Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            var value = reader.GetString();
+            switch (value)
+            {
+                case "analysis-failed":
+                    return CompletenessState.AnalysisFailed;
+                case "execution-lost":
+                    return CompletenessState.ExecutionLost;
+                case "filtered":
+                    return CompletenessState.Filtered;
+                case "optional-absent":
+                    return CompletenessState.OptionalAbsent;
+                case "reported":
+                    return CompletenessState.Reported;
+                case "unaccounted":
+                    return CompletenessState.Unaccounted;
+            }
+            throw new Exception("Cannot unmarshal type CompletenessState");
+        }
+
+        public override void Write(Utf8JsonWriter writer, CompletenessState value, JsonSerializerOptions options)
+        {
+            switch (value)
+            {
+                case CompletenessState.AnalysisFailed:
+                    JsonSerializer.Serialize(writer, "analysis-failed", options);
+                    return;
+                case CompletenessState.ExecutionLost:
+                    JsonSerializer.Serialize(writer, "execution-lost", options);
+                    return;
+                case CompletenessState.Filtered:
+                    JsonSerializer.Serialize(writer, "filtered", options);
+                    return;
+                case CompletenessState.OptionalAbsent:
+                    JsonSerializer.Serialize(writer, "optional-absent", options);
+                    return;
+                case CompletenessState.Reported:
+                    JsonSerializer.Serialize(writer, "reported", options);
+                    return;
+                case CompletenessState.Unaccounted:
+                    JsonSerializer.Serialize(writer, "unaccounted", options);
+                    return;
+            }
+            throw new Exception("Cannot marshal type CompletenessState");
+        }
+
+        public static readonly CompletenessStateConverter Singleton = new CompletenessStateConverter();
     }
 
     internal class OcrStatusConverter : JsonConverter<OcrStatus>
