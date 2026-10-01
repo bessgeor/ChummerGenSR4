@@ -15,6 +15,7 @@ import { SetupError } from "../src/host/setup-error.js";
 import { parseArguments, type Arguments } from "../src/options/arguments.js";
 import { resolveRunOptions } from "../src/options/run-options.js";
 import { workflowPaths } from "../src/paths.js";
+import { captureArguments } from "../src/steps/capture-step.js";
 import { scratch } from "./diagnosis-fixtures.js";
 import { challengeAnswer, diagnosisHarness, FakeAgents, hypothesisAnswer, twoClusters } from "./diagnosis-harness.js";
 
@@ -37,7 +38,10 @@ test("the check plan is the union of every challenged cluster's predicted cases 
     b: cluster("b", other, { outcome: "no_alternative", reason: "r", alternative: null }),
     c: cluster("c", other, null, "failed"),
   });
-  deepStrictEqual(plan, { cases: ["build-alpha", "career-beta", "build-gamma"], captures: ["skills", "common", "armor"], checked: ["a", "b"] });
+  deepStrictEqual(plan, {
+    cases: ["build-alpha", "career-beta", "build-gamma"], captures: ["skills", "common", "armor"], checked: ["a", "b"],
+    predicted: [{ case: "build-alpha", capture: "skills" }, { case: "career-beta", capture: "common" }, { case: "build-gamma", capture: "armor" }],
+  });
   equal(planCheck({ c: cluster("c", other, null, "abstained") }), null);
 });
 
@@ -135,7 +139,7 @@ test("the check capture is one capture runner call on the desktop lane with the 
     async run(command) {
       commands.push(command);
       mkdirSync(runFolder, { recursive: true });
-      for (const file of ["results.json", "coverage.json"]) writeFileSync(join(runFolder, file), "{}");
+      for (const file of ["summary.json", "results.json", "coverage.json"]) writeFileSync(join(runFolder, file), "{}");
       writeFileSync(command.args[command.args.indexOf("--run-folder-file") + 1]!, runFolder);
       return 1;
     },
@@ -145,11 +149,14 @@ test("the check capture is one capture runner call on the desktop lane with the 
   const options = { ...resolveRunOptions(parsed(["--threshold", "0.001", "--settings-overlay", "o", "--canonical-cache", "c"]), {}, { LOCALAPPDATA: root }, root) };
   deepStrictEqual(await capture({ cases: ["build-a", "career-b"], captures: ["skills", "common"], options }), { status: 1, runFolder });
   const command = commands[0]!;
-  deepStrictEqual([command.resource, command.command, command.label], ["desktop", "dotnet", "diagnosis check"]);
+  deepStrictEqual([command.resource, command.command, command.label], ["desktop", "dotnet", "diagnosis check capture"]);
   const value = (flag: string) => command.args[command.args.indexOf(flag) + 1];
   deepStrictEqual([value("--case"), value("--capture"), value("--case-file"), value("--threshold"), value("--settings-overlay"), value("--canonical-cache")],
     ["build-a,career-b", "skills,common", options.caseFile, "0.001", join(root, "o"), join(root, "c")]);
   ok(command.args[0]!.endsWith("Parity.Capture.dll"));
+  // The same arguments the capture step builds, so an option added there reaches the check too.
+  deepStrictEqual(command.args, captureArguments(paths, options, { cases: ["build-a", "career-b"], captures: ["skills", "common"] }, value("--run-folder-file")!));
+  ok(!captureArguments(paths, options, { cases: ["build-a"], captures: null }, "f").includes("--capture"));
   const failing = hostCheckCapture(paths, { run: async () => 3 }, createScratchFolder);
   await rejects(failing({ cases: ["a"], captures: ["x"], options }), (error: Error) => error instanceof SetupError && /exited with 3/.test(error.message));
   const silent = hostCheckCapture(paths, { run: async () => 0 }, createScratchFolder);

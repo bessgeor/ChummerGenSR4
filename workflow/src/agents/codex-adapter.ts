@@ -52,7 +52,8 @@ function usageOf(usage: Usage): AgentUsage {
 
 /**
  * Runs a job with the Codex SDK under the user's ChatGPT subscription: a read-only sandbox, no approvals, no web
- * search, no network for commands, and the job folder as working directory.
+ * search, no network for commands, and the job folder as working directory. The sandbox limits writes, not reads,
+ * so the caller must give the job a working folder that has nothing else of value around it.
  */
 export class CodexAdapter implements AgentRunner {
   constructor(

@@ -18,6 +18,13 @@ export function snapshotPath(path: string): string | null {
   return clean.startsWith("../") || clean === ".." ? null : clean;
 }
 
+/** The lines of a text: a final line break ends the last line, it does not start another. */
+export function lineCount(text: string): number {
+  if (text.length === 0) return 0;
+  const parts = text.split(/\r?\n/);
+  return text.endsWith("\n") ? parts.length - 1 : parts.length;
+}
+
 function explanationErrors(explanation: Explanation, manifest: ContextManifest, snapshot: string, label: string): string[] {
   const errors: string[] = [];
   if (explanation.claim.trim().length === 0) errors.push(`${label}: the claim is empty`);
@@ -34,7 +41,7 @@ function explanationErrors(explanation: Explanation, manifest: ContextManifest, 
       continue;
     }
     if (location.line !== null) {
-      const lines = readFileSync(file, "utf8").split(/\r?\n/).length;
+      const lines = lineCount(readFileSync(file, "utf8"));
       if (location.line < 1 || location.line > lines) errors.push(`${label}: line ${location.line} is outside ${location.path} (${lines} lines)`);
     }
   }

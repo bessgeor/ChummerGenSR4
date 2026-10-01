@@ -26,7 +26,13 @@ export type CheckResult = {
   readonly clusters: Readonly<Record<string, ClusterCheck>>;
 };
 
-export type CheckPlan = { readonly cases: readonly string[]; readonly captures: readonly string[]; readonly checked: readonly string[] };
+export type CheckPlan = {
+  readonly cases: readonly string[];
+  readonly captures: readonly string[];
+  readonly checked: readonly string[];
+  /** Each predicted case and capture once, in first-named order: what the check run has to observe. */
+  readonly predicted: readonly { readonly case: string; readonly capture: string }[];
+};
 
 function predictionsOf(cluster: ClusterDiagnosis): { hypothesis: readonly Prediction[]; alternative: readonly Prediction[] | null } {
   return {
@@ -40,14 +46,18 @@ export function planCheck(clusters: Readonly<Record<string, ClusterDiagnosis>>):
   const checked = Object.values(clusters).filter((cluster) => cluster.status === "challenged");
   const cases: string[] = [];
   const captures: string[] = [];
+  const predicted: { case: string; capture: string }[] = [];
   for (const cluster of checked) {
     const { hypothesis, alternative } = predictionsOf(cluster);
     for (const prediction of [...hypothesis, ...(alternative ?? [])]) {
       if (!cases.includes(prediction.case)) cases.push(prediction.case);
       if (!captures.includes(prediction.capture)) captures.push(prediction.capture);
+      if (!predicted.some((item) => item.case === prediction.case && item.capture === prediction.capture)) {
+        predicted.push({ case: prediction.case, capture: prediction.capture });
+      }
     }
   }
-  return cases.length === 0 ? null : { cases, captures, checked: checked.map((cluster) => cluster.clusterId) };
+  return cases.length === 0 ? null : { cases, captures, checked: checked.map((cluster) => cluster.clusterId), predicted };
 }
 
 /** What the check run's results say about one case and capture. */

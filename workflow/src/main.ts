@@ -5,11 +5,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
-import type { AgentRunner } from "./agents/agent-job.js";
-import type { AgentSettings } from "./agents/agent-settings.js";
-import { ClaudeAdapter } from "./agents/claude-adapter.js";
-import { CodexAdapter } from "./agents/codex-adapter.js";
-import { PooledAgentRunner } from "./agents/pooled-agent-runner.js";
+import { agentRunners } from "./agents/agent-runners.js";
 import { planCases } from "./cases/case-plan.js";
 import { hostCheckCapture } from "./diagnosis/check-capture.js";
 import { DiagnosisService } from "./diagnosis/diagnosis-service.js";
@@ -28,9 +24,8 @@ import { loadProfile, localDataFolder } from "./options/profile.js";
 import { resolveRunOptions } from "./options/run-options.js";
 import { workflowPaths } from "./paths.js";
 import { CaptureStep } from "./steps/capture-step.js";
-import { CompareStep } from "./steps/compare-step.js";
+import { CompareStep, reportPath } from "./steps/compare-step.js";
 import { readCaseDetails } from "./steps/case-details.js";
-import { reportPath } from "./steps/compare-step.js";
 import { readDocument } from "./steps/read-document.js";
 import { CompareReportSchema } from "../../contracts/generated/typescript/parity-compare-report.js";
 import { changedInputs } from "./steps/input-fingerprints.js";
@@ -87,23 +82,11 @@ async function main(): Promise<number> {
     new CaptureStep({ paths, host, store: stepStore, log, now, createScratchFolder, changedInputs }),
     new CompareStep({ paths, host, store: stepStore, log, now, changedInputs }), stepStore, now);
 
-  // One runner, and so one model pool, per agent settings; a thread keeps the settings it started with.
-  let agentRunner: { key: string; runner: AgentRunner } | null = null;
-  const agents = (settings: AgentSettings): AgentRunner => {
-    const key = JSON.stringify(settings);
-    if (agentRunner?.key !== key) {
-      agentRunner = { key, runner: new PooledAgentRunner({
-        claude: new ClaudeAdapter(settings.executables.claude, process.env),
-        codex: new CodexAdapter(settings.executables.codex, process.env),
-      }, settings.modelPool) };
-    }
-    return agentRunner.runner;
-  };
   const diagnosis = new DiagnosisService({
-    repositoryRoot, threadFolder: paths.threadFolder, agents, quota: new QuotaWaiter(randomBytes(8).toString("hex"), undefined, log),
+    repositoryRoot, threadFolder: paths.threadFolder, agents: agentRunners(process.env), quota: new QuotaWaiter(randomBytes(8).toString("hex"), undefined, log),
     git: processGit(repositoryRoot), allCases: (caseFile) => planCases(caseFile, [], []).cases,
     readReport: (runFolder) => readDocument(join(runFolder, reportPath), CompareReportSchema),
-    checkCapture: hostCheckCapture(paths, host, createScratchFolder), now, log,
+    checkCapture: hostCheckCapture(paths, host, createScratchFolder), createScratchFolder, now, log,
   });
 
   const checkpointer = SqliteSaver.fromConnString(paths.checkpoints);

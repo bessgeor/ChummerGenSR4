@@ -1,16 +1,19 @@
 import { z } from "zod";
 import type { AgentFailure, AgentFailureKind, AgentJob } from "./agent-job.js";
 
-const quota = /usage limit|limit reached|hit your (?:usage )?limit|usage_limit|rate[ _-]?limit|quota|\b429\b|5-hour limit|weekly limit|out of (?:extra )?usage/i;
+// The subscriptions' own limit messages only: a failure that keeps happening must not read as a limit that ends.
+const quota = /usage limit|hit your (?:usage )?limit|usage_limit|rate_limit_error|subscription quota|5-hour limit|weekly limit|out of (?:extra )?usage/i;
 const signIn = /not logged in|please (?:log|sign) ?in|\/login|authenticat|unauthori[sz]ed|invalid api key|oauth token|\b401\b/i;
-const refusal = /\brefus(?:al|ed|e)\b|content policy|usage polic(?:y|ies)/i;
+// A refusal by the model; a refused network connection is not one.
+const refusal = /\b(?:model|assistant) refused\b|\brefusal\b|content policy|usage polic(?:y|ies)/i;
 
 /**
  * Classifies the text of a failed job: a usage limit of the subscription, a refusal, or anything else
- * (a missing sign-in included), which is an infrastructure failure.
+ * (a missing sign-in included), which is an infrastructure failure. An HTTP status of 429 is a usage limit
+ * whatever the text says.
  */
-export function classifyFailure(text: string): Exclude<AgentFailureKind, "invalid_output"> {
-  if (quota.test(text)) return "quota_exhausted";
+export function classifyFailure(text: string, httpStatus: number | null = null): Exclude<AgentFailureKind, "invalid_output"> {
+  if (httpStatus === 429 || quota.test(text)) return "quota_exhausted";
   if (signIn.test(text)) return "infra";
   if (refusal.test(text)) return "refused";
   return "infra";

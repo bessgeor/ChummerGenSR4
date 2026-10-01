@@ -5,6 +5,7 @@ import { killTree } from "../host/host-runner.js";
 import { SetupError } from "../host/setup-error.js";
 import type { AgentFailure, AgentJob, AgentResult, AgentRunner, AgentUsage } from "./agent-job.js";
 import { childEnvironment } from "./child-environment.js";
+import { claudeNativeBesideShim, resolveExecutable, type ResolvedExecutable } from "./executable.js";
 import { classifyFailure, failure, finishOutput, jsonSchemaOf } from "./job-output.js";
 
 /** The only tools a Claude job gets: reading and searching files. */
@@ -17,7 +18,9 @@ export function claudeArguments<T>(job: AgentJob<T>): string[] {
   const args = ["-p", "--output-format", "stream-json", "--verbose",
     "--json-schema", JSON.stringify(jsonSchemaOf(job.schema)), "--effort", job.choice.effort];
   if (job.choice.model !== null) args.push("--model", job.choice.model);
-  args.push("--permission-mode", "dontAsk", "--tools", claudeTools.join(","), "--allowedTools", ...claudeTools);
+  // No --allowedTools: a bare tool name allows every path. Without it, dontAsk reads only the job folder and the
+  // --add-dir folders and denies everything else.
+  args.push("--permission-mode", "dontAsk", "--tools", claudeTools.join(","));
   for (const folder of job.workspace.readOnly) args.push("--add-dir", folder);
   args.push("--strict-mcp-config", "--no-session-persistence", "--setting-sources", "");
   return args;
@@ -35,16 +38,13 @@ type ResultEvent = {
   usage?: { input_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number; output_tokens?: number };
 };
 
+/** The usage the result reports, or null when it lacks a count: a missing count is not zero tokens. */
 function usageOf(result: ResultEvent): AgentUsage | null {
   const usage = result.usage;
   if (usage === undefined) return null;
-  const cached = usage.cache_read_input_tokens ?? 0;
-  return {
-    inputTokens: (usage.input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0) + cached,
-    cachedInputTokens: cached,
-    outputTokens: usage.output_tokens ?? 0,
-    costUsd: result.total_cost_usd ?? null,
-  };
+  const { input_tokens: input, cache_creation_input_tokens: created, cache_read_input_tokens: cached, output_tokens: output } = usage;
+  if (input === undefined || created === undefined || cached === undefined || output === undefined) return null;
+  return { inputTokens: input + created + cached, cachedInputTokens: cached, outputTokens: output, costUsd: result.total_cost_usd ?? null };
 }
 
 function parseEvent(line: string): Record<string, unknown> | null {
@@ -70,11 +70,17 @@ export class ClaudeAdapter implements AgentRunner {
     private readonly spawnProcess: typeof spawn = spawn,
     private readonly stop: (child: ChildProcess) => void = killTree,
     private readonly clock: () => number = Date.now,
+    private readonly resolve: (executable: string, environment: NodeJS.ProcessEnv) => ResolvedExecutable =
+      (executable, environment) => resolveExecutable(executable, environment, claudeNativeBesideShim),
   ) {}
 
   async run<T>(job: AgentJob<T>): Promise<AgentResult<T>> {
     const started = this.clock();
-    const ending = await this.execute(job);
+    const program = this.resolve(this.executable, this.environment);
+    if ("problem" in program) {
+      return { ok: false, failure: failure("infra", `${job.label}: the Claude CLI cannot be started: ${program.problem}`), usage: null, durationMs: this.clock() - started, sessionId: null };
+    }
+    const ending = await this.execute(job, program.path);
     const durationMs = this.clock() - started;
     const sessionId = ending.sessionId;
     const usage = ending.result === null ? null : usageOf(ending.result);
@@ -92,7 +98,7 @@ export class ClaudeAdapter implements AgentRunner {
     if (result.stop_reason === "refusal") return failed(failure("refused", `${job.label}: ${result.result ?? "the model refused"}`));
     if (result.is_error === true) {
       const text = `${result.result ?? ""} (${result.subtype ?? "error"}, status ${result.api_error_status ?? "none"})`;
-      return failed(failure(classifyFailure(text), `${job.label}: ${text}`));
+      return failed(failure(classifyFailure(text, result.api_error_status ?? null), `${job.label}: ${text}`));
     }
     if (result.structured_output === undefined) {
       return failed(failure("invalid_output", `${job.label}: the result has no structured output: ${(result.result ?? "").slice(0, 500)}`));
@@ -101,7 +107,7 @@ export class ClaudeAdapter implements AgentRunner {
     return finished.ok ? { ok: true, output: finished.output, usage, durationMs, sessionId } : failed(finished.failure);
   }
 
-  private execute<T>(job: AgentJob<T>): Promise<Ending & { sessionId: string | null }> {
+  private execute<T>(job: AgentJob<T>, program: string): Promise<Ending & { sessionId: string | null }> {
     return new Promise((resolve, reject) => {
       if (job.signal?.aborted === true) {
         reject(new SetupError(`${job.label}: not started because the run was stopped.`));
@@ -110,7 +116,7 @@ export class ClaudeAdapter implements AgentRunner {
       mkdirSync(dirname(job.logFile), { recursive: true });
       const log = createWriteStream(job.logFile);
       const env = childEnvironment(this.environment, billingVariables, { CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" });
-      const child = this.spawnProcess(this.executable, claudeArguments(job),
+      const child = this.spawnProcess(program, claudeArguments(job),
         { cwd: job.workspace.folder, env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
       const state: Ending & { sessionId: string | null } = { result: null, guard: null, timedOut: false, code: null, stderr: "", tail: [], sessionId: null };
       let aborted = false;

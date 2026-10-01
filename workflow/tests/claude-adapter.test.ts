@@ -60,7 +60,8 @@ test("the CLI runs headless with the schema, read-only tools, no MCP, settings o
   for (const [flag, value] of [["--effort", "high"], ["--model", "sonnet"], ["--permission-mode", "dontAsk"], ["--tools", "Read,Grep,Glob"], ["--add-dir", "C:/snapshot/source"], ["--setting-sources", ""]]) {
     equal(call.args[call.args.indexOf(flag!) + 1], value, flag);
   }
-  deepStrictEqual(call.args.slice(call.args.indexOf("--allowedTools") + 1, call.args.indexOf("--allowedTools") + 4), ["Read", "Grep", "Glob"]);
+  // A bare tool name in --allowedTools would allow reads of every path, so none is given.
+  ok(!call.args.includes("--allowedTools"));
   ok(call.args.includes("--strict-mcp-config") && call.args.includes("--no-session-persistence"));
   deepStrictEqual(call.env, { PATH: "p", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" });
   ok(readFileSync(given.logFile, "utf8").includes("\"structured_output\""));
@@ -134,4 +135,35 @@ test("the job's log folder is created", async () => {
   const given = job();
   await runWith([{ lines: [init(), result({ structured_output: { answer: 1 } })], code: 0 }], {}, given);
   ok(existsSync(given.logFile));
+});
+
+test("usage is null when the result lacks a count, never zero tokens", async () => {
+  const truncated = await runWith([{ lines: [init(), result({ structured_output: { answer: 1 }, usage: { input_tokens: 10, output_tokens: 5 } })], code: 0 }]);
+  ok(truncated.result.ok);
+  equal(truncated.result.usage, null);
+  const none = await runWith([{ lines: [init(), result({ structured_output: { answer: 1 }, usage: undefined })], code: 0 }]);
+  equal(none.result.usage, null);
+});
+
+test("an HTTP status of 429 is a usage limit, a refused connection is not a refusal", async () => {
+  const limited = await runWith([{ lines: [init(), result({ is_error: true, subtype: "error_during_execution", result: "Too many requests", api_error_status: 429 })], code: 1 }]);
+  equal(failureOf(limited.result).kind, "quota_exhausted");
+  const offline = await runWith([{ lines: [], stderr: "connect ECONNREFUSED 127.0.0.1:8080: Connection refused", code: 1 }]);
+  equal(failureOf(offline.result).kind, "infra");
+});
+
+test("a CLI that only exists as a script shim fails as infra with what to set, before any process starts", async () => {
+  const fake = fakeSpawn([]);
+  const adapter = new ClaudeAdapter("claude", {}, fake.spawn, stopFake, undefined, () => ({ problem: "claude.cmd is a script shim" }));
+  const failure = failureOf(await adapter.run(job()));
+  equal(failure.kind, "infra");
+  ok(/script shim/.test(failure.message));
+  equal(fake.calls.length, 0);
+});
+
+test("the resolved program is the one that starts", async () => {
+  const fake = fakeSpawn([{ lines: [init(), result({ structured_output: { answer: 1 } })], code: 0 }]);
+  const adapter = new ClaudeAdapter("claude", {}, fake.spawn, stopFake, undefined, () => ({ path: "C:/found/claude.exe" }));
+  ok((await adapter.run(job())).ok);
+  equal(fake.calls[0]!.command, "C:/found/claude.exe");
 });

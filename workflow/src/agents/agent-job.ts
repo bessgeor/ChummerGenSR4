@@ -36,6 +36,10 @@ export type AgentJob<T> = {
   readonly logFile: string;
   /** Aborts when the run stops: the job is stopped and the adapter throws a setup error. */
   readonly signal?: AbortSignal;
+  /** Asked when the job gets its place in the model pool; `false` means the job is not started. */
+  readonly mayStart?: () => boolean;
+  /** Called with the job's result while the job still holds its place in the model pool, before a queued job asks `mayStart`. */
+  readonly onResult?: (result: AgentResult<T>) => void;
 };
 
 export type AgentUsage = {
@@ -62,7 +66,15 @@ export type AgentResult<T> =
   | (Common & { readonly ok: true; readonly output: T })
   | (Common & { readonly ok: false; readonly failure: AgentFailure });
 
+/** What a runner returns for a job whose `mayStart` said no. */
+export type NotStarted = { readonly started: false };
+export const notStarted: NotStarted = { started: false };
+
+export function wasNotStarted<T>(result: AgentResult<T> | NotStarted): result is NotStarted {
+  return "started" in result;
+}
+
 /** Runs model jobs. A job that ran returns a result, also when it failed; a stopped run throws a setup error. */
 export interface AgentRunner {
-  run<T>(job: AgentJob<T>): Promise<AgentResult<T>>;
+  run<T>(job: AgentJob<T>): Promise<AgentResult<T> | NotStarted>;
 }

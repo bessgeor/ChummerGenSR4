@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { z } from "zod";
-import type { AgentJob, AgentResult, AgentRunner } from "../src/agents/agent-job.js";
+import { notStarted, wasNotStarted, type AgentJob, type AgentResult, type AgentRunner } from "../src/agents/agent-job.js";
+import { resolveExecutable } from "../src/agents/executable.js";
+import { agentRunners } from "../src/agents/agent-runners.js";
 import { resolveAgentSettings } from "../src/agents/agent-settings.js";
 import { classifyFailure, finishOutput, jsonSchemaOf, parseAnswer } from "../src/agents/job-output.js";
 import { PooledAgentRunner } from "../src/agents/pooled-agent-runner.js";
@@ -26,6 +28,16 @@ test("usage-limit texts are quota_exhausted, refusals refused, sign-in problems 
   equal(classifyFailure("The model refused to answer this request."), "refused");
   equal(classifyFailure("spawn claude ENOENT"), "infra");
   equal(classifyFailure("Exited with code 1"), "infra");
+});
+
+test("only the subscriptions' own limit messages and an HTTP 429 are usage limits; other texts that mention limits are not", () => {
+  for (const text of ["Quota file not found", "The request hit a limit reached in the parser", "connect ECONNREFUSED: Connection refused", "Rate limit of the repository host", "error 4290"]) {
+    equal(classifyFailure(text), "infra", text);
+  }
+  equal(classifyFailure("Too many requests", 429), "quota_exhausted");
+  equal(classifyFailure("Overloaded", 529), "infra");
+  equal(classifyFailure("The assistant refused to continue."), "refused");
+  equal(classifyFailure("Blocked by the usage policy."), "refused");
 });
 
 const schema = z.strictObject({ answer: z.number() });
@@ -76,6 +88,49 @@ test("the pooled runner picks the job's provider and never runs more jobs than i
   equal(peak, 2);
   deepStrictEqual(calls.filter((name) => name === "claude").length, 3);
   throws(() => new PooledAgentRunner({ claude: adapter("a"), codex: adapter("b") }, 0), /model pool size/);
+});
+
+test("the pooled runner asks mayStart when a job gets its place and does not start a job that is told no", async () => {
+  let finished = 0;
+  const calls: string[] = [];
+  const adapter: AgentRunner = {
+    async run<T>(job: AgentJob<T>): Promise<AgentResult<T>> {
+      calls.push(job.label);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      finished++;
+      return { ok: true, output: { answer: 1 } as T, usage: null, durationMs: 20, sessionId: null };
+    },
+  };
+  const runner = new PooledAgentRunner({ claude: adapter, codex: adapter }, 1);
+  // Only the first job may start: the others ask after it finished, when the first one has used what there was.
+  const asked: number[] = [];
+  const jobs = ["a", "b", "c"].map((label) => ({ ...fakeJob("claude"), label, mayStart: () => { asked.push(finished); return finished === 0; } }));
+  const results = await Promise.all(jobs.map((job) => runner.run(job)));
+  deepStrictEqual(asked, [0, 1, 1]);
+  deepStrictEqual(calls, ["a"]);
+  deepStrictEqual(results.map(wasNotStarted), [false, true, true]);
+  equal(results[1], notStarted);
+});
+
+test("a CLI name resolves to a program Windows starts without a shell, or says what to set", () => {
+  const present = (...files: string[]) => (path: string) => files.includes(path);
+  const environment = { Path: "C:\\bin;C:\\npm" };
+  deepStrictEqual(resolveExecutable("claude", environment, [], "win32", present("C:\\npm\\claude.exe")), { path: "C:\\npm\\claude.exe" });
+  deepStrictEqual(resolveExecutable("claude", environment, [], "linux", present()), { path: "claude" });
+  deepStrictEqual(resolveExecutable("C:\\tools\\claude.exe", environment, [], "win32", present()), { path: "C:\\tools\\claude.exe" });
+  deepStrictEqual(resolveExecutable("claude", environment, [], "win32", present()), { path: "claude" });
+  const shim = resolveExecutable("claude", environment, [], "win32", present("C:\\npm\\claude.cmd"));
+  ok("problem" in shim && /C:\\npm\\claude\.cmd is a script shim/.test(shim.problem) && /agents\.executables/.test(shim.problem));
+  const native = join("node_modules", "pkg", "claude.exe");
+  deepStrictEqual(resolveExecutable("claude", environment, [native], "win32", present("C:\\npm\\claude.cmd", join("C:\\npm", native))), { path: join("C:\\npm", native) });
+  ok("problem" in resolveExecutable("C:\\tools\\claude.cmd", environment, [], "win32", present()));
+});
+
+test("one runner, and so one model pool, serves the same agent settings", () => {
+  const runners = agentRunners({});
+  const settings = resolveAgentSettings(undefined);
+  equal(runners(settings), runners(resolveAgentSettings(undefined)));
+  ok(runners(settings) !== runners(resolveAgentSettings({ modelPool: 3 })));
 });
 
 test("without a profile, hypotheses run on Claude and challenges on Codex", () => {

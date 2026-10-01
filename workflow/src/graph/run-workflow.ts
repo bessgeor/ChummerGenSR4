@@ -31,10 +31,15 @@ export function newThreadId(now: Date): string {
   return `wf-${stamp}-${randomBytes(4).toString("hex")}`;
 }
 
-function config(threadId: string, cases: number, signal: AbortSignal | undefined) {
-  // build, one capture per case, the last compare, triage and diagnosis, whose quota waits may repeat for hours.
+/**
+ * LangGraph's limit on super-steps in one invocation. A quota wait costs about four of them every 15 minutes and
+ * must not end for lack of steps, so the limit is far beyond any wait a subscription's limit can last.
+ */
+export const recursionLimit = 1_000_000;
+
+function config(threadId: string, signal: AbortSignal | undefined) {
   return {
-    configurable: { thread_id: threadId }, recursionLimit: cases + 1000, durability: "sync" as const,
+    configurable: { thread_id: threadId }, recursionLimit, durability: "sync" as const,
     ...(signal === undefined ? {} : { signal }),
   };
 }
@@ -60,7 +65,7 @@ function report(state: WorkflowStateValue, readCase: RunDependencies["readCase"]
   for (const line of describeDiagnosis(state.clusters, state.diagnosisCheck, state.diagnosisPath)) log(line);
 }
 
-async function start(command: Extract<Command, { kind: "start" }>, dependencies: RunDependencies): Promise<{ threadId: string; cases: number; input: WorkflowStateValue }> {
+async function start(command: Extract<Command, { kind: "start" }>, dependencies: RunDependencies): Promise<{ threadId: string; input: WorkflowStateValue }> {
   const options = dependencies.resolveOptions(command);
   const plan = dependencies.planCases(options);
   for (const name of plan.excluded) dependencies.log(`${name} is left out: none of the requested captures belongs to it.`);
@@ -71,10 +76,10 @@ async function start(command: Extract<Command, { kind: "start" }>, dependencies:
     threadId, options, plan: [...plan.cases], fingerprints: null, captures: {}, lastCaptured: -1, compares: {}, triageSummary: null,
     clusters: {}, agentMilliseconds: 0, diagnosisCheck: null, diagnosisPath: null,
   };
-  return { threadId, cases: plan.cases.length, input };
+  return { threadId, input };
 }
 
-async function resume(threadId: string, graph: WorkflowGraph): Promise<number> {
+async function checkResumable(threadId: string, graph: WorkflowGraph): Promise<void> {
   const snapshot = await graph.getState({ configurable: { thread_id: threadId } });
   const values = snapshot.values as Partial<WorkflowStateValue>;
   if (snapshot.config.configurable?.["checkpoint_id"] === undefined || values.plan === undefined) {
@@ -83,7 +88,6 @@ async function resume(threadId: string, graph: WorkflowGraph): Promise<number> {
   if (snapshot.next.length === 0) {
     throw new SetupError(`Thread ${threadId} already finished; start a new run instead.`);
   }
-  return values.plan.length;
 }
 
 /** Reports a thread whose graph ran to its end; a result that cannot be read is a setup error, and the finished thread has nothing to resume. */
@@ -107,14 +111,14 @@ export async function runWorkflow(command: Exclude<Command, { kind: "help" }>, d
   try {
     let final: WorkflowStateValue;
     if (command.kind === "resume") {
-      const cases = await resume(command.threadId, graph);
+      await checkResumable(command.threadId, graph);
       log(`Resuming thread ${command.threadId}.`);
-      final = await graph.invoke(null, config(command.threadId, cases, dependencies.signal));
+      final = await graph.invoke(null, config(command.threadId, dependencies.signal));
     } else {
       const started = await start(command, dependencies);
       threadId = started.threadId;
       log(`Resume it after an interruption with: npm start -- --resume ${threadId}`);
-      final = await graph.invoke(started.input, config(threadId, started.cases, dependencies.signal));
+      final = await graph.invoke(started.input, config(threadId, dependencies.signal));
     }
     return finish(final, dependencies);
   } catch (error) {

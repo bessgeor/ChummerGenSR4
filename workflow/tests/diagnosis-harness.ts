@@ -1,9 +1,9 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { InMemoryStore, MemorySaver } from "@langchain/langgraph";
-import type { AgentFailure, AgentJob, AgentResult, AgentRunner } from "../src/agents/agent-job.js";
+import { notStarted, type AgentFailure, type AgentJob, type AgentResult, type AgentRunner, type NotStarted } from "../src/agents/agent-job.js";
 import { resolveAgentSettings } from "../src/agents/agent-settings.js";
 import { finishOutput } from "../src/agents/job-output.js";
 import type { PlannedCase } from "../src/cases/case-plan.js";
@@ -15,6 +15,7 @@ import { processGit } from "../src/diagnosis/source-snapshot.js";
 import { buildWorkflowGraph, type WorkflowSteps } from "../src/graph/workflow-graph.js";
 import { runWorkflow, type RunDependencies } from "../src/graph/run-workflow.js";
 import type { WorkflowStateValue } from "../src/graph/workflow-state.js";
+import { createScratchFolder } from "../src/host/scratch-folder.js";
 import { SetupError } from "../src/host/setup-error.js";
 import type { Arguments } from "../src/options/arguments.js";
 import type { CaseDetails } from "../src/steps/case-details.js";
@@ -46,38 +47,75 @@ export const challengeAnswer = (): ChallengeOutput => ({
 /** What the fake agent does for a job: answer (validated like a real adapter), fail, or run until the run stops. */
 export type Reply = { readonly answer: unknown } | { readonly failure: AgentFailure } | { readonly hang: true };
 
-export type JobCall = { readonly kind: string; readonly cluster: string; readonly prompt: string; readonly images: readonly string[]; readonly provider: string };
+export type JobCall = {
+  readonly kind: string; readonly cluster: string; readonly prompt: string; readonly images: readonly string[]; readonly provider: string;
+  /** The job's folders and what they held while the job ran. */
+  readonly workspace: { readonly folder: string; readonly readOnly: readonly string[]; readonly contextFiles: readonly string[]; readonly snapshotFiles: readonly string[] };
+};
 
 const delay = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
-/** An agent runner that answers from a script and records every job, with the order of starts and ends. */
+/**
+ * An agent runner that answers from a script and records every job, with the order of starts and ends. Like the
+ * pooled runner it runs at most `poolSize` jobs at a time and asks each job `mayStart` when it gets its place.
+ */
 export class FakeAgents implements AgentRunner {
   readonly calls: JobCall[] = [];
   readonly events: string[] = [];
   running = 0;
   peak = 0;
+  private readonly queue: (() => void)[] = [];
 
-  constructor(public reply: (call: JobCall, attempt: number) => Reply = (call) => ({ answer: call.kind === "hypothesis" ? hypothesisAnswer() : challengeAnswer() })) {}
+  constructor(
+    public reply: (call: JobCall, attempt: number) => Reply = (call) => ({ answer: call.kind === "hypothesis" ? hypothesisAnswer() : challengeAnswer() }),
+    private readonly poolSize = Number.POSITIVE_INFINITY,
+    /** The duration each job reports. */
+    private readonly durationMs = 1000,
+  ) {}
 
-  async run<T>(job: AgentJob<T>): Promise<AgentResult<T>> {
-    const call: JobCall = { kind: job.kind, cluster: job.label.split(" ")[1]!, prompt: job.prompt, images: job.images, provider: job.choice.provider };
+  private async place(): Promise<void> {
+    if (this.running >= this.poolSize) await new Promise<void>((resolve) => this.queue.push(resolve));
+    else this.running++;
+  }
+
+  private release(): void {
+    const next = this.queue.shift();
+    if (next === undefined) this.running--;
+    else next();
+  }
+
+  async run<T>(job: AgentJob<T>): Promise<AgentResult<T> | NotStarted> {
+    await this.place();
+    this.peak = Math.max(this.peak, this.running);
+    if (job.mayStart?.() === false) {
+      this.release();
+      return notStarted;
+    }
+    const call: JobCall = {
+      kind: job.kind, cluster: job.label.split(" ")[1]!, prompt: job.prompt, images: job.images, provider: job.choice.provider,
+      workspace: { ...job.workspace, contextFiles: readdirSync(job.workspace.folder), snapshotFiles: readdirSync(job.workspace.readOnly[0]!) },
+    };
     this.calls.push(call);
     const attempt = this.calls.filter((other) => other.kind === call.kind && other.cluster === call.cluster).length;
     this.events.push(`${job.kind} ${call.cluster} start`);
-    this.running++;
-    this.peak = Math.max(this.peak, this.running);
     try {
       await delay(15);
       const reply = this.reply(call, attempt);
       if ("hang" in reply) {
         await new Promise((_resolve, reject) => job.signal?.addEventListener("abort", () => reject(new SetupError(`${job.label}: stopped`)), { once: true }));
       }
-      const common = { usage: { inputTokens: 100, cachedInputTokens: 10, outputTokens: 20, costUsd: 0.01 }, durationMs: 1000, sessionId: "s-1" };
-      if ("failure" in reply) return { ok: false, failure: reply.failure, ...common };
+      const common = { usage: { inputTokens: 100, cachedInputTokens: 10, outputTokens: 20, costUsd: 0.01 }, durationMs: this.durationMs, sessionId: "s-1" };
+      if ("failure" in reply) {
+        const failed: AgentResult<T> = { ok: false, failure: reply.failure, ...common };
+        job.onResult?.(failed);
+        return failed;
+      }
       const finished = finishOutput(job, (reply as { answer: unknown }).answer);
-      return finished.ok ? { ok: true, output: finished.output, ...common } : { ok: false, failure: finished.failure, ...common };
+      const result: AgentResult<T> = finished.ok ? { ok: true, output: finished.output, ...common } : { ok: false, failure: finished.failure, ...common };
+      job.onResult?.(result);
+      return result;
     } finally {
-      this.running--;
+      this.release();
       this.events.push(`${job.kind} ${call.cluster} end`);
     }
   }
@@ -163,7 +201,7 @@ export function diagnosisHarness(options: HarnessOptions) {
   }), log);
   const diagnosis = new DiagnosisService({
     repositoryRoot: sourceRepository, threadFolder: (threadId) => join(root, "threads", threadId), agents: () => agents, quota,
-    git: processGit(sourceRepository), allCases: () => cases, readReport, checkCapture, now: () => new Date("2026-10-01T12:00:00Z"), log,
+    git: processGit(sourceRepository), allCases: () => cases, readReport, checkCapture, createScratchFolder, now: () => new Date("2026-10-01T12:00:00Z"), log,
   });
   const checkpointer = options.checkpointer ?? new MemorySaver();
   const store = options.store ?? new InMemoryStore();

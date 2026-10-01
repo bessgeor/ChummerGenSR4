@@ -1,12 +1,13 @@
 import { join } from "node:path";
 import type { BaseStore } from "@langchain/langgraph-checkpoint";
 import type { CompareReport } from "../../../contracts/generated/typescript/parity-compare-report.js";
-import type { AgentResult, AgentRunner, JobKind } from "../agents/agent-job.js";
-import type { AgentSettings } from "../agents/agent-settings.js";
+import { wasNotStarted, type AgentResult, type JobKind, type NotStarted } from "../agents/agent-job.js";
+import type { AgentRunners } from "../agents/agent-runners.js";
 import type { PlannedCase } from "../cases/case-plan.js";
 import { CaptureResultsSchema } from "../../../contracts/generated/typescript/parity-capture-results.js";
 import { ExecutionCoverageSchema } from "../../../contracts/generated/typescript/parity-execution-coverage.js";
 import { labelRecord, putRecord, recordNamespace, type EvalRecord } from "../evals/eval-record.js";
+import type { ScratchFolder } from "../host/scratch-folder.js";
 import { SetupError } from "../host/setup-error.js";
 import type { RunOptions } from "../options/run-options.js";
 import { readDocument } from "../steps/read-document.js";
@@ -16,6 +17,7 @@ import type { CheckCapture } from "./check-capture.js";
 import type { ClusterDiagnosis, ClusterUpdate, QuotaWaitMark } from "./cluster-diagnosis.js";
 import { diagnosisDocument, writeDiagnosisDocument } from "./diagnosis-document.js";
 import { ContextManifestSchema, contextHash, sealContext, type ContextManifest } from "./context.js";
+import { stageJobFolder } from "./job-folder.js";
 import {
   ChallengeOutputSchema, challengePromptVersion, HypothesisOutputSchema, hypothesisPromptVersion,
   type ChallengeOutput, type Explanation, type HypothesisOutput,
@@ -34,14 +36,15 @@ export function diagnosisFolders(threadFolder: string) {
 export type DiagnosisDependencies = {
   readonly repositoryRoot: string;
   readonly threadFolder: (threadId: string) => string;
-  /** The agent runner for a thread's agent settings; one runner (and model pool) per settings. */
-  readonly agents: (settings: AgentSettings) => AgentRunner;
+  readonly agents: AgentRunners;
   readonly quota: QuotaWaiter;
   readonly git: Git;
   /** Every case of a case file, unfiltered: the check vocabulary. */
   readonly allCases: (caseFile: string) => readonly PlannedCase[];
   readonly readReport: (runFolder: string) => CompareReport;
   readonly checkCapture: CheckCapture;
+  /** A scratch folder outside the repository, where a job gets its copy of the context and the snapshot. */
+  readonly createScratchFolder: (prefix: string) => ScratchFolder;
   readonly now: () => Date;
   readonly log: (line: string) => void;
 };
@@ -68,6 +71,9 @@ export type JobStep = { readonly update: ClusterUpdate; readonly chargedMs: numb
 
 /** Diagnosis on the real host: contexts, model jobs with their records, and quota waits. */
 export class DiagnosisService {
+  /** Model time the jobs finished in this process charged to each thread, before the graph state has them. */
+  private readonly charged = new Map<string, number>();
+
   constructor(private readonly dependencies: DiagnosisDependencies) {}
 
   /** Takes the source snapshot and seals one context per triage cluster; no cluster needs no snapshot. */
@@ -111,22 +117,14 @@ export class DiagnosisService {
     const run = await this.dependencies.checkCapture({ cases: plan.cases, captures: plan.captures, options: input.options, ...(input.signal === undefined ? {} : { signal: input.signal }) });
     const results = readDocument(join(run.runFolder, "results.json"), CaptureResultsSchema);
     const coverage = readDocument(join(run.runFolder, "coverage.json"), ExecutionCoverageSchema);
-    const predicted = new Map<string, { case: string; capture: string }>();
-    for (const id of plan.checked) {
-      const cluster = input.clusters[id]!;
-      for (const prediction of [...(cluster.hypothesis?.output.explanation?.predictions ?? []), ...(cluster.challenge?.output.alternative?.predictions ?? [])]) {
-        predicted.set(`${prediction.case}/${prediction.capture}`, prediction);
-      }
-    }
-    const observations = [...predicted.values()].map((item) => observe(results, item.case, item.capture));
+    const observations = plan.predicted.map((item) => observe(results, item.case, item.capture));
     const clusters: Record<string, ClusterCheck> = {};
     for (const id of plan.checked) {
       const cluster = input.clusters[id]!;
       const checked = judge(cluster, observations);
       clusters[id] = checked;
-      for (const answer of [cluster.hypothesis, cluster.challenge]) {
-        if (answer !== null) await labelRecord(store, answer.recordId.includes("/hypothesis/") ? "hypothesis" : "challenge", answer.recordId, checked.outcome);
-      }
+      if (cluster.hypothesis !== null) await labelRecord(store, "hypothesis", cluster.hypothesis.recordId, checked.outcome);
+      if (cluster.challenge !== null) await labelRecord(store, "challenge", cluster.challenge.recordId, checked.outcome);
       this.dependencies.log(`Diagnosis check: ${id} ${checked.outcome}.`);
     }
     return {
@@ -158,41 +156,69 @@ export class DiagnosisService {
     return `${threadId}/${cluster.clusterId}/${kind}/${attempt}`;
   }
 
+  /** Model time charged to a thread: the state's total, or more when finished jobs of the same step are not in it yet. */
+  private spentMs(threadId: string, stateMs: number): number {
+    return Math.max(stateMs, this.charged.get(threadId) ?? 0);
+  }
+
+  private charge(threadId: string, stateMs: number, milliseconds: number): void {
+    this.charged.set(threadId, this.spentMs(threadId, stateMs) + milliseconds);
+  }
+
+  private budgetExhausted(label: string, clusterId: string, budgetMinutes: number): JobStep {
+    this.dependencies.log(`${label}: the run budget of ${budgetMinutes} min is spent; not started.`);
+    return { update: { clusterId, status: "budget_exhausted" }, chargedMs: 0 };
+  }
+
   private async runJob(kind: JobKind, input: JobInput, store: BaseStore): Promise<JobStep> {
     const { cluster, options } = input;
     const label = `${kind} ${cluster.clusterId}`;
-    if (input.spentMs >= options.agents.runBudgetMinutes * 60_000) {
-      this.dependencies.log(`${label}: the run budget of ${options.agents.runBudgetMinutes} min is spent; not started.`);
-      return { update: { clusterId: cluster.clusterId, status: "budget_exhausted" }, chargedMs: 0 };
-    }
+    const budgetMs = options.agents.runBudgetMinutes * 60_000;
+    const budgetSpent = () => this.spentMs(input.threadId, input.spentMs) >= budgetMs;
+    if (budgetSpent()) return this.budgetExhausted(label, cluster.clusterId, options.agents.runBudgetMinutes);
     const manifest = this.manifest(cluster);
     const folders = diagnosisFolders(this.dependencies.threadFolder(input.threadId));
-    const paths = { contextFolder: cluster.contextFolder, snapshotFolder: folders.source };
     const hypothesis: Explanation | null = cluster.hypothesis?.output.explanation ?? null;
     if (kind === "challenge" && hypothesis === null) throw new Error(`${label}: there is no hypothesis to challenge.`);
     const recordId = await this.recordId(store, input.threadId, cluster, kind);
     const choice = options.agents.jobs[kind];
-    const common = {
-      kind, label, choice, images: manifest.members.flatMap((member) => [join(cluster.contextFolder, member.canonicalCrop), join(cluster.contextFolder, member.candidateCrop)]),
-      workspace: { folder: cluster.contextFolder, readOnly: [folders.source] },
-      logFile: join(folders.logs, `${recordId.split("/").slice(1).join("-")}.jsonl`),
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-    };
-    this.dependencies.log(`${label}: running on ${choice.provider} (${choice.model ?? "default model"}, effort ${choice.effort}).`);
-    const started = this.dependencies.now();
-    const runner = this.dependencies.agents(options.agents);
-    const result: AgentResult<unknown> = kind === "hypothesis"
-      ? await runner.run<HypothesisOutput>({ ...common, prompt: hypothesisPrompt(manifest, paths), schema: HypothesisOutputSchema,
-        validate: (output) => validateHypothesis(output, manifest, folders.source) })
-      : await runner.run<ChallengeOutput>({ ...common, prompt: challengePrompt(manifest, hypothesis!, paths), schema: ChallengeOutputSchema,
-        validate: (output) => validateChallenge(output, hypothesis!, manifest, folders.source) });
+    const scratch = this.dependencies.createScratchFolder("workflow-job-");
+    let started = this.dependencies.now();
+    let result: AgentResult<unknown> | NotStarted;
+    try {
+      const staged = stageJobFolder(scratch, cluster.clusterId, cluster.contextFolder, folders.source);
+      const paths = { contextFolder: staged.context, snapshotFolder: staged.source };
+      const common = {
+        kind, label, choice, images: manifest.members.flatMap((member) => [join(staged.context, member.canonicalCrop), join(staged.context, member.candidateCrop)]),
+        workspace: { folder: staged.context, readOnly: [staged.source] },
+        logFile: join(folders.logs, `${recordId.split("/").slice(1).join("-")}.jsonl`),
+        // Asked when the job gets its place in the model pool, after the jobs queued before it were charged.
+        mayStart: () => {
+          if (budgetSpent()) return false;
+          started = this.dependencies.now();
+          return true;
+        },
+        onResult: (outcome: AgentResult<unknown>) => this.charge(input.threadId, input.spentMs, chargedMilliseconds(label, outcome)),
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+      };
+      this.dependencies.log(`${label}: running on ${choice.provider} (${choice.model ?? "default model"}, effort ${choice.effort}).`);
+      const runner = this.dependencies.agents(options.agents);
+      result = kind === "hypothesis"
+        ? await runner.run<HypothesisOutput>({ ...common, prompt: hypothesisPrompt(manifest, paths), schema: HypothesisOutputSchema,
+          validate: (output) => validateHypothesis(output, manifest, folders.source) })
+        : await runner.run<ChallengeOutput>({ ...common, prompt: challengePrompt(manifest, hypothesis!, paths), schema: ChallengeOutputSchema,
+          validate: (output) => validateChallenge(output, hypothesis!, manifest, folders.source) });
+    } finally {
+      scratch.remove();
+    }
+    if (wasNotStarted(result)) return this.budgetExhausted(label, cluster.clusterId, options.agents.runBudgetMinutes);
     const finished = this.dependencies.now();
     const record: EvalRecord = {
       schemaVersion: 1, recordId, jobKind: kind, threadId: input.threadId, subject: { kind: "discrepancy-cluster", id: cluster.clusterId },
       contextHash: cluster.contextHash, promptVersion: kind === "hypothesis" ? hypothesisPromptVersion : challengePromptVersion,
       agent: { provider: choice.provider, model: choice.model, effort: choice.effort },
-      startedUtc: started.toISOString(), finishedUtc: finished.toISOString(), durationMs: Math.max(0, Math.round(result.durationMs)),
-      usage: result.usage === null ? null : { ...result.usage, costUsd: result.usage.costUsd === null ? null : Math.max(0, result.usage.costUsd) },
+      startedUtc: started.toISOString(), finishedUtc: finished.toISOString(), durationMs: measuredDuration(label, result),
+      usage: result.usage,
       result: result.ok ? { status: "succeeded", message: null } : { status: result.failure.kind, message: result.failure.message },
       output: result.ok ? result.output : null,
       labels: { check: null },
@@ -220,4 +246,20 @@ export class DiagnosisService {
     if (failure.kind === "infra") throw new SetupError(`${label} failed: ${failure.message} (record ${recordId})`);
     return { update: { clusterId: cluster.clusterId, status: "failed", failure: { job: kind, kind: failure.kind, message: failure.message }, records }, chargedMs: record.durationMs };
   }
+}
+
+/** The model time a result charges to the run budget: a finished job, a failed one too; not a usage limit, and an infra failure ends the run. */
+function chargedMilliseconds(label: string, result: AgentResult<unknown>): number {
+  return !result.ok && (result.failure.kind === "quota_exhausted" || result.failure.kind === "infra") ? 0 : measuredDuration(label, result);
+}
+
+/** The adapter's duration in whole milliseconds. A negative or non-finite duration or cost is a bug in the adapter and fails the run. */
+function measuredDuration(label: string, result: AgentResult<unknown>): number {
+  if (!Number.isFinite(result.durationMs) || result.durationMs < 0) {
+    throw new SetupError(`${label}: the agent runner reported the duration ${result.durationMs} ms.`);
+  }
+  if (result.usage?.costUsd != null && (!Number.isFinite(result.usage.costUsd) || result.usage.costUsd < 0)) {
+    throw new SetupError(`${label}: the agent runner reported the cost ${result.usage.costUsd} USD.`);
+  }
+  return Math.round(result.durationMs);
 }

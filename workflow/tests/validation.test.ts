@@ -4,7 +4,7 @@ import { test } from "node:test";
 import type { ContextManifest } from "../src/diagnosis/context.js";
 import type { Explanation } from "../src/diagnosis/job-schemas.js";
 import { challengePrompt, hypothesisPrompt } from "../src/diagnosis/prompts.js";
-import { discriminatingPredictions, snapshotPath, validateChallenge, validateHypothesis } from "../src/diagnosis/validation.js";
+import { discriminatingPredictions, lineCount, snapshotPath, validateChallenge, validateHypothesis } from "../src/diagnosis/validation.js";
 import { scratch, write } from "./diagnosis-fixtures.js";
 import { challengeAnswer, hypothesisAnswer } from "./diagnosis-harness.js";
 
@@ -25,6 +25,15 @@ function snapshot(): string {
 test("snapshot paths are relative and stay inside the snapshot", () => {
   deepStrictEqual(["Chummer/a.cs", "./Chummer/a.cs", "Chummer\\a.cs", "Chummer/x/../a.cs"].map(snapshotPath), ["Chummer/a.cs", "Chummer/a.cs", "Chummer/a.cs", "Chummer/a.cs"]);
   deepStrictEqual(["../a.cs", "C:/a.cs", "/a.cs", "", "Chummer/../../a.cs"].map(snapshotPath), [null, null, null, null, null]);
+});
+
+test("a final line break ends the last line; it does not start another, so the line after the last is outside the file", () => {
+  deepStrictEqual(["", "a", "a\n", "a\nb", "a\r\nb\r\n", "a\n\n"].map(lineCount), [0, 1, 1, 2, 2, 2]);
+  const root = scratch();
+  const hundred = Array.from({ length: 100 }, (_, index) => `line ${index + 1}`).join("\r\n");
+  write(root, "Chummer/ending.cs", `${hundred}\r\n`);
+  const cite = (line: number) => validateHypothesis({ ...hypothesisAnswer(), explanation: { ...hypothesisAnswer().explanation!, locations: [{ path: "Chummer/ending.cs", symbol: null, line }] } }, manifest, root);
+  deepStrictEqual([cite(100), cite(101).length, cite(0).length], [[], 1, 1]);
 });
 
 test("a valid hypothesis and abstention pass; each broken part is named", () => {

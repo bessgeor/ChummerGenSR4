@@ -1,6 +1,6 @@
 import { deepStrictEqual, equal, ok } from "node:assert/strict";
-import { writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { InMemoryStore, MemorySaver } from "@langchain/langgraph";
 import type { ClusterDiagnosis } from "../src/diagnosis/cluster-diagnosis.js";
@@ -117,6 +117,16 @@ test("a usage limit waits 1, 2 and 5 minutes, retries the job, and is never char
   equal(record.result.status, "quota_exhausted");
 });
 
+test("a long usage limit keeps waiting: the graph's step limit does not end the run", async () => {
+  // Each retry takes about four super-steps; 270 waits are far beyond a limit of cases + 1000 steps.
+  const waits = 270;
+  const agents = new FakeAgents((call, attempt) => (call.kind === "hypothesis" && attempt <= waits ? quota : { answer: call.kind === "hypothesis" ? hypothesisAnswer() : challengeAnswer() }));
+  const harness = diagnosisHarness({ spots: [twoClusters[0]!], agents });
+  equal(await harness.start(), 1);
+  equal(harness.sleeps.length, waits);
+  equal(Object.values(await clustersOf(harness))[0]!.status, "challenged");
+});
+
 test("the delays go 1, 2, 5, 10, 15 minutes, then 15; a successful job starts them again", async () => {
   const sleeps: number[] = [];
   const waiter = new QuotaWaiter("p", async (milliseconds) => {
@@ -175,6 +185,39 @@ test("once the run budget is spent no job starts and its cluster is budget_exhau
   equal(await harness.start(), 1);
   deepStrictEqual(harness.agents.calls.map((call) => call.kind), ["hypothesis", "hypothesis"]);
   deepStrictEqual(Object.values(await clustersOf(harness)).map((cluster) => cluster.status), ["budget_exhausted", "budget_exhausted"]);
+});
+
+test("a job that waited in the model pool does not start once the jobs before it used the budget", async () => {
+  // Both hypotheses are sent in one step and see no spent time; the pool runs them one after another.
+  // The first takes 1000 ms of a 500 ms budget, so the second must not start when it gets its place.
+  const harness = diagnosisHarness({ spots: twoClusters, agents: new FakeAgents(undefined, 1), budgetMinutes: 0.5 / 60 });
+  equal(await harness.start(), 1);
+  deepStrictEqual(harness.agents.calls.map((call) => call.kind), ["hypothesis"]);
+  deepStrictEqual(Object.values(await clustersOf(harness)).map((cluster) => cluster.status), ["budget_exhausted", "budget_exhausted"]);
+  ok(harness.lines.some((line) => /the run budget of .* is spent; not started/.test(line)));
+  const state = await harness.state(harness.threadId());
+  equal(state.agentMilliseconds, 1000);
+});
+
+test("a job sees a copy of its context and the snapshot outside the repository and the thread, which is removed afterwards", async () => {
+  const harness = diagnosisHarness({ spots: [twoClusters[0]!] });
+  equal(await harness.start(), 1);
+  for (const call of harness.agents.calls) {
+    const { folder, readOnly, contextFiles, snapshotFiles } = call.workspace;
+    ok(!folder.startsWith(harness.root) && !readOnly[0]!.startsWith(harness.root), `${folder} is outside ${harness.root}`);
+    ok(contextFiles.includes("context.json") && contextFiles.includes("evidence"));
+    ok(snapshotFiles.includes("Chummer"));
+    equal(resolve(folder, "..", "source"), readOnly[0]);
+    ok(call.images.every((image) => image.startsWith(folder)));
+    ok(!existsSync(folder) && !existsSync(readOnly[0]!), "the copy is removed after the job");
+    ok(!call.prompt.includes(harness.root), "the prompt names no folder of the thread");
+  }
+});
+
+test("a duration or cost the agent runner reports below zero fails the run instead of being recorded as zero", async () => {
+  const harness = diagnosisHarness({ spots: [twoClusters[0]!], agents: new FakeAgents(undefined, Number.POSITIVE_INFINITY, -5) });
+  equal(await harness.start(), 3);
+  ok(harness.lines.some((line) => /reported the duration -5 ms/.test(line)));
 });
 
 test("--no-diagnosis and --only triage run no model job; no cluster ends the run after preparing nothing", async () => {
