@@ -7,6 +7,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Tesseract" Version="5.2.0" />
+    <!-- Copies tessdata/eng.traineddata beside the comparer. -->
+    <PackageReference Include="Tesseract.Data.English" Version="4.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Parity.Cases\Parity.Cases.csproj" />
     <ProjectReference Include="..\Parity.Imaging\Parity.Imaging.csproj" />
   </ItemGroup>
 
