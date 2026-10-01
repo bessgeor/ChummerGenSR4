@@ -13,6 +13,8 @@ internal sealed class ScriptedUiDriver : IUiDriver
 
     public int ActivationFailuresBeforeCapture { get; set; } = -1;
 
+    public bool PointerMovedBeforeCapture { get; set; }
+
     public Color CaptureColor { get; set; } = Color.White;
 
     public List<string> Calls { get; } = [];
@@ -67,6 +69,11 @@ internal sealed class ScriptedUiDriver : IUiDriver
         public Bitmap Capture()
         {
             owner.Calls.Add("capture");
+            if (owner.PointerMovedBeforeCapture)
+            {
+                throw new PointerException("scripted pointer move");
+            }
+
             Bitmap bitmap = new(4, 2);
             using Graphics graphics = Graphics.FromImage(bitmap);
             graphics.Clear(owner.CaptureColor);

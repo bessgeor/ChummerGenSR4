@@ -121,5 +121,5 @@ internal sealed class SideExecutor(IUiDriver driver)
         new(index, action.Describe(), action.Required, outcome, reason);
 
     private static string Describe(Exception error) =>
-        error is WindowActivationException ? error.Message : $"{error.GetType().Name}: {error.Message}";
+        error is WindowActivationException or PointerException ? error.Message : $"{error.GetType().Name}: {error.Message}";
 }

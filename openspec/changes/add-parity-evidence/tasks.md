@@ -9,6 +9,7 @@
 - [ ] 2.1 Add the coverage audit, write `coverage.json` and make invalid coverage give status 2. Evidence: unit tests for a complete side, a gap, a repeated index, a mislabeled index, a failure, a startup failure, optional absences and both capture/file mismatches, and the status rule, pass.
 - [ ] 2.2 Add the timing decorator and `timing.json`. Evidence: unit tests with a scripted driver and a substituted clock show each operation's sample, a throwing call recorded as failed and passed through, and the percentiles.
 - [ ] 2.3 Add the canonical capture cache with `--canonical-cache`. Evidence: unit tests for the key changing with each input, a miss and store, a hit restoring captures and records without launching, a corrupted entry as a setup error, a failed side not stored, an existing entry not overwritten, and a cache folder inside the repository rejected.
+- [ ] 2.4 Park the pointer on the title bar and fail a capture whose pointer moved, and change the cache format. Evidence: unit tests for the parking spot and for a moved pointer failing the capture with its `pointer:` reason; a live run served from the cache matches its live candidate.
 
 ## 3. Comparer
 

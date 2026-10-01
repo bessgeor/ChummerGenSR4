@@ -16,7 +16,8 @@ internal sealed class ChummerSession(
     WindowGeometry geometry,
     TabNavigator tabs,
     LabelWaiter labels,
-    WindowCapturer capturer) : IAppSession
+    WindowCapturer capturer,
+    PointerParker pointer) : IAppSession
 {
     private static readonly TimeSpan WindowTimeout = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan LiveWindowTimeout = TimeSpan.FromSeconds(10);
@@ -29,10 +30,12 @@ internal sealed class ChummerSession(
     private IntPtr _mainWindow;
     private IntPtr _stableWindow;
     private Rectangle? _stableBounds;
+    private Point _pointerSpot;
 
     /// <summary>
-    /// Waits for a window and input idle, then maximizes and activates the largest window and waits
-    /// for input idle and stable bounds. Activating before the app is idle races its own startup.
+    /// Waits for a window and input idle, then maximizes and activates the largest window, waits
+    /// for input idle and stable bounds, and parks the pointer on its title bar before the startup
+    /// delay. Activating before the app is idle races its own startup.
     /// </summary>
     public void WaitUntilReady()
     {
@@ -42,7 +45,7 @@ internal sealed class ChummerSession(
         NativeMethods.ShowWindow(_mainWindow, NativeMethods.SwMaximize);
         activator.Activate(_mainWindow);
         WaitForInputIdle();
-        WaitForStableBounds();
+        _pointerSpot = pointer.Park(WaitForStableBounds());
         Thread.Sleep(timing.StartupDelay);
         process.Refresh();
         WaitForInputIdle();
@@ -102,6 +105,7 @@ internal sealed class ChummerSession(
         IntPtr window = LiveWindow();
         activator.Activate(window);
         capturer.FocusStatusBar(window);
+        pointer.EnsureAt(_pointerSpot);
         return capturer.Capture(window, bounds);
     }
 

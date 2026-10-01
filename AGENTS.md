@@ -55,4 +55,4 @@
 ## Desktop use
 
 - A capture run drives real windows. Only one live run may use the desktop at a time: never start a second run while one is active, and watch a slow run instead of restarting it.
-- Leave the mouse and keyboard alone during a run; another window taking the foreground fails the current action with a `window-activation` reason.
+- Leave the mouse and keyboard alone during a run; another window taking the foreground fails the current action with a `window-activation` reason. The capture runner parks the pointer in the middle of the app's title bar, and a pointer moved away from it fails the next capture with a `pointer` reason.

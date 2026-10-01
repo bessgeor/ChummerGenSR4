@@ -40,6 +40,17 @@ When the capture runner is given `--canonical-cache <dir>`, it SHALL compute for
 - **WHEN** a live canonical side fails
 - **THEN** nothing is stored for that case
 
+### Requirement: The pointer position does not decide captures
+Once the app's main window is maximized and its bounds are stable, the capture runner SHALL move the mouse pointer to the middle of the window's title bar, before the startup delay. Before each capture it SHALL check that the pointer is still there; if it is not, or if it cannot be moved or read, the capture action SHALL fail with a reason that starts with `pointer:`. The cache key's format version SHALL change whenever this placement changes.
+
+#### Scenario: Pointer left over a control
+- **WHEN** the pointer rests over a button or a text box of the app's window before a side starts
+- **THEN** the side's captures show no hover effect of that position
+
+#### Scenario: Pointer moved during a side
+- **WHEN** the pointer leaves its spot on the title bar before a capture
+- **THEN** that capture action fails with a `pointer:` reason naming both positions
+
 ### Requirement: UI timing is recorded by a decorator around the driver
 The capture runner SHALL measure every launch, activation, tab selection, label wait, wait, capture and close through a decorator around its UI driver and sessions, recording the case, side, operation, target, duration and whether the call threw, and SHALL pass every exception through unchanged. At the end of a run that reaches its last case it SHALL write `timing.json`, conforming to `parity-capture-timing.schema.json`, with each live side's samples in order and their total, and per operation the count, failures, total, median, 80th percentile and maximum. A side served from the cache SHALL have no samples.
 

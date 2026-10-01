@@ -12,7 +12,8 @@ namespace Parity.Capture.Cache;
 /// </summary>
 internal sealed class CacheKeyBuilder(FileHasher hasher)
 {
-    public const int Format = 1;
+    /// <summary>2: the pointer is parked on the title bar for every capture.</summary>
+    public const int Format = 2;
 
     public CacheKey Build(
         CacheSession session,

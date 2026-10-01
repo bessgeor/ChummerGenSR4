@@ -41,6 +41,7 @@ internal static class Program
         services.AddSingleton<TabNavigator>();
         services.AddSingleton<LabelWaiter>();
         services.AddSingleton<WindowCapturer>();
+        services.AddSingleton<PointerParker>();
         services.AddSingleton<ChummerUiDriver>();
         services.AddSingleton<TimingRecorder>();
         services.AddSingleton<IUiDriver>(provider => new TimedUiDriver(

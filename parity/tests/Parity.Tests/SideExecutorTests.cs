@@ -106,6 +106,18 @@ public sealed class SideExecutorTests : IDisposable
     }
 
     [Fact]
+    public void Pointer_moved_before_a_capture_fails_it_with_its_reason()
+    {
+        _driver.PointerMovedBeforeCapture = true;
+
+        SideRun run = Run(Case(new CaptureAction("common"), new WaitAction(10)));
+
+        Assert.Equal([OutcomeKind.Failed, OutcomeKind.NotRun], run.Actions.Select(action => action.Outcome));
+        Assert.Equal("pointer: scripted pointer move", run.Actions[0].Reason);
+        Assert.Empty(run.Captures);
+    }
+
+    [Fact]
     public void Startup_failure_marks_every_action_not_run()
     {
         _driver.LaunchFailure = new TimeoutException("no window");
