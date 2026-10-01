@@ -108,4 +108,4 @@ Thread `wf-20261001T181202Z-6a4639c6`, run `20261001T181209Z-1b3c0f7a`, exit 2. 
 
 ## Archive
 
-`npm run openspec:validate` before the archive printed `Totals: 6 passed, 0 failed (6 items)`; the archive command's output is recorded in the archive commit.
+`npm run openspec:validate` before the archive printed `Totals: 6 passed, 0 failed (6 items)`. `npx openspec archive add-discrepancy-diagnosis -y` printed `discrepancy-diagnosis: create` with `+ 9 added`, `parity-workflow: update` with `~ 3 modified`, `Totals: + 9, ~ 3, - 0, → 0` and `Change 'add-discrepancy-diagnosis' archived as '2026-10-02-add-discrepancy-diagnosis'.` It counted 7 of 8 tasks because task 3.2 is this archive step; the archived `tasks.md` has every task checked. The new spec's Purpose was the placeholder the archive writes and was replaced with a description of the capability. `npm run openspec:validate` after the archive and the Purpose edit printed `✓ spec/development-process`, `✓ spec/discrepancy-diagnosis`, `✓ spec/parity-contracts`, `✓ spec/parity-workflow`, `✓ spec/visual-parity-capture`, `✓ spec/visual-parity-compare` and `Totals: 6 passed, 0 failed (6 items)`.
