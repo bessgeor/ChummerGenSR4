@@ -2,6 +2,7 @@ import type { ContextManifest } from "../diagnosis/context.js";
 import type { BenchmarkItem } from "../evals/benchmark.js";
 import { verdicts, type EvalRecord } from "../evals/eval-record.js";
 import type { QueueEntry } from "../evals/review-queue.js";
+import type { CheckView } from "./cluster-check.js";
 
 export function escapeHtml(text: string): string {
   return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll("\"", "&quot;").replaceAll("'", "&#39;");
@@ -60,8 +61,10 @@ export type RecordView = {
   readonly manifest: ContextManifest;
   /** For a challenge: the hypothesis it challenged. */
   readonly hypothesis: unknown;
-  /** The cluster's check from the thread's `diagnosis.json`, or null when there is none. */
-  readonly check: unknown;
+  /** The cluster's check from the thread's `diagnosis.json`, or why there is none. */
+  readonly check: CheckView;
+  /** The token the verdict form carries: a form of another page cannot know it. */
+  readonly verdictToken: string;
   readonly items: readonly BenchmarkItem[];
   readonly position: number | null;
   readonly queued: number;
@@ -92,11 +95,12 @@ export function recordPage(view: RecordView): string {
     + `review ${labels.review === null ? "-" : `${labels.review.verdict} by ${escapeHtml(labels.review.reviewer)}`}</p>`
     + (labels.grader === null ? "" : `<p>Grader (advisory): ${labels.grader.score}. ${escapeHtml(labels.grader.rationale)}</p>`)
     + `<form class=verdict method=post action="/verdict"><input type=hidden name=id value="${escapeHtml(record.recordId)}">`
+    + `<input type=hidden name=token value="${escapeHtml(view.verdictToken)}">`
     + `<p>${buttons}</p><p><textarea name=note rows=2 cols=80 placeholder="note (optional)"></textarea></p></form>`
     + `<h2>Evidence</h2>${members}`
     + (view.hypothesis === null ? "" : `<h2>Challenged hypothesis</h2>${json(view.hypothesis)}`)
     + `<h2>Answer</h2>${json(record.output)}`
-    + `<h2>Check</h2>${view.check === null ? "<p>No check of this cluster in the thread's diagnosis.json.</p>" : json(view.check)}`
+    + `<h2>Check</h2>${"absent" in view.check ? `<p>No check to show: ${escapeHtml(view.check.absent)}</p>` : json(view.check.value)}`
     + (patches.length === 0 ? "" : `<h2>Accepted fix</h2>${patches}`)
     + differenceScript);
 }
