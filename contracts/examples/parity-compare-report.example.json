@@ -1,0 +1,107 @@
+{
+  "runId": "20261001T120000Z-1a2b3c4d",
+  "threshold": 0.00004,
+  "ocr": { "enabled": true, "language": "eng" },
+  "status": "analysis-failures",
+  "rows": [
+    {
+      "case": "build-Diego_v_alpha2_by_bessgeor",
+      "characterFile": "Diego_v_alpha2_by_bessgeor.chum",
+      "mode": "build",
+      "capture": "common",
+      "status": "analyzed",
+      "difference": 0.000231,
+      "differingPixels": 201,
+      "canonicalCapture": "captures/build-Diego_v_alpha2_by_bessgeor/canonical/common.png",
+      "candidateCapture": "captures/build-Diego_v_alpha2_by_bessgeor/candidate/common.png",
+      "canonicalSize": { "width": 1280, "height": 680 },
+      "candidateSize": { "width": 1280, "height": 680 },
+      "discrepancies": ["build-Diego_v_alpha2_by_bessgeor/common#1"]
+    },
+    {
+      "case": "build-Diego_v_alpha2_by_bessgeor",
+      "characterFile": "Diego_v_alpha2_by_bessgeor.chum",
+      "mode": "build",
+      "capture": "skills",
+      "status": "analyzed",
+      "difference": 0.000231,
+      "differingPixels": 201,
+      "canonicalCapture": "captures/build-Diego_v_alpha2_by_bessgeor/canonical/skills.png",
+      "candidateCapture": "captures/build-Diego_v_alpha2_by_bessgeor/candidate/skills.png",
+      "canonicalSize": { "width": 1280, "height": 680 },
+      "candidateSize": { "width": 1280, "height": 680 },
+      "discrepancies": ["build-Diego_v_alpha2_by_bessgeor/skills#1"]
+    },
+    {
+      "case": "build-Diego_v_alpha2_by_bessgeor",
+      "characterFile": "Diego_v_alpha2_by_bessgeor.chum",
+      "mode": "build",
+      "capture": "spells",
+      "status": "missing-candidate",
+      "difference": 1,
+      "canonicalCapture": "captures/build-Diego_v_alpha2_by_bessgeor/canonical/spells.png",
+      "canonicalSize": { "width": 1280, "height": 680 },
+      "discrepancies": []
+    },
+    {
+      "case": "build-Diego_v_alpha2_by_bessgeor",
+      "characterFile": "Diego_v_alpha2_by_bessgeor.chum",
+      "mode": "build",
+      "capture": "gear",
+      "status": "passed",
+      "difference": 0,
+      "canonicalCapture": "captures/build-Diego_v_alpha2_by_bessgeor/canonical/gear.png",
+      "candidateCapture": "captures/build-Diego_v_alpha2_by_bessgeor/candidate/gear.png",
+      "canonicalSize": { "width": 1280, "height": 680 },
+      "candidateSize": { "width": 1280, "height": 680 },
+      "discrepancies": []
+    }
+  ],
+  "discrepancies": [
+    {
+      "id": "build-Diego_v_alpha2_by_bessgeor/common#1",
+      "case": "build-Diego_v_alpha2_by_bessgeor",
+      "capture": "common",
+      "core": { "x": 1102, "y": 140, "width": 21, "height": 9 },
+      "crop": { "x": 1003, "y": 136, "width": 132, "height": 17 },
+      "differingPixels": 201,
+      "imageHash": "5f3c2a9d8e7b6a5f4e3d2c1b0a9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a19",
+      "canonicalCrop": "compare/crops/build-Diego_v_alpha2_by_bessgeor/common.1.canonical.png",
+      "candidateCrop": "compare/crops/build-Diego_v_alpha2_by_bessgeor/common.1.candidate.png",
+      "canonicalOcr": { "status": "text", "text": "Special Attributes 65 BP" },
+      "candidateOcr": { "status": "text", "text": "Special Attributes 75 BP" },
+      "representative": "build-Diego_v_alpha2_by_bessgeor/common#1"
+    },
+    {
+      "id": "build-Diego_v_alpha2_by_bessgeor/skills#1",
+      "case": "build-Diego_v_alpha2_by_bessgeor",
+      "capture": "skills",
+      "core": { "x": 1102, "y": 140, "width": 21, "height": 9 },
+      "crop": { "x": 1003, "y": 136, "width": 132, "height": 17 },
+      "differingPixels": 201,
+      "imageHash": "5f3c2a9d8e7b6a5f4e3d2c1b0a9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a19",
+      "canonicalCrop": "compare/crops/build-Diego_v_alpha2_by_bessgeor/skills.1.canonical.png",
+      "candidateCrop": "compare/crops/build-Diego_v_alpha2_by_bessgeor/skills.1.candidate.png",
+      "canonicalOcr": { "status": "empty" },
+      "candidateOcr": { "status": "error", "error": "InvalidOperationException: Failed to process image." },
+      "representative": "build-Diego_v_alpha2_by_bessgeor/common#1"
+    }
+  ],
+  "groups": [
+    {
+      "representative": "build-Diego_v_alpha2_by_bessgeor/common#1",
+      "members": ["build-Diego_v_alpha2_by_bessgeor/common#1", "build-Diego_v_alpha2_by_bessgeor/skills#1"]
+    }
+  ],
+  "totals": {
+    "rows": 4,
+    "passed": 1,
+    "analyzed": 2,
+    "sizeMismatches": 0,
+    "missing": 1,
+    "failed": 0,
+    "discrepancies": 2,
+    "groups": 1,
+    "ocrErrors": 1
+  }
+}

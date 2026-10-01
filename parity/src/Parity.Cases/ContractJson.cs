@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using CaptureResultsContract = Parity.Contracts.CaptureResults.CaptureResults;
 using CaptureSummaryContract = Parity.Contracts.CaptureSummary.CaptureSummary;
+using CompareReportContract = Parity.Contracts.CompareReport.CompareReport;
 using ParityCasesContract = Parity.Contracts.ParityCases.ParityCases;
 
 namespace Parity.Cases;
@@ -15,6 +16,7 @@ public static class ContractJson
     private static readonly JsonSerializerOptions CasesOptions = Strict(Parity.Contracts.ParityCases.Converter.Settings);
     private static readonly JsonSerializerOptions SummaryOptions = Strict(Parity.Contracts.CaptureSummary.Converter.Settings);
     private static readonly JsonSerializerOptions ResultsOptions = Strict(Parity.Contracts.CaptureResults.Converter.Settings);
+    private static readonly JsonSerializerOptions ReportOptions = Strict(Parity.Contracts.CompareReport.Converter.Settings);
 
     public static ParityCasesContract ReadCases(string json) => Read<ParityCasesContract>(json, CasesOptions);
 
@@ -22,11 +24,15 @@ public static class ContractJson
 
     public static CaptureResultsContract ReadResults(string json) => Read<CaptureResultsContract>(json, ResultsOptions);
 
+    public static CompareReportContract ReadReport(string json) => Read<CompareReportContract>(json, ReportOptions);
+
     public static string Write(ParityCasesContract document) => JsonSerializer.Serialize(document, CasesOptions);
 
     public static string Write(CaptureSummaryContract document) => JsonSerializer.Serialize(document, SummaryOptions);
 
     public static string Write(CaptureResultsContract document) => JsonSerializer.Serialize(document, ResultsOptions);
+
+    public static string Write(CompareReportContract document) => JsonSerializer.Serialize(document, ReportOptions);
 
     private static T Read<T>(string json, JsonSerializerOptions options)
         where T : class =>

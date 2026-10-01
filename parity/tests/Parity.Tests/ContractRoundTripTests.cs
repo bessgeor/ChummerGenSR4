@@ -13,6 +13,7 @@ public sealed class ContractRoundTripTests
         ["ParityCases"] = json => ContractJson.Write(ContractJson.ReadCases(json)),
         ["CaptureSummary"] = json => ContractJson.Write(ContractJson.ReadSummary(json)),
         ["CaptureResults"] = json => ContractJson.Write(ContractJson.ReadResults(json)),
+        ["CompareReport"] = json => ContractJson.Write(ContractJson.ReadReport(json)),
     };
 
     public static TheoryData<string> Schemas()
