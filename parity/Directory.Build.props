@@ -6,7 +6,8 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AnalysisLevel>latest</AnalysisLevel>
     <InvariantGlobalization>false</InvariantGlobalization>
-    <!-- The canonical capture cache keys on the runner's assemblies; without git queries no commit ID reaches their version or Source Link, so they change only with the code. -->
+    <!-- The canonical capture cache keys on the runner's assemblies. Without git queries no commit ID reaches their version or Source Link, and mapping the repository root to a fixed prefix keeps the build folder out of their paths, so they change only with the code. -->
     <EnableSourceControlManagerQueries>false</EnableSourceControlManagerQueries>
+    <PathMap>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..'))=/repo/</PathMap>
   </PropertyGroup>
 </Project>
