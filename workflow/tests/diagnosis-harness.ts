@@ -11,8 +11,7 @@ import type { CheckCapture, CheckCaptureRequest } from "../src/diagnosis/check-c
 import { DiagnosisService } from "../src/diagnosis/diagnosis-service.js";
 import type { ChallengeOutput, HypothesisOutput } from "../src/diagnosis/job-schemas.js";
 import { QuotaWaiter, type Sleep } from "../src/diagnosis/quota-waiter.js";
-import { processGit, sourceLines } from "../src/diagnosis/source-snapshot.js";
-import { sha256Lines } from "../src/steps/fingerprint.js";
+import { compiledSourceIdentity, processGit } from "../src/diagnosis/source-snapshot.js";
 import { buildWorkflowGraph, type WorkflowSteps } from "../src/graph/workflow-graph.js";
 import { runWorkflow, type RunDependencies } from "../src/graph/run-workflow.js";
 import type { WorkflowStateValue } from "../src/graph/workflow-state.js";
@@ -125,8 +124,8 @@ export class FakeAgents implements AgentRunner {
   }
 }
 
-const fingerprints = (source: string): InputFingerprints => ({
-  canonicalExecutable: "e", canonicalSupport: "s", canonicalSupportStat: "ss", tessdata: "default", candidate: "candidate", overlay: "none", captureTools: "ct", compareTools: "mt", source,
+const fingerprints = (candidateSource: string): InputFingerprints => ({
+  canonicalExecutable: "e", canonicalSupport: "s", canonicalSupportStat: "ss", tessdata: "default", candidate: "candidate", overlay: "none", captureTools: "ct", compareTools: "mt", candidateSource,
 });
 
 const baseArguments: Arguments = {
@@ -155,8 +154,10 @@ export type HarnessOptions = {
   readonly checkStatus?: 0 | 1 | 2;
   /** Makes the scratch folders of the model jobs; by default real ones. */
   readonly createScratchFolder?: typeof createScratchFolder;
-  /** The source fingerprint the build step reports; by default that of the fixture repository, as it is. */
-  readonly source?: string;
+  /** The compiled-source identity the candidate's build recorded; by default that of the fixture repository when the build step runs. */
+  readonly candidateSource?: string;
+  /** Runs after triage, before diagnosis, with the fixture repository's folder: an edit made between the build and the diagnosis. */
+  readonly afterTriage?: (repository: string) => void;
 };
 
 /** A workflow whose host steps are fakes over fixture run folders, with the real diagnosis service and fake agents. */
@@ -171,10 +172,12 @@ export function diagnosisHarness(options: HarnessOptions) {
   const lines: string[] = [];
   const log = (line: string) => lines.push(line);
   const steps: WorkflowSteps = {
-    build: async () => fingerprints(options.source ?? sha256Lines(await sourceLines(sourceRepository, processGit(sourceRepository)))),
+    // The build records the compiled source it started from; by default that is the fixture repository as it is now.
+    build: async () => fingerprints(options.candidateSource ?? await compiledSourceIdentity(sourceRepository, processGit(sourceRepository))),
     capture: async (_context, item): Promise<StepOutcome> => ({ case: item.name, status: 1, runFolder: folders[item.name] ?? join(root, "runs", item.name), key: "k", reusedFrom: null }),
     compare: async (_context, capture) => capture,
     triage: async (input) => {
+      options.afterTriage?.(sourceRepository);
       writeFileSync(triagePath, JSON.stringify(triageDocument(input.threadId, options.spots, folders)));
       const clusters = new Set(options.spots.map((spot) => spot.x)).size;
       return { path: triagePath, discrepancies: options.spots.length, clusters, newClusters: clusters, otherFindings: 0 };

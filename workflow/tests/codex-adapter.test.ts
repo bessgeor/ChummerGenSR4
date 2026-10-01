@@ -164,3 +164,14 @@ test("a job past its time limit fails as infra; a stopped run is a setup error",
   await rejects(running, SetupError);
   await rejects(adapter.run(job({ signal: AbortSignal.abort() })), SetupError);
 });
+
+test("a job log that cannot be created or written is a setup error naming the file, and the job is stopped", async () => {
+  const environment = { CODEX_HOME: codexHome("chatgpt") };
+  const folder = mkdtempSync(join(tmpdir(), "workflow-codex-"));
+  const events: ThreadEvent[] = [{ type: "thread.started", thread_id: "t" }, { type: "turn.completed", usage }];
+  // The log file is a folder: the stream fails when it opens.
+  await rejects(runWith(events, environment, job({ logFile: folder })), (error: Error) => error instanceof SetupError && error.message.includes(folder));
+  const file = join(folder, "a-file");
+  writeFileSync(file, "x");
+  await rejects(runWith(events, environment, job({ logFile: join(file, "logs", "codex.jsonl") })), (error: Error) => error instanceof SetupError && /cannot be created/.test(error.message));
+});

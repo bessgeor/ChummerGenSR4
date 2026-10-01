@@ -1,5 +1,5 @@
 import { deepStrictEqual, equal, ok, rejects } from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -205,4 +205,15 @@ test("the evidence images are listed in the prompt and the model must open every
   // A request that never got a result does not count either.
   const unanswered = await runWith([{ lines: [init(), reads(images)[0]!, answer], code: 0 }], {}, job({ images }));
   equal(failureOf(unanswered.result).kind, "invalid_output");
+});
+
+test("a job log that cannot be created or written is a setup error naming the file, not an unhandled stream error", async () => {
+  const folder = mkdtempSync(join(tmpdir(), "workflow-claude-"));
+  const answer = result({ structured_output: { answer: 1 } });
+  // The log file is a folder: the stream fails when it opens.
+  await rejects(runWith([{ lines: [init(), answer], code: 0 }], {}, job({ logFile: folder })), (error: Error) => error instanceof SetupError && error.message.includes(folder));
+  // The log's folder cannot be created because a file is in its place.
+  const file = join(folder, "a-file");
+  writeFileSync(file, "x");
+  await rejects(runWith([{ lines: [init(), answer], code: 0 }], {}, job({ logFile: join(file, "logs", "claude.jsonl") })), (error: Error) => error instanceof SetupError && /cannot be created/.test(error.message));
 });

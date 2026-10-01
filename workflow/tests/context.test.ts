@@ -1,12 +1,15 @@
 import { deepStrictEqual, equal, ok, rejects } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { canonicalJson, ContextManifestSchema, contextHash, sealContext, type ContextInput } from "../src/diagnosis/context.js";
-import { sha256Lines } from "../src/steps/fingerprint.js";
-import { createSourceSnapshot, processGit, sourceLines, type SourceSnapshot } from "../src/diagnosis/source-snapshot.js";
+import { compiledSourceIdentity, createSourceSnapshot, processGit, type SourceSnapshot } from "../src/diagnosis/source-snapshot.js";
+import { recordedCandidateSource, unrecordedSource } from "../src/diagnosis/candidate-source.js";
+import { HostSteps } from "../src/host-steps.js";
+import type { HostRunner } from "../src/host/host-runner.js";
 import { SetupError } from "../src/host/setup-error.js";
+import { workflowPaths } from "../src/paths.js";
 import { plannedCase, readReport, repository, runFolders, scratch, triageDocument, write, type Spot } from "./diagnosis-fixtures.js";
 
 test("the snapshot copies the working tree's source and data without history, ignored or deleted files", async () => {
@@ -32,22 +35,52 @@ const spots: Spot[] = [
 
 function contextInput(root: string): ContextInput {
   const folders = runFolders(root, spots);
-  const snapshot: SourceSnapshot = { folder: join(root, "diagnosis", "source"), identity: "s".repeat(64), commit: "c".repeat(40), files: 3 };
+  const snapshot: SourceSnapshot = { folder: join(root, "diagnosis", "source"), identity: "s".repeat(64), compiledIdentity: "c".repeat(64), commit: "c".repeat(40), files: 3 };
   return {
     triage: triageDocument("wf-1", spots, folders), clusterId: "d-0000000000000100",
     cases: [plannedCase(root, "alpha"), plannedCase(root, "beta", "career")], readReport, snapshot, candidate: "candidate-hash",
   };
 }
 
-test("the source lines of the working tree, without copying, give the identity of its snapshot; any change to a data or source file changes it", async () => {
+test("the compiled-source identity of the working tree equals the snapshot's; a data or language file does not change it, a source file does", async () => {
   const root = repository();
   const git = processGit(root);
   const snapshot = await createSourceSnapshot(root, join(scratch(), "source"), git);
-  equal(sha256Lines(await sourceLines(root, git)), snapshot.identity);
-  // A data file is part of the identity, though it is not an input of the build.
+  equal(await compiledSourceIdentity(root, git), snapshot.compiledIdentity);
+  // Data and language files are no build input: the snapshot's identity changes, the compiled one does not.
   write(root, "bin/data/skills.xml", "<skills><skill/></skills>");
-  ok(sha256Lines(await sourceLines(root, git)) !== snapshot.identity);
+  write(root, "bin/lang/en-us.xml", "<lang><x/></lang>");
+  equal(await compiledSourceIdentity(root, git), snapshot.compiledIdentity);
+  ok((await createSourceSnapshot(root, join(scratch(), "source"), git)).identity !== snapshot.identity);
+  write(root, "Chummer/frmCreate.cs", "class frmCreate { int edited; }");
+  ok((await compiledSourceIdentity(root, git)) !== snapshot.compiledIdentity);
 });
+test("the candidate build records the compiled source it started from, only when it ran and succeeded", async () => {
+  const root = repository();
+  const paths = workflowPaths(root);
+  const git = processGit(root);
+  equal(recordedCandidateSource(paths), unrecordedSource);
+  let status = 1;
+  let builds = 0;
+  const host: HostRunner = {
+    async run() {
+      mkdirSync(paths.candidateApp, { recursive: true });
+      // An edit while the compiler runs: the record keeps the source as the build started.
+      write(root, "Chummer/frmCreate.cs", `class frmCreate { int editedWhileBuilding${++builds}; }`);
+      return status;
+    },
+  };
+  const steps = new HostSteps(paths, host, undefined as never, undefined as never, undefined as never, () => new Date());
+  await rejects(steps.buildCandidate(), SetupError);
+  equal(recordedCandidateSource(paths), unrecordedSource);
+  // A failed build records nothing. The next build records the source as it is when that build starts.
+  status = 0;
+  const atStart = await compiledSourceIdentity(root, git);
+  await steps.buildCandidate();
+  equal(recordedCandidateSource(paths), atStart);
+  ok((await compiledSourceIdentity(root, git)) !== atStart);
+});
+
 test("a sealed context holds the members, scenarios, vocabulary and source identity, with copied crops", async () => {
   const root = scratch();
   const folder = join(root, "diagnosis", "d-0000000000000100");

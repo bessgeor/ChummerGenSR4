@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { InMemoryStore, MemorySaver } from "@langchain/langgraph";
 import type { ClusterDiagnosis } from "../src/diagnosis/cluster-diagnosis.js";
 import { nextDiagnosisRoute } from "../src/diagnosis/cluster-diagnosis.js";
+import { unrecordedSource } from "../src/diagnosis/candidate-source.js";
 import { QuotaWaiter } from "../src/diagnosis/quota-waiter.js";
 import { EvalRecordSchema, recordNamespace } from "../src/evals/eval-record.js";
 import { nodeMode } from "../src/graph/workflow-graph.js";
@@ -209,13 +210,34 @@ test("a job that waited in the model pool does not start once the jobs before it
   equal(state.agentMilliseconds, 1000);
 });
 
-test("diagnosis refuses a source that differs from the one fingerprinted when the build step ended, and no job runs", async () => {
-  const harness = diagnosisHarness({ spots: [twoClusters[0]!], source: "0".repeat(64) });
+test("an edit of the compiled source without a rebuild ends the run with 3 before any job", async () => {
+  // The candidate's build recorded the source as it was; Chummer/ is edited afterwards and not built again.
+  const harness = diagnosisHarness({ spots: [twoClusters[0]!], afterTriage: (repository) => writeFileSync(join(repository, "Chummer", "frmCreate.cs"), "class frmCreate { int edited; }") });
   equal(await harness.start(), 3);
   equal(harness.agents.calls.length, 0);
-  ok(harness.lines.some((line) => /Setup error: The source under Chummer, bin\/data, bin\/lang changed since the thread's build step .*Start a new thread/.test(line)), harness.lines.join("\n"));
+  ok(harness.lines.some((line) => /Setup error: The compiled source \(Chummer\/\) differs from the source the candidate was built from .*Build again: run without --only/.test(line)), harness.lines.join("\n"));
 });
 
+test("a data or language file edited after the build gives no failure", async () => {
+  const harness = diagnosisHarness({
+    spots: [twoClusters[0]!],
+    afterTriage: (repository) => {
+      writeFileSync(join(repository, "bin", "data", "skills.xml"), "<skills><skill/></skills>");
+      writeFileSync(join(repository, "bin", "lang", "en-us.xml"), "<lang><x/></lang>");
+    },
+  });
+  equal(await harness.start(), 1);
+  equal(harness.agents.calls.length, 2);
+});
+
+test("a candidate that recorded no source is refused with what to do", async () => {
+  const harness = diagnosisHarness({ spots: [twoClusters[0]!], candidateSource: unrecordedSource });
+  equal(await harness.start(), 3);
+  equal(harness.agents.calls.length, 0);
+  ok(harness.lines.some((line) => /The candidate has no recorded source: it was not built by the workflow's build step\. Run without --only/.test(line)), harness.lines.join("\n"));
+  // The refusal needs no snapshot, so none is copied into the thread's folder.
+  ok(!existsSync(join(harness.root, "threads", harness.threadId(), "diagnosis", "source")));
+});
 test("a job sees a copy of its context and the snapshot outside the repository and the thread, which is removed afterwards", async () => {
   const harness = diagnosisHarness({ spots: [twoClusters[0]!] });
   equal(await harness.start(), 1);

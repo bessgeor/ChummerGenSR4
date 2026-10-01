@@ -1,9 +1,9 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { createWriteStream, mkdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { resolve } from "node:path";
 import { killTree } from "../host/host-runner.js";
 import { SetupError } from "../host/setup-error.js";
 import type { AgentFailure, AgentJob, AgentResult, AgentRunner, AgentUsage } from "./agent-job.js";
+import { JobLog } from "./job-log.js";
 import { childEnvironment } from "./child-environment.js";
 import { claudeNativeBesideShim, resolveExecutable, type ResolvedExecutable } from "./executable.js";
 import { classifyFailure, failure, finishOutput, jsonSchemaOf } from "./job-output.js";
@@ -143,8 +143,8 @@ export class ClaudeAdapter implements AgentRunner {
         reject(new SetupError(`${job.label}: not started because the run was stopped.`));
         return;
       }
-      mkdirSync(dirname(job.logFile), { recursive: true });
-      const log = createWriteStream(job.logFile);
+      // A log that cannot be written stops the job; closing it then throws a setup error.
+      const log = new JobLog(job.logFile, job.label, () => this.stop(child));
       const env = childEnvironment(this.environment, billingVariables, { CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" });
       const child = this.spawnProcess(program, claudeArguments(job),
         { cwd: job.workspace.folder, env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
@@ -207,10 +207,10 @@ export class ClaudeAdapter implements AgentRunner {
         if (pending.length > 0) onLine(pending);
         state.code = code;
         // The log is complete before the job's result is used.
-        log.end(() => {
+        log.close().then(() => {
           if (aborted) reject(new SetupError(`${job.label}: the Claude job was stopped because the run was stopped.`));
           else resolve(state);
-        });
+        }, reject);
       };
       // A CLI that cannot start reports an error and may never close.
       child.on("error", (error) => {

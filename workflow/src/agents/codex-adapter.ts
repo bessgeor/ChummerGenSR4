@@ -1,9 +1,10 @@
-import { createWriteStream, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { Codex, type CodexOptions, type Input, type ThreadEvent, type ThreadOptions, type TurnOptions, type Usage } from "@openai/codex-sdk";
 import { SetupError } from "../host/setup-error.js";
 import type { AgentFailure, AgentJob, AgentResult, AgentRunner, AgentUsage } from "./agent-job.js";
+import { JobLog } from "./job-log.js";
 import { childEnvironment } from "./child-environment.js";
 import { classifyFailure, failure, finishOutput, jsonSchemaOf, parseAnswer } from "./job-output.js";
 
@@ -77,6 +78,8 @@ export class CodexAdapter implements AgentRunner {
       ...(this.executable === null ? {} : { codexPathOverride: this.executable }),
     });
     const controller = new AbortController();
+    // A log that cannot be written stops the job; closing it then throws a setup error. It is made before the timer, so a failure leaves nothing running.
+    const log = new JobLog(job.logFile, job.label, () => controller.abort());
     // Set by the timer and the run's signal, which TypeScript's narrowing does not see.
     let stopped = null as "timeout" | "run" | null;
     let guard: AgentFailure | null = null;
@@ -89,8 +92,6 @@ export class CodexAdapter implements AgentRunner {
       controller.abort();
     };
     job.signal?.addEventListener("abort", abort, { once: true });
-    mkdirSync(dirname(job.logFile), { recursive: true });
-    const log = createWriteStream(job.logFile);
     let answer: string | null = null;
     // The failed turn's own message comes first; a stream error or the SDK's exit error after it is only a fallback.
     let failedTurn: string | null = null;
@@ -125,7 +126,7 @@ export class CodexAdapter implements AgentRunner {
     } finally {
       clearTimeout(timer);
       job.signal?.removeEventListener("abort", abort);
-      await new Promise<void>((resolve) => log.end(resolve));
+      await log.close();
     }
 
     if (stopped === "run") throw new SetupError(`${job.label}: the Codex job was stopped because the run was stopped.`);

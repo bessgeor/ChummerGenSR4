@@ -7,11 +7,21 @@ import { sha256File, sha256Lines } from "../steps/fingerprint.js";
 /** The folders the candidate is built and run from: the app's source and its tracked data and translations. */
 export const snapshotFolders = ["Chummer", "bin/data", "bin/lang"] as const;
 
+/** The folder the candidate is compiled from. `bin/data` and `bin/lang` are no build input: capture steps copy them into each staged app. */
+const compiledFolder = "Chummer/";
+
+/** SHA-256 over the lines (`path<TAB>SHA-256`) of the compiled source files among the snapshot lines. */
+function compiledIdentityOf(lines: readonly string[]): string {
+  return sha256Lines(lines.filter((line) => line.startsWith(compiledFolder)));
+}
+
 export type SourceSnapshot = {
   /** The snapshot's folder: a plain copy of the files, without version history. */
   readonly folder: string;
   /** SHA-256 over the sorted relative paths and their files' SHA-256. */
   readonly identity: string;
+  /** The same over the compiled source (`Chummer/`) only: what the candidate's build recorded. */
+  readonly compiledIdentity: string;
   /** The commit the working tree was on when the snapshot was taken. */
   readonly commit: string;
   readonly files: number;
@@ -40,11 +50,13 @@ function sourcePaths(repositoryRoot: string, git: Git): string[] {
   return paths;
 }
 
-/** The lines (`path<TAB>SHA-256`) whose hash is the identity of the snapshot the working tree would give now, without copying anything. */
-export async function sourceLines(repositoryRoot: string, git: Git): Promise<string[]> {
+/** The identity of the compiled source of the working tree now, without copying anything; equals `compiledIdentity` of a snapshot taken now. */
+export async function compiledSourceIdentity(repositoryRoot: string, git: Git): Promise<string> {
   const lines: string[] = [];
-  for (const path of sourcePaths(repositoryRoot, git)) lines.push(`${path}\t${await sha256File(join(repositoryRoot, path))}`);
-  return lines;
+  for (const path of sourcePaths(repositoryRoot, git).filter((item) => item.startsWith(compiledFolder))) {
+    lines.push(`${path}\t${await sha256File(join(repositoryRoot, path))}`);
+  }
+  return sha256Lines(lines);
 }
 
 /**
@@ -62,5 +74,5 @@ export async function createSourceSnapshot(repositoryRoot: string, folder: strin
     copyFileSync(join(repositoryRoot, path), target);
     lines.push(`${path}\t${await sha256File(target)}`);
   }
-  return { folder, identity: sha256Lines(lines), commit: git(["rev-parse", "HEAD"]).trim(), files: paths.length };
+  return { folder, identity: sha256Lines(lines), compiledIdentity: compiledIdentityOf(lines), commit: git(["rev-parse", "HEAD"]).trim(), files: paths.length };
 }

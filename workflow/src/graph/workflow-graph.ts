@@ -107,7 +107,7 @@ export function buildWorkflowGraph(steps: WorkflowSteps, diagnosis: DiagnosisSte
     .addNode("prepare_diagnosis", async (state: WorkflowStateValue) => {
       if (state.triageSummary === null || state.fingerprints === null) throw new Error("Diagnosis ran before triage.");
       const clusters = await diagnosis.prepare({
-        threadId: state.threadId, triagePath: state.triageSummary.path, caseFile: state.options.caseFile, candidate: state.fingerprints.candidate, source: state.fingerprints.source,
+        threadId: state.threadId, triagePath: state.triageSummary.path, caseFile: state.options.caseFile, candidate: state.fingerprints.candidate, candidateSource: state.fingerprints.candidateSource,
       });
       return { clusters };
     })

@@ -155,6 +155,8 @@ test("the profile's agents part is validated strictly", () => {
     { jobs: { hypothesis: { provider: "claude", effort: "extreme" } } },
     { modelPool: 0 },
     { runBudgetMinutes: -1 },
+    // A timer above 2^31-1 ms would fire at once.
+    { jobs: { hypothesis: { provider: "claude", timeoutMinutes: 100_000 } } },
   ]) {
     writeFileSync(path, JSON.stringify({ agents }));
     throws(() => loadProfile({ PARITY_WORKFLOW_PROFILE: path }), (error: Error) => error instanceof SetupError && error.message.includes(path), JSON.stringify(agents));

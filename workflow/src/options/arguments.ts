@@ -40,7 +40,7 @@ export const usage = `Usage: npm start -- [options]
     --tessdata <dir>
   Workflow:
     --only <node>              capture, compare, triage or diagnose; earlier nodes must find their completed steps
-    --recapture                capture every planned case again, ignoring recorded capture steps (not with --only compare or triage)
+    --recapture                capture every planned case again, ignoring recorded capture steps (only with --only capture, or without --only)
     --no-diagnosis             end the run after triage: no model job and no check capture
     --resume <thread>          continue a thread that stopped, with the options it was started with
     --help

@@ -20,7 +20,7 @@ import { StepStore } from "../src/steps/step-store.js";
 
 const fingerprints: InputFingerprints = {
   canonicalExecutable: "exe", canonicalSupport: "support", canonicalSupportStat: "stat", tessdata: "default", candidate: "candidate", overlay: "none",
-  captureTools: "ct", compareTools: "mt", source: "src",
+  captureTools: "ct", compareTools: "mt", candidateSource: "src",
 };
 
 const options: RunOptions = {
@@ -119,15 +119,15 @@ test("the capture key changes with every input", () => {
     captureKey(item, "fixture", "f".repeat(64), options, fingerprints),
     captureKey(item, "fixture", environment, { ...options, threshold: 0.1 }, fingerprints),
     captureKey(item, "fixture", environment, { ...options, canonicalCache: null }, fingerprints),
-    ...(Object.keys(fingerprints) as (keyof InputFingerprints)[]).filter((name) => name !== "compareTools" && name !== "tessdata" && name !== "canonicalSupportStat" && name !== "source")
+    ...(Object.keys(fingerprints) as (keyof InputFingerprints)[]).filter((name) => name !== "compareTools" && name !== "tessdata" && name !== "canonicalSupportStat" && name !== "candidateSource")
       .map((name) => captureKey(item, "fixture", environment, options, { ...fingerprints, [name]: "changed" })),
   ];
   for (const variant of variants) notEqual(variant.key, base);
   equal(captureKey(item, "fixture", environment, { ...options, canonicalCache: "D:/elsewhere" }, fingerprints).key, base);
   equal(captureKey(item, "fixture", environment, options, { ...fingerprints, compareTools: "changed" }).key, base);
   equal(captureKey(item, "fixture", environment, options, { ...fingerprints, canonicalSupportStat: "changed" }).key, base);
-  // The source fingerprint guards diagnosis only; it is not part of a step key, so recorded steps stay valid.
-  equal(captureKey(item, "fixture", environment, options, { ...fingerprints, source: "changed" }).key, base);
+  // The recorded source guards diagnosis only; it is not part of a step key, so recorded steps stay valid.
+  equal(captureKey(item, "fixture", environment, options, { ...fingerprints, candidateSource: "changed" }).key, base);
   const compareBase = compareKey("k", "r", "c", options, fingerprints).key;
   for (const variant of [compareKey("x", "r", "c", options, fingerprints), compareKey("k", "x", "c", options, fingerprints),
     compareKey("k", "r", "x", options, fingerprints), compareKey("k", "r", "c", { ...options, noOcr: true }, fingerprints),

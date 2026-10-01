@@ -24,7 +24,8 @@ import {
 } from "./job-schemas.js";
 import { challengePrompt, hypothesisPrompt } from "./prompts.js";
 import type { QuotaWaiter } from "./quota-waiter.js";
-import { createSourceSnapshot, snapshotFolders, type Git } from "./source-snapshot.js";
+import { unrecordedSource } from "./candidate-source.js";
+import { createSourceSnapshot, type Git } from "./source-snapshot.js";
 import { validateChallenge, validateHypothesis } from "./validation.js";
 
 /** Where a thread's diagnosis lives: the snapshot, a context folder per cluster, and the agents' logs. */
@@ -49,7 +50,7 @@ export type DiagnosisDependencies = {
   readonly log: (line: string) => void;
 };
 
-export type PrepareInput = { readonly threadId: string; readonly triagePath: string; readonly caseFile: string; readonly candidate: string; readonly source: string };
+export type PrepareInput = { readonly threadId: string; readonly triagePath: string; readonly caseFile: string; readonly candidate: string; readonly candidateSource: string };
 
 export type JobInput = {
   readonly threadId: string;
@@ -81,11 +82,15 @@ export class DiagnosisService {
     const triage = readDocument(input.triagePath, TriageDocumentSchema);
     if (triage.clusters.length === 0) return {};
     const folders = diagnosisFolders(this.dependencies.threadFolder(input.threadId));
+    // The models explain this source, so its compiled part must be the source the captured candidate was built from, as its build recorded it.
+    // Without a record nothing can be compared, so no snapshot is taken.
+    if (input.candidateSource === unrecordedSource) {
+      throw new SetupError("The candidate has no recorded source: it was not built by the workflow's build step. Run without --only so that the build records it.");
+    }
     const snapshot = await createSourceSnapshot(this.dependencies.repositoryRoot, folders.source, this.dependencies.git);
-    // The models explain this source, so it must be the source the thread captured: its files by content, as fingerprinted when the build step ended.
-    if (snapshot.identity !== input.source) {
-      throw new SetupError(`The source under ${snapshotFolders.join(", ")} changed since the thread's build step (identity ${input.source.slice(0, 12)}, now ${snapshot.identity.slice(0, 12)}); `
-        + `the pixels do not show this source. Start a new thread.`);
+    if (snapshot.compiledIdentity !== input.candidateSource) {
+      throw new SetupError(`The compiled source (Chummer/) differs from the source the candidate was built from (recorded ${input.candidateSource.slice(0, 12)}, now ${snapshot.compiledIdentity.slice(0, 12)}); `
+        + "the pixels do not show this source. Build again: run without --only.");
     }
     this.dependencies.log(`Diagnosis: source snapshot of ${snapshot.files} files at ${snapshot.commit.slice(0, 12)}; ${triage.clusters.length} clusters.`);
     const cases = this.dependencies.allCases(input.caseFile);

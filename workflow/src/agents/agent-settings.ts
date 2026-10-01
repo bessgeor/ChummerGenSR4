@@ -5,7 +5,8 @@ const ChoiceSchema = z.strictObject({
   provider: z.enum(providers),
   model: z.string().min(1).nullable().optional(),
   effort: z.enum(efforts).optional(),
-  timeoutMinutes: z.number().positive().optional(),
+  // Node clamps a timer above 2^31-1 ms (35 791 minutes) to 1 ms, which would stop every job at once.
+  timeoutMinutes: z.number().positive().max(35_000).optional(),
 });
 
 /** The `agents` part of the local workflow profile; every field is optional. */

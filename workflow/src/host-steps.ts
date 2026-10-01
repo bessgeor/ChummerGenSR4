@@ -4,6 +4,8 @@ import type { PlannedCase } from "./cases/case-plan.js";
 import type { TriageInput, WorkflowSteps } from "./graph/workflow-graph.js";
 import type { TriageSummary } from "./graph/workflow-state.js";
 import type { HostRunner } from "./host/host-runner.js";
+import { recordCandidateSource } from "./diagnosis/candidate-source.js";
+import { compiledSourceIdentity, processGit } from "./diagnosis/source-snapshot.js";
 import { SetupError } from "./host/setup-error.js";
 import type { RunOptions } from "./options/run-options.js";
 import type { WorkflowPaths } from "./paths.js";
@@ -38,13 +40,16 @@ export class HostSteps implements WorkflowSteps {
     return fingerprintInputs(this.paths, options);
   }
 
-  private async buildCandidate(signal: AbortSignal | undefined): Promise<void> {
+  /** Builds the candidate and records the compiled source it was built from, taken before the build so an edit during it shows. */
+  async buildCandidate(signal?: AbortSignal): Promise<void> {
+    const compiled = await compiledSourceIdentity(this.paths.repositoryRoot, processGit(this.paths.repositoryRoot));
     const status = await this.host.run({
       resource: "cpu", label: "build candidate", command: process.execPath,
       args: [join(this.paths.repositoryRoot, "parity", "scripts", "build-candidate.mjs")],
       ...(signal === undefined ? {} : { signal }),
     });
     if (status !== 0) throw new SetupError(`The candidate build failed (exit ${status}); nothing was captured.`);
+    recordCandidateSource(this.paths, compiled);
   }
 
   private async buildTools(signal: AbortSignal | undefined): Promise<void> {
