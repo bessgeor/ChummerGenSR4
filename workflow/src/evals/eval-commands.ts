@@ -1,5 +1,7 @@
 import type { BaseStore } from "@langchain/langgraph-checkpoint";
-import { join } from "node:path";
+import { randomBytes } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import type { AgentSettings } from "../agents/agent-settings.js";
 import type { AgentRunners } from "../agents/agent-runners.js";
 import type { QuotaWaiter } from "../diagnosis/quota-waiter.js";
@@ -10,7 +12,9 @@ import type { WorkflowPaths } from "../paths.js";
 import { addBenchmarkItem, checkBenchmarkItem, readBenchmark } from "./benchmark.js";
 import { CommandOptions } from "./command-options.js";
 import { listRecords } from "./eval-record.js";
+import { comparisonLines, compareRuns, metrics } from "./comparison.js";
 import { freezeDataset } from "./dataset.js";
+import { resumeEvalRun, runPartitions, startEvalRun, summaryLines } from "./eval-run.js";
 import { gradeRecords } from "./grader.js";
 import { labelHindsight } from "./hindsight.js";
 import { recordSummary } from "./record-summary.js";
@@ -29,6 +33,11 @@ export const evalUsage = `Usage: npm run eval -- <command> [options]
                                   print the review queue (npm run review shows it)
   freeze --job <hypothesis|challenge> --name <name> [--seed <text>] [--test-percent <0-100>] [--reason <text>]
                                   freeze the next version of a dataset under out/evals/datasets/<name>/
+  run --dataset <folder> [--partition test|development|all] [--repeat <n>] [--name <text>]
+                                  run the current prompt with the profile's agent choice on a dataset (out/evals/runs/<run>/)
+  run --resume <run>              finish a stopped eval run with its stored settings
+  compare --baseline <run> --candidate <run> [--metric prediction|rootCause]
+                                  paired comparison of two eval runs with a 95% confidence interval
 
 Exit status: 0 done, 1 certificate refused, 2 a grader job failed, 3 setup error.`;
 
@@ -134,7 +143,49 @@ const freeze: Command = async (args, context) => {
   return 0;
 };
 
-const commands: Readonly<Record<string, Command>> = { records, benchmark, hindsight, grade, queue, freeze };
+function runDependencies(context: EvalContext) {
+  return {
+    store: context.store, agents: context.agents, quota: context.quota, runsFolder: join(context.paths.evalsFolder, "runs"),
+    createScratchFolder: context.createScratchFolder, now: context.now, log: context.log,
+    newRunId: () => `er-${context.now().toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "")}-${randomBytes(4).toString("hex")}`,
+    ...(context.signal === undefined ? {} : { signal: context.signal }),
+  };
+}
+
+const run: Command = async (args, context) => {
+  const options = CommandOptions.parse("run", args, ["dataset", "partition", "repeat", "name", "resume"]);
+  const resumed = options.text("resume");
+  if (resumed !== null) {
+    for (const other of ["dataset", "partition", "repeat", "name"]) {
+      if (options.text(other) !== null) throw new SetupError(`--resume takes no --${other}: a run keeps the settings it started with.`);
+    }
+  }
+  const { folder, summary } = resumed !== null
+    ? await resumeEvalRun(runDependencies(context), resumed)
+    : await startEvalRun(runDependencies(context), {
+      datasetFolder: resolve(options.required("dataset")), partition: options.choice("partition", runPartitions, "test"),
+      repeat: options.number("repeat", 1, 1, 100, true), name: options.text("name"), settings: context.agentSettings(),
+    });
+  for (const line of summaryLines(summary)) context.log(line);
+  context.log(`Run folder: ${folder}`);
+  return 0;
+};
+
+const compare: Command = async (args, context) => {
+  const options = CommandOptions.parse("compare", args, ["baseline", "candidate", "metric"]);
+  const runs = join(context.paths.evalsFolder, "runs");
+  const metric = options.choice("metric", metrics, "prediction");
+  const comparison = compareRuns(join(runs, options.required("baseline")), join(runs, options.required("candidate")), metric, context.now());
+  const folder = join(context.paths.evalsFolder, "comparisons");
+  mkdirSync(folder, { recursive: true });
+  const path = join(folder, `${comparison.baseline}--${comparison.candidate}-${metric}.json`);
+  writeFileSync(path, `${JSON.stringify(comparison, null, 2)}\n`);
+  for (const line of comparisonLines(comparison)) context.log(line);
+  context.log(`Comparison: ${path}`);
+  return 0;
+};
+
+const commands: Readonly<Record<string, Command>> = { records, benchmark, hindsight, grade, queue, freeze, run, compare };
 
 /** Runs one evaluation command and returns its exit status; a setup error is thrown. */
 export async function runEvalCommand(args: readonly string[], context: EvalContext): Promise<number> {
