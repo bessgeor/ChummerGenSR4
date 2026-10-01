@@ -25,6 +25,15 @@ export const SideSchema = z.enum([
 ]);
 export type Side = z.infer<typeof SideSchema>;
 
+// live: the side ran in this run; cache: its record and captures came from the canonical
+// capture cache.
+
+export const SourceSchema = z.enum([
+    "cache",
+    "live",
+]);
+export type Source = z.infer<typeof SourceSchema>;
+
 
 export const StatusSchema = z.enum([
     "completed",
@@ -60,6 +69,14 @@ export const CanonicalExecutableSchema = z.object({
     "stagedSha256Before": z.string().optional(),
 });
 export type CanonicalExecutable = z.infer<typeof CanonicalExecutableSchema>;
+
+export const CanonicalCacheSchema = z.object({
+    "hits": z.number(),
+    "misses": z.number(),
+    "path": z.string(),
+    "stored": z.number(),
+});
+export type CanonicalCache = z.infer<typeof CanonicalCacheSchema>;
 
 export const ActionExecutionSchema = z.object({
     "action": z.string(),
@@ -107,10 +124,13 @@ export type RunTotals = z.infer<typeof RunTotalsSchema>;
 
 export const SideExecutionSchema = z.object({
     "actions": z.array(ActionExecutionSchema),
+    "cachedFromRun": z.string().optional(),
+    "cacheEntry": z.string().optional(),
     "counts": OutcomeCountsSchema,
     "durationMilliseconds": z.number(),
     "failure": z.string().optional(),
     "side": SideSchema,
+    "source": SourceSchema,
     "status": StatusSchema,
 });
 export type SideExecution = z.infer<typeof SideExecutionSchema>;
@@ -140,8 +160,10 @@ export type CaseExecution = z.infer<typeof CaseExecutionSchema>;
 export const CaptureSummarySchema = z.object({
     "candidate": CandidateExecutableSchema,
     "canonical": CanonicalExecutableSchema,
+    "canonicalCache": CanonicalCacheSchema.optional(),
     "caseFile": z.string(),
     "cases": z.array(CaseExecutionSchema),
+    "coverage": z.string().optional(),
     "finishedUtc": z.string().optional(),
     "results": z.string().optional(),
     "runId": z.string(),
@@ -151,6 +173,7 @@ export const CaptureSummarySchema = z.object({
     "startedUtc": z.string(),
     "status": RunStatusSchema,
     "threshold": z.number(),
+    "timing": z.string().optional(),
     "totals": RunTotalsSchema,
 });
 export type CaptureSummary = z.infer<typeof CaptureSummarySchema>;

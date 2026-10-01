@@ -89,6 +89,7 @@ internal sealed class ReportWriter
     private static SideExecution Side(SideRun run) => new()
     {
         Side = run.Side == RunLayout.CanonicalSide ? Parity.Contracts.CaptureSummary.Side.Canonical : Parity.Contracts.CaptureSummary.Side.Candidate,
+        Source = Source.Live,
         Status = run.Failed ? Status.Failed : Status.Completed,
         DurationMilliseconds = (long)run.Duration.TotalMilliseconds,
         Failure = run.Failure,

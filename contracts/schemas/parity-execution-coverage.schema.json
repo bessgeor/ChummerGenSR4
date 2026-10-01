@@ -1,0 +1,139 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/bessgeor/ChummerGenSR4/contracts/parity-execution-coverage.schema.json",
+  "title": "ExecutionCoverage",
+  "description": "The audit of a capture run's execution: whether every planned action of every case has exactly one outcome on each side, and what each planned capture became.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["runId", "valid", "invalidReasons", "cases", "totals"],
+  "properties": {
+    "runId": { "type": "string", "minLength": 1 },
+    "valid": {
+      "description": "True when no case has an invalid reason.",
+      "type": "boolean"
+    },
+    "invalidReasons": {
+      "description": "<code>:<case>/<side>, with code action-gap, failure, capture-without-file or file-without-capture.",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "cases": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/CaseCoverage" }
+    },
+    "totals": { "$ref": "#/definitions/CoverageTotals" }
+  },
+  "definitions": {
+    "CaseCoverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["case", "characterFile", "mode", "plannedActions", "plannedCaptures", "sides"],
+      "properties": {
+        "case": { "type": "string", "minLength": 1 },
+        "characterFile": { "type": "string", "minLength": 1 },
+        "mode": { "type": "string", "enum": ["build", "career"] },
+        "plannedActions": { "type": "integer", "minimum": 0 },
+        "plannedCaptures": {
+          "description": "Capture names of the case's capture actions, in plan order.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "sides": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/SideCoverage" }
+        }
+      }
+    },
+    "SideCoverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["side", "source", "recordedActions", "contiguous", "failures", "optionalAbsent", "skippedOptional", "filtered", "notRun", "captures"],
+      "properties": {
+        "side": { "type": "string", "enum": ["canonical", "candidate"] },
+        "source": {
+          "description": "live: the side ran in this run; cache: its record came from the canonical capture cache.",
+          "type": "string",
+          "enum": ["live", "cache"]
+        },
+        "recordedActions": { "type": "integer", "minimum": 0 },
+        "contiguous": {
+          "description": "True when the record indexes are exactly 0 to plannedActions - 1, each once, and each record names its planned action.",
+          "type": "boolean"
+        },
+        "startupFailure": {
+          "description": "The error that stopped the side before its first action; absent otherwise.",
+          "type": "string",
+          "minLength": 1
+        },
+        "failures": {
+          "description": "Every failed action.",
+          "type": "array",
+          "items": { "$ref": "#/definitions/ActionReference" }
+        },
+        "optionalAbsent": {
+          "description": "Optional tabs that were not shown, never counted as failures.",
+          "type": "array",
+          "items": { "$ref": "#/definitions/ActionReference" }
+        },
+        "skippedOptional": {
+          "description": "Actions skipped because their optional tab was absent.",
+          "type": "array",
+          "items": { "$ref": "#/definitions/ActionReference" }
+        },
+        "filtered": { "type": "integer", "minimum": 0 },
+        "notRun": { "type": "integer", "minimum": 0 },
+        "captures": {
+          "description": "Each planned capture's outcome on this side, in plan order.",
+          "type": "array",
+          "items": { "$ref": "#/definitions/CaptureCoverage" }
+        }
+      }
+    },
+    "ActionReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["index", "action"],
+      "properties": {
+        "index": { "type": "integer", "minimum": 0 },
+        "action": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string" }
+      }
+    },
+    "CaptureCoverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capture", "outcome", "file"],
+      "properties": {
+        "capture": { "type": "string", "minLength": 1 },
+        "outcome": {
+          "description": "The capture action's outcome, as in the summary; missing when no record has the action.",
+          "type": "string",
+          "enum": ["performed", "failed", "optional-absent", "skipped-optional", "filtered", "not-run", "missing"]
+        },
+        "file": {
+          "description": "True when the side wrote a capture file for it.",
+          "type": "boolean"
+        }
+      }
+    },
+    "CoverageTotals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cases", "sides", "cachedSides", "actions", "failures", "startupFailures", "optionalAbsent", "skippedOptional", "filtered", "notRun", "plannedCaptures", "capturedPairs"],
+      "properties": {
+        "cases": { "type": "integer", "minimum": 0 },
+        "sides": { "type": "integer", "minimum": 0 },
+        "cachedSides": { "type": "integer", "minimum": 0 },
+        "actions": { "description": "Recorded actions over all sides.", "type": "integer", "minimum": 0 },
+        "failures": { "type": "integer", "minimum": 0 },
+        "startupFailures": { "type": "integer", "minimum": 0 },
+        "optionalAbsent": { "type": "integer", "minimum": 0 },
+        "skippedOptional": { "type": "integer", "minimum": 0 },
+        "filtered": { "type": "integer", "minimum": 0 },
+        "notRun": { "type": "integer", "minimum": 0 },
+        "plannedCaptures": { "description": "Planned captures over all cases.", "type": "integer", "minimum": 0 },
+        "capturedPairs": { "description": "Planned captures that both sides wrote.", "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

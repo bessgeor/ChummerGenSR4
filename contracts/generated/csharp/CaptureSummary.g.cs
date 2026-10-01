@@ -34,6 +34,10 @@ namespace Parity.Contracts.CaptureSummary
         [JsonPropertyName("canonical")]
         public CanonicalExecutable Canonical { get; set; }
 
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        [JsonPropertyName("canonicalCache")]
+        public CanonicalCache? CanonicalCache { get; set; }
+
         [JsonRequired]
         [JsonPropertyName("caseFile")]
         [JsonConverter(typeof(MinMaxLengthCheckConverter))]
@@ -42,6 +46,13 @@ namespace Parity.Contracts.CaptureSummary
         [JsonRequired]
         [JsonPropertyName("cases")]
         public List<CaseExecution> Cases { get; set; }
+
+        /// <summary>
+        /// Execution coverage file path relative to the run folder; absent when setup failed.
+        /// </summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        [JsonPropertyName("coverage")]
+        public string? Coverage { get; set; }
 
         /// <summary>
         /// ISO 8601 UTC timestamp; absent when setup failed.
@@ -92,6 +103,13 @@ namespace Parity.Contracts.CaptureSummary
         [JsonPropertyName("threshold")]
         [JsonConverter(typeof(MinMaxValueCheckConverter))]
         public double Threshold { get; set; }
+
+        /// <summary>
+        /// Timing file path relative to the run folder; absent when setup failed.
+        /// </summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        [JsonPropertyName("timing")]
+        public string? Timing { get; set; }
 
         [JsonRequired]
         [JsonPropertyName("totals")]
@@ -144,6 +162,38 @@ namespace Parity.Contracts.CaptureSummary
         public string? StagedSha256Before { get; set; }
     }
 
+    /// <summary>
+    /// Absent when the run used no canonical capture cache.
+    /// </summary>
+    public partial class CanonicalCache
+    {
+        /// <summary>
+        /// Canonical sides served from the cache.
+        /// </summary>
+        [JsonRequired]
+        [JsonPropertyName("hits")]
+        public long Hits { get; set; }
+
+        /// <summary>
+        /// Canonical sides run live because no entry had their key.
+        /// </summary>
+        [JsonRequired]
+        [JsonPropertyName("misses")]
+        public long Misses { get; set; }
+
+        [JsonRequired]
+        [JsonPropertyName("path")]
+        [JsonConverter(typeof(MinMaxLengthCheckConverter))]
+        public string Path { get; set; }
+
+        /// <summary>
+        /// Entries this run added.
+        /// </summary>
+        [JsonRequired]
+        [JsonPropertyName("stored")]
+        public long Stored { get; set; }
+    }
+
     public partial class CaseExecution
     {
         [JsonRequired]
@@ -171,10 +221,28 @@ namespace Parity.Contracts.CaptureSummary
         [JsonPropertyName("actions")]
         public List<ActionExecution> Actions { get; set; }
 
+        /// <summary>
+        /// The run that stored the entry; present only when source is cache.
+        /// </summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        [JsonPropertyName("cachedFromRun")]
+        [JsonConverter(typeof(MinMaxLengthCheckConverter))]
+        public string? CachedFromRun { get; set; }
+
+        /// <summary>
+        /// The cache key the side was looked up or stored under; absent without a cache.
+        /// </summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        [JsonPropertyName("cacheEntry")]
+        public string? CacheEntry { get; set; }
+
         [JsonRequired]
         [JsonPropertyName("counts")]
         public OutcomeCounts Counts { get; set; }
 
+        /// <summary>
+        /// For a cached side, the duration of the run that stored it.
+        /// </summary>
         [JsonRequired]
         [JsonPropertyName("durationMilliseconds")]
         public long DurationMilliseconds { get; set; }
@@ -190,6 +258,14 @@ namespace Parity.Contracts.CaptureSummary
         [JsonRequired]
         [JsonPropertyName("side")]
         public Side Side { get; set; }
+
+        /// <summary>
+        /// live: the side ran in this run; cache: its record and captures came from the canonical
+        /// capture cache.
+        /// </summary>
+        [JsonRequired]
+        [JsonPropertyName("source")]
+        public Source Source { get; set; }
 
         [JsonRequired]
         [JsonPropertyName("status")]
@@ -361,6 +437,12 @@ namespace Parity.Contracts.CaptureSummary
 
     public enum Side { Candidate, Canonical };
 
+    /// <summary>
+    /// live: the side ran in this run; cache: its record and captures came from the canonical
+    /// capture cache.
+    /// </summary>
+    public enum Source { Cache, Live };
+
     public enum Status { Completed, Failed };
 
     /// <summary>
@@ -388,6 +470,7 @@ namespace Parity.Contracts.CaptureSummary
                 ModeConverter.Singleton,
                 ActionOutcomeConverter.Singleton,
                 SideConverter.Singleton,
+                SourceConverter.Singleton,
                 StatusConverter.Singleton,
                 RunStatusConverter.Singleton,
                 new DateOnlyConverter(),
@@ -544,6 +627,40 @@ namespace Parity.Contracts.CaptureSummary
         }
 
         public static readonly SideConverter Singleton = new SideConverter();
+    }
+
+    internal class SourceConverter : JsonConverter<Source>
+    {
+        public override bool CanConvert(Type t) => t == typeof(Source);
+
+        public override Source Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            var value = reader.GetString();
+            switch (value)
+            {
+                case "cache":
+                    return Source.Cache;
+                case "live":
+                    return Source.Live;
+            }
+            throw new Exception("Cannot unmarshal type Source");
+        }
+
+        public override void Write(Utf8JsonWriter writer, Source value, JsonSerializerOptions options)
+        {
+            switch (value)
+            {
+                case Source.Cache:
+                    JsonSerializer.Serialize(writer, "cache", options);
+                    return;
+                case Source.Live:
+                    JsonSerializer.Serialize(writer, "live", options);
+                    return;
+            }
+            throw new Exception("Cannot marshal type Source");
+        }
+
+        public static readonly SourceConverter Singleton = new SourceConverter();
     }
 
     internal class StatusConverter : JsonConverter<Status>

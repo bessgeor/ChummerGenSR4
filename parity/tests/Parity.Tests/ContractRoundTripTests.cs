@@ -14,6 +14,8 @@ public sealed class ContractRoundTripTests
         ["CaptureSummary"] = json => ContractJson.Write(ContractJson.ReadSummary(json)),
         ["CaptureResults"] = json => ContractJson.Write(ContractJson.ReadResults(json)),
         ["CompareReport"] = json => ContractJson.Write(ContractJson.ReadReport(json)),
+        ["ExecutionCoverage"] = json => ContractJson.Write(ContractJson.ReadCoverage(json)),
+        ["CaptureTiming"] = json => ContractJson.Write(ContractJson.ReadTiming(json)),
     };
 
     public static TheoryData<string> Schemas()

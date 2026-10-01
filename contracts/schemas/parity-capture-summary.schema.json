@@ -17,6 +17,7 @@
     "canonical": { "$ref": "#/definitions/CanonicalExecutable" },
     "candidate": { "$ref": "#/definitions/CandidateExecutable" },
     "settingsOverlay": { "$ref": "#/definitions/SettingsOverlay" },
+    "canonicalCache": { "$ref": "#/definitions/CanonicalCache" },
     "screens": {
       "type": "array",
       "items": { "$ref": "#/definitions/ScreenInfo" }
@@ -28,6 +29,14 @@
     "totals": { "$ref": "#/definitions/RunTotals" },
     "results": {
       "description": "Results file path relative to the run folder; absent when setup failed.",
+      "type": "string"
+    },
+    "coverage": {
+      "description": "Execution coverage file path relative to the run folder; absent when setup failed.",
+      "type": "string"
+    },
+    "timing": {
+      "description": "Timing file path relative to the run folder; absent when setup failed.",
       "type": "string"
     }
   },
@@ -84,6 +93,18 @@
         "replaced": { "description": "True when the file replaced a canonical copy.", "type": "boolean" }
       }
     },
+    "CanonicalCache": {
+      "description": "Absent when the run used no canonical capture cache.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "hits", "misses", "stored"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "hits": { "description": "Canonical sides served from the cache.", "type": "integer", "minimum": 0 },
+        "misses": { "description": "Canonical sides run live because no entry had their key.", "type": "integer", "minimum": 0 },
+        "stored": { "description": "Entries this run added.", "type": "integer", "minimum": 0 }
+      }
+    },
     "ScreenInfo": {
       "type": "object",
       "additionalProperties": false,
@@ -123,11 +144,30 @@
     "SideExecution": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["side", "status", "durationMilliseconds", "counts", "actions"],
+      "required": ["side", "source", "status", "durationMilliseconds", "counts", "actions"],
       "properties": {
         "side": { "type": "string", "enum": ["canonical", "candidate"] },
+        "source": {
+          "description": "live: the side ran in this run; cache: its record and captures came from the canonical capture cache.",
+          "type": "string",
+          "enum": ["live", "cache"]
+        },
+        "cacheEntry": {
+          "description": "The cache key the side was looked up or stored under; absent without a cache.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "cachedFromRun": {
+          "description": "The run that stored the entry; present only when source is cache.",
+          "type": "string",
+          "minLength": 1
+        },
         "status": { "type": "string", "enum": ["completed", "failed"] },
-        "durationMilliseconds": { "type": "integer", "minimum": 0 },
+        "durationMilliseconds": {
+          "description": "For a cached side, the duration of the run that stored it.",
+          "type": "integer",
+          "minimum": 0
+        },
         "counts": { "$ref": "#/definitions/OutcomeCounts" },
         "failure": {
           "description": "The error that stopped this side, including failures before the first action such as startup; present only when status is failed.",
