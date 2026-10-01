@@ -3,7 +3,7 @@
 ## 1. Labels, benchmark and review
 
 - [x] 1.1 Add eval record version 2 (origin, the four label kinds, the upgrade of version 1), record listing and `npm run eval -- records`, the root-cause grading, benchmark items (`benchmark add|check`, revert detection) and `npm run eval -- hindsight`. Evidence: unit tests for the upgrade, label independence, each grade, the earliest-fix rule, records after the fix, revert detection, the setup errors of `benchmark add` and a patch that no longer replays (temporary git repository), pass.
-- [ ] 1.2 Add the `grade` job kind (profile, prompt, schema, validation) and `npm run eval -- grade`, and the review queue with `npm run eval -- queue`. Evidence: unit tests with a fake agent runner for the grader's scratch copy, label and record, an out-of-range score, a changed context, a usage limit and `infra`, and for the queue's selection, disagreements, strata and order, pass.
+- [x] 1.2 Add the `grade` job kind (profile, prompt, schema, validation) and `npm run eval -- grade`, and the review queue with `npm run eval -- queue`. Evidence: unit tests with a fake agent runner for the grader's scratch copy, label and record, an out-of-range score, a changed context, a usage limit and `infra`, and for the queue's selection, disagreements, strata and order, pass.
 - [ ] 1.3 Add the review page `npm run review`. Evidence: unit tests over a real HTTP server on a fixture store for the queue page, the record page, the evidence route's refusal of unlisted files, a verdict post, an invalid verdict and an unknown record, pass.
 
 ## 2. Datasets, runs and certificates

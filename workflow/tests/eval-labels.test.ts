@@ -11,7 +11,7 @@ import { labelHindsight } from "../src/evals/hindsight.js";
 import { gradeExplanation, rootCauseOfExplanation, type RootCause } from "../src/evals/root-cause.js";
 import { SetupError } from "../src/host/setup-error.js";
 import { workflowPaths } from "../src/paths.js";
-import { challengeOutput, explanation, fixRepository, hypothesisOutput, record } from "./eval-fixtures.js";
+import { challengeOutput, evalContext, explanation, fixRepository, hypothesisOutput, record } from "./eval-fixtures.js";
 
 const root: RootCause = {
   source: "benchmark:x", mechanism: "layout",
@@ -130,7 +130,7 @@ test("benchmark check names an item whose patch git no longer gives or whose com
   const path = join(repo.benchmark, `${item.itemId}.json`);
   writeFileSync(path, JSON.stringify(changed));
   const paths = { ...workflowPaths(repo.root), benchmark: repo.benchmark };
-  await rejects(runEvalCommand(["benchmark", "check"], { paths, store: new InMemoryStore(), git, now: () => new Date(), log: () => undefined }),
+  await rejects(runEvalCommand(["benchmark", "check"], evalContext({ paths, git })),
     (error: unknown) => error instanceof SetupError && /differs from the stored patch/.test(error.message));
   ok(readFileSync(path, "utf8").length > 0);
 });
@@ -166,8 +166,8 @@ test("eval records counts records by origin and job kind with their labels", asy
   const store = new InMemoryStore();
   await putRecord(store, record({ labels: { ...noLabels, check: "confirmed" } }));
   await putRecord(store, record({ recordId: "e", origin: "eval-run" }));
-  const lines: string[] = [];
-  const context = { paths: workflowPaths("root"), store, git: () => "", now: () => new Date(), log: (line: string) => lines.push(line) };
+  const context = evalContext({ store });
+  const lines = context.lines;
   equal(await runEvalCommand(["records"], context), 0);
   deepStrictEqual(lines, [
     "Eval records: 2.",

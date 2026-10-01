@@ -1,13 +1,19 @@
 import type { BaseStore } from "@langchain/langgraph-checkpoint";
 import { join } from "node:path";
+import type { AgentSettings } from "../agents/agent-settings.js";
+import type { AgentRunners } from "../agents/agent-runners.js";
+import type { QuotaWaiter } from "../diagnosis/quota-waiter.js";
 import type { Git } from "../diagnosis/source-snapshot.js";
+import type { ScratchFolder } from "../host/scratch-folder.js";
 import { SetupError } from "../host/setup-error.js";
 import type { WorkflowPaths } from "../paths.js";
 import { addBenchmarkItem, checkBenchmarkItem, readBenchmark } from "./benchmark.js";
 import { CommandOptions } from "./command-options.js";
 import { listRecords } from "./eval-record.js";
+import { gradeRecords } from "./grader.js";
 import { labelHindsight } from "./hindsight.js";
 import { recordSummary } from "./record-summary.js";
+import { defaultQueueOptions, queueLines, reviewQueue } from "./review-queue.js";
 
 export const evalUsage = `Usage: npm run eval -- <command> [options]
 
@@ -16,6 +22,10 @@ export const evalUsage = `Usage: npm run eval -- <command> [options]
                                   write a benchmark item for an accepted fix and grade earlier answers by it
   benchmark check                 verify that every benchmark item still replays from git
   hindsight                       grade the answers every benchmark item covers
+  grade [--record <ids>] [--limit <n>]
+                                  advisory model grades of answers without one (or of the named records, again)
+  queue [--seed <text>] [--per-stratum <n>]
+                                  print the review queue (npm run review shows it)
 
 Exit status: 0 done, 1 certificate refused, 2 a grader job failed, 3 setup error.`;
 
@@ -26,6 +36,12 @@ export type EvalContext = {
   readonly git: Git;
   readonly now: () => Date;
   readonly log: (line: string) => void;
+  /** The agent settings of the local profile, read when a command needs them. */
+  readonly agentSettings: () => AgentSettings;
+  readonly agents: AgentRunners;
+  readonly quota: QuotaWaiter;
+  readonly createScratchFolder: (prefix: string) => ScratchFolder;
+  readonly signal?: AbortSignal;
 };
 
 type Command = (args: readonly string[], context: EvalContext) => Promise<number>;
@@ -73,7 +89,34 @@ const benchmark: Command = async (args, context) => {
   throw new SetupError("'benchmark' needs 'add' or 'check'. See npm run eval -- --help.");
 };
 
-const commands: Readonly<Record<string, Command>> = { records, benchmark, hindsight };
+const grade: Command = async (args, context) => {
+  const options = CommandOptions.parse("grade", args, ["record", "limit"]);
+  const settings = context.agentSettings();
+  const ids = options.text("record");
+  const { graded, failed } = await gradeRecords({
+    store: context.store, agents: context.agents(settings), choice: settings.jobs.grade, quota: context.quota,
+    threadFolder: context.paths.threadFolder, logsFolder: join(context.paths.evalsFolder, "grader", "logs"),
+    createScratchFolder: context.createScratchFolder, now: context.now, log: context.log,
+    ...(context.signal === undefined ? {} : { signal: context.signal }),
+  }, {
+    recordIds: ids === null ? null : ids.split(",").map((id) => id.trim()).filter((id) => id.length > 0),
+    limit: options.text("limit") === null ? null : options.number("limit", 0, 1, Number.MAX_SAFE_INTEGER, true),
+  });
+  context.log(`Grader: ${graded} graded, ${failed} failed.`);
+  return failed > 0 ? 2 : 0;
+};
+
+const queue: Command = async (args, context) => {
+  const options = CommandOptions.parse("queue", args, ["seed", "per-stratum"]);
+  const entries = reviewQueue(await listRecords(context.store), {
+    seed: options.text("seed") ?? defaultQueueOptions.seed,
+    perStratum: options.number("per-stratum", defaultQueueOptions.perStratum, 0, 1000, true),
+  });
+  for (const line of queueLines(entries)) context.log(line);
+  return 0;
+};
+
+const commands: Readonly<Record<string, Command>> = { records, benchmark, hindsight, grade, queue };
 
 /** Runs one evaluation command and returns its exit status; a setup error is thrown. */
 export async function runEvalCommand(args: readonly string[], context: EvalContext): Promise<number> {

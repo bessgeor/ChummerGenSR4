@@ -2,7 +2,14 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Explanation, HypothesisOutput, ChallengeOutput } from "../src/diagnosis/job-schemas.js";
+import { InMemoryStore } from "@langchain/langgraph";
+import { resolveAgentSettings } from "../src/agents/agent-settings.js";
+import { QuotaWaiter } from "../src/diagnosis/quota-waiter.js";
+import type { EvalContext } from "../src/evals/eval-commands.js";
 import { noLabels, type EvalRecord } from "../src/evals/eval-record.js";
+import { createScratchFolder } from "../src/host/scratch-folder.js";
+import { workflowPaths } from "../src/paths.js";
+import { FakeAgents } from "./diagnosis-harness.js";
 import { scratch, triageDocument } from "./diagnosis-fixtures.js";
 
 export const hash = (character: string) => character.repeat(64);
@@ -65,4 +72,16 @@ export function fixRepository() {
   const threads = join(root, "out", "threads");
   writeFile(threads, "wf-1/triage.json", JSON.stringify(triageDocument("wf-1", [{ case: "build-alpha", capture: "skills", x: 100 }], { "build-alpha": join(root, "runs", "a") })));
   return { root, git, regression, fix, docs, threads, benchmark: join(root, "benchmark") };
+}
+
+/** An evaluation context over an in-memory store, with fake agents and a quota waiter that does not sleep. */
+export function evalContext(overrides: Partial<EvalContext> = {}): EvalContext & { readonly lines: string[] } {
+  const lines: string[] = [];
+  const agents = new FakeAgents();
+  return {
+    paths: workflowPaths(scratch("workflow-eval-")), store: new InMemoryStore(), git: () => "", now: () => new Date("2026-10-02T09:00:00Z"),
+    log: (line) => lines.push(line), agentSettings: () => resolveAgentSettings(undefined), agents: () => agents,
+    quota: new QuotaWaiter("p", async () => undefined), createScratchFolder, lines,
+    ...overrides,
+  };
 }
