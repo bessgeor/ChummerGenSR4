@@ -1,3 +1,4 @@
+using Parity.Cases;
 using Parity.Contracts.CompareReport;
 using Parity.Contracts.ExecutionCoverage;
 using CoverageOutcome = Parity.Contracts.ExecutionCoverage.Outcome;
@@ -70,7 +71,7 @@ internal sealed class CompletenessBuilder
         List<(Contracts.ExecutionCoverage.Side Side, CoverageOutcome Outcome)> outcomes = plannedCase.Sides
             .Select(side => (side.Side, side.Captures.Where(item => item.Capture == capture).Select(item => item.Outcome).DefaultIfEmpty(CoverageOutcome.Missing).Single()))
             .ToList();
-        string sides = string.Join(", ", outcomes.Select(item => $"{Name(item.Side)} {Name(item.Outcome)}"));
+        string sides = string.Join(", ", outcomes.Select(item => $"{ContractJson.Name(item.Side)} {ContractJson.Name(item.Outcome)}"));
         if (outcomes.Count != 2)
         {
             entry.State = CompletenessState.Unaccounted;
@@ -100,16 +101,4 @@ internal sealed class CompletenessBuilder
 
     private static long Count(List<CompletenessEntry> entries, CompletenessState state) => entries.Count(entry => entry.State == state);
 
-    private static string Name(Contracts.ExecutionCoverage.Side side) => side == Contracts.ExecutionCoverage.Side.Canonical ? "canonical" : "candidate";
-
-    private static string Name(CoverageOutcome outcome) => outcome switch
-    {
-        CoverageOutcome.Performed => "performed",
-        CoverageOutcome.Failed => "failed",
-        CoverageOutcome.OptionalAbsent => "optional-absent",
-        CoverageOutcome.SkippedOptional => "skipped-optional",
-        CoverageOutcome.Filtered => "filtered",
-        CoverageOutcome.NotRun => "not-run",
-        _ => "missing",
-    };
 }

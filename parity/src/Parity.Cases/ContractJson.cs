@@ -50,6 +50,14 @@ public static class ContractJson
     public static string Name(Parity.Contracts.CompareReport.ReportStatus status) =>
         JsonSerializer.SerializeToElement(status, ReportOptions).GetString()!;
 
+    /// <summary>An action outcome spelled as the contract writes it in <c>coverage.json</c>.</summary>
+    public static string Name(Parity.Contracts.ExecutionCoverage.Outcome outcome) =>
+        JsonSerializer.SerializeToElement(outcome, CoverageOptions).GetString()!;
+
+    /// <summary>A side spelled as the contract writes it in <c>coverage.json</c>.</summary>
+    public static string Name(Parity.Contracts.ExecutionCoverage.Side side) =>
+        JsonSerializer.SerializeToElement(side, CoverageOptions).GetString()!;
+
     private static T Read<T>(string json, JsonSerializerOptions options)
         where T : class =>
         JsonSerializer.Deserialize<T>(json, options)
