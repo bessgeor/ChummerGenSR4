@@ -14,5 +14,5 @@
 
 ## 3. Verification and archive
 
-- [ ] 3.1 Run live `npm start` on a case with a real discrepancy, with the sourcebook overlay, both adapters and the batched check on the desktop lane; kill it once during diagnosis and resume it; record a quota wait if one occurs. Record in `verification.md` the canonical hash before and after, execution outcomes apart from visual results, the triage clusters, each job's record, the check's execution outcome apart from its observations, fixture-tested scope apart from live evidence, and what remains unverified.
+- [x] 3.1 Run live `npm start` on a case with a real discrepancy, with the sourcebook overlay, both adapters and the batched check on the desktop lane; kill it once during diagnosis and resume it; record a quota wait if one occurs. Record in `verification.md` the canonical hash before and after, execution outcomes apart from visual results, the triage clusters, each job's record, the check's execution outcome apart from its observations, fixture-tested scope apart from live evidence, and what remains unverified.
 - [ ] 3.2 Archive the change with `openspec archive add-discrepancy-diagnosis`. Evidence: `npm run openspec:validate` passes after the archive, recorded in `verification.md`.
