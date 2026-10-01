@@ -1,10 +1,19 @@
 // Composition root of the parity workflow: `npm start -- <options>` runs or resumes a thread of the graph
-// build → capture → compare → triage and exits with 0, 1, 2 or 3 (see --help).
+// build → capture → compare → triage → diagnosis and exits with 0, 1, 2 or 3 (see --help).
+import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
+import type { AgentRunner } from "./agents/agent-job.js";
+import type { AgentSettings } from "./agents/agent-settings.js";
+import { ClaudeAdapter } from "./agents/claude-adapter.js";
+import { CodexAdapter } from "./agents/codex-adapter.js";
+import { PooledAgentRunner } from "./agents/pooled-agent-runner.js";
 import { planCases } from "./cases/case-plan.js";
+import { DiagnosisService } from "./diagnosis/diagnosis-service.js";
+import { QuotaWaiter } from "./diagnosis/quota-waiter.js";
+import { processGit } from "./diagnosis/source-snapshot.js";
 import { buildWorkflowGraph } from "./graph/workflow-graph.js";
 import { runWorkflow, setupErrorStatus } from "./graph/run-workflow.js";
 import { HostSteps } from "./host-steps.js";
@@ -20,6 +29,9 @@ import { workflowPaths } from "./paths.js";
 import { CaptureStep } from "./steps/capture-step.js";
 import { CompareStep } from "./steps/compare-step.js";
 import { readCaseDetails } from "./steps/case-details.js";
+import { reportPath } from "./steps/compare-step.js";
+import { readDocument } from "./steps/read-document.js";
+import { CompareReportSchema } from "../../contracts/generated/typescript/parity-compare-report.js";
 import { changedInputs } from "./steps/input-fingerprints.js";
 import { StepStore } from "./steps/step-store.js";
 import { SqliteStore } from "./store/sqlite-store.js";
@@ -74,10 +86,28 @@ async function main(): Promise<number> {
     new CaptureStep({ paths, host, store: stepStore, log, now, createScratchFolder, changedInputs }),
     new CompareStep({ paths, host, store: stepStore, log, now, changedInputs }), stepStore, now);
 
+  // One runner, and so one model pool, per agent settings; a thread keeps the settings it started with.
+  let agentRunner: { key: string; runner: AgentRunner } | null = null;
+  const agents = (settings: AgentSettings): AgentRunner => {
+    const key = JSON.stringify(settings);
+    if (agentRunner?.key !== key) {
+      agentRunner = { key, runner: new PooledAgentRunner({
+        claude: new ClaudeAdapter(settings.executables.claude, process.env),
+        codex: new CodexAdapter(settings.executables.codex, process.env),
+      }, settings.modelPool) };
+    }
+    return agentRunner.runner;
+  };
+  const diagnosis = new DiagnosisService({
+    repositoryRoot, threadFolder: paths.threadFolder, agents, quota: new QuotaWaiter(randomBytes(8).toString("hex"), undefined, log),
+    git: processGit(repositoryRoot), allCases: (caseFile) => planCases(caseFile, [], []).cases,
+    readReport: (runFolder) => readDocument(join(runFolder, reportPath), CompareReportSchema), now, log,
+  });
+
   const checkpointer = SqliteSaver.fromConnString(paths.checkpoints);
   const store = new SqliteStore(paths.store);
   try {
-    const graph = buildWorkflowGraph(steps).compile({ checkpointer, store });
+    const graph = buildWorkflowGraph(steps, diagnosis).compile({ checkpointer, store });
     return await runWorkflow(command, {
       graph,
       resolveOptions: (start) => resolveRunOptions(start.arguments, profile, process.env, repositoryRoot),

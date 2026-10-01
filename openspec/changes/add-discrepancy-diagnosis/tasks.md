@@ -9,7 +9,7 @@
 ## 2. Diagnosis
 
 - [x] 2.1 Add the source snapshot and the sealed context per cluster. Evidence: unit tests for the snapshot's content and identity, the manifest's content, the stable hash, the copied crops and a missing crop, pass.
-- [ ] 2.2 Add the hypothesis and challenge jobs with their prompts, schemas and semantic validation, the diagnosis nodes with the `Send` fan-out, the `wait_for_quota` route, the run budget, `--only diagnose` and `--no-diagnosis`. Evidence: unit tests with a fake agent runner for the fan-out, abstention, validation failures, an `infra` failure, a quota wait with a fake clock and the delays, the immediate retry after a restart, a resume after a kill that does not repeat a finished job, and the budget, pass.
+- [x] 2.2 Add the hypothesis and challenge jobs with their prompts, schemas and semantic validation, the diagnosis nodes with the `Send` fan-out, the `wait_for_quota` route, the run budget, `--only diagnose` and `--no-diagnosis`. Evidence: unit tests with a fake agent runner for the fan-out, abstention, validation failures, an `infra` failure, a quota wait with a fake clock and the delays, the immediate retry after a restart, a resume after a kill that does not repeat a finished job, and the budget, pass.
 - [ ] 2.3 Add the batched check, the eval records with the check label, `diagnosis.json`, the report lines and the exit status. Evidence: unit tests with a fake host for one capture call with union filters, the observation rules, the three check outcomes, a check run with execution failures, no check run without predictions, the records of succeeded and failed jobs and the labels, pass; `AGENTS.md` and `README.md` describe diagnosis.
 
 ## 3. Verification and archive

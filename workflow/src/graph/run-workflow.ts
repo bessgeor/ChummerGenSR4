@@ -31,9 +31,9 @@ export function newThreadId(now: Date): string {
 }
 
 function config(threadId: string, cases: number, signal: AbortSignal | undefined) {
-  // build, one capture per case, the last compare and triage, with room to spare.
+  // build, one capture per case, the last compare, triage and diagnosis, whose quota waits may repeat for hours.
   return {
-    configurable: { thread_id: threadId }, recursionLimit: cases + 10, durability: "sync" as const,
+    configurable: { thread_id: threadId }, recursionLimit: cases + 1000, durability: "sync" as const,
     ...(signal === undefined ? {} : { signal }),
   };
 }
@@ -67,6 +67,7 @@ async function start(command: Extract<Command, { kind: "start" }>, dependencies:
   dependencies.log(`Thread ${threadId}: ${plan.cases.length} cases, canonical cache ${cache}.`);
   const input: WorkflowStateValue = {
     threadId, options, plan: [...plan.cases], fingerprints: null, captures: {}, lastCaptured: -1, compares: {}, triageSummary: null,
+    clusters: {}, agentMilliseconds: 0,
   };
   return { threadId, cases: plan.cases.length, input };
 }

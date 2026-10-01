@@ -1,5 +1,6 @@
 import { Annotation } from "@langchain/langgraph";
 import type { PlannedCase } from "../cases/case-plan.js";
+import { mergeClusters, type ClusterDiagnosis, type ClusterUpdate } from "../diagnosis/cluster-diagnosis.js";
 import type { RunOptions } from "../options/run-options.js";
 import type { InputFingerprints } from "../steps/input-fingerprints.js";
 import type { StepOutcome } from "../steps/step-outcome.js";
@@ -29,9 +30,23 @@ export const WorkflowState = Annotation.Root({
   lastCaptured: Annotation<number>(),
   compares: byCase(),
   triageSummary: Annotation<TriageSummary | null>(),
+  /** Each triage cluster's diagnosis, by cluster ID; job nodes update the clusters they ran. */
+  clusters: Annotation<Record<string, ClusterDiagnosis>, Record<string, ClusterUpdate>>({
+    reducer: mergeClusters,
+    default: () => ({}),
+  }),
+  /** Model time of the thread's finished jobs, in milliseconds; quota waits are never added. */
+  agentMilliseconds: Annotation<number>({
+    reducer: (current, update) => current + update,
+    default: () => 0,
+  }),
 });
 
 export type WorkflowStateValue = typeof WorkflowState.State;
+export type WorkflowStateUpdate = typeof WorkflowState.Update;
 
 /** The payload `Send` gives the capture and compare nodes: the state plus the index of their case. */
 export type CaseTask = WorkflowStateValue & { readonly index: number };
+
+/** The payload `Send` gives a diagnosis job node: the state plus the cluster it works on. */
+export type ClusterTask = WorkflowStateValue & { readonly clusterId: string };

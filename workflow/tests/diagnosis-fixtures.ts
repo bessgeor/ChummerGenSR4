@@ -1,4 +1,5 @@
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -87,6 +88,37 @@ export function triageDocument(threadId: string, spots: readonly Spot[], folders
     otherFindings: [],
     totals: { cases: Object.keys(folders).length, discrepancies: spots.length, clusters: xs.length, newClusters: xs.length, knownClusters: 0, otherFindings: 0 },
   };
+}
+
+export function write(root: string, path: string, text: string): void {
+  mkdirSync(dirname(join(root, path)), { recursive: true });
+  writeFileSync(join(root, path), text);
+}
+
+/**
+ * A git repository with the app's source and data folders: a committed file changed in the working tree, an
+ * untracked and an ignored file, a deleted tracked file, and files outside the snapshot folders.
+ */
+export function repository(): string {
+  const root = scratch("workflow-snapshot-");
+  const git = (...args: string[]) => execFileSync("git", ["-C", root, ...args], { stdio: "ignore" });
+  git("init", "-q");
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "Test");
+  write(root, ".gitignore", "Chummer/obj/\n");
+  write(root, "Chummer/frmCreate.cs", "class frmCreate {}");
+  write(root, "Chummer/deleted.cs", "gone");
+  write(root, "bin/data/skills.xml", "<skills/>");
+  write(root, "bin/lang/en-us.xml", "<lang/>");
+  write(root, "bin/ChummerGenSR4.exe", "binary");
+  write(root, "README.md", "readme");
+  git("add", "-A");
+  git("commit", "-q", "-m", "initial");
+  write(root, "Chummer/untracked.cs", "new");
+  write(root, "Chummer/obj/ignored.cs", "ignored");
+  rmSync(join(root, "Chummer/deleted.cs"));
+  write(root, "Chummer/frmCreate.cs", "class frmCreate { int moved; }");
+  return root;
 }
 
 export function readReport(runFolder: string): CompareReport {
