@@ -69,7 +69,7 @@ Each violated rule is listed; any violation rejects the attempt at stage `patch`
 
 ### Build
 
-`parity/scripts/build-candidate.mjs` gains `--source <folder>` (the folder that holds `Chummer/`, default the repository), `--output <folder>` (default `out/candidate/`; the executable goes to `<output>/bin/`, intermediate files to `<output>/obj/`) and `--log <file>` (an MSBuild file log). Its exit status becomes 0 for a build, 1 for a failed build, and 3 when the canonical hash is wrong or MSBuild cannot be found. Repair runs it through the host runner on the CPU pool with the attempt's `source/` and an output folder in its scratch folder. Exit 1 rejects the attempt at stage `build`; 3, or any other status, is a setup error.
+`parity/scripts/build-candidate.mjs` gains `--source <folder>` (the folder that holds `Chummer/`, default the repository), `--output <folder>` (default `out/candidate/`; the executable goes to `<output>/bin/`, intermediate files to `<output>/obj/`) and `--log <file>` (an MSBuild file log). Its exit status becomes 0 for a build, 1 for a failed build, and 3 when the canonical hash is wrong, MSBuild cannot be found or is stopped by a signal, or anything unexpected fails (an unreadable canonical executable, say), so that only a build MSBuild itself rejected counts as a failed build. Repair runs it through the host runner on the CPU pool with the attempt's `source/` and an output folder in its scratch folder. Exit 1 rejects the attempt at stage `build`; 3, or any other status, is a setup error.
 
 ### Narrow check
 
@@ -90,7 +90,7 @@ The folder is written under a temporary name and renamed when complete; an exist
 
 ### Records and labels
 
-A repair job is recorded like a diagnosis job (origin `workflow`, subject the cluster, the context hash, prompt version, agent, usage, result and answer) under `<thread>/<cluster>/repair/<n>`; the first free `n` is taken from the store, so a resumed attempt never replaces an earlier record. Once the attempt is archived, the record gets the new label `repair: { outcome, stage, reason, labelledUtc }`; it is automatic, never gold, and the review queue, grader and datasets still use hypothesis and challenge records only. The label is empty until an attempt is archived, and a stored record without the key reads as empty.
+A repair job is recorded like a diagnosis job (origin `workflow`, subject the cluster, the context hash, prompt version, agent, usage, result and answer) under `<thread>/<cluster>/repair/<n>`; the first free `n` is taken from the store, so a resumed attempt never replaces an earlier record. Once the attempt is archived, the record gets the new label `repair: { outcome, stage, reason, labelledUtc }`; it is automatic, never gold, and the review queue, grader and datasets still use hypothesis and challenge records only. The label is empty until an attempt is archived, and a stored record without the key reads as empty: the label is additive, automatic and never gold, so records already in the store need no migration and a missing key loses nothing that a grade or a verdict depends on.
 
 ### Options, report and exit status
 
