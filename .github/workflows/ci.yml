@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  checks:
+    # Checks that need no interactive desktop; the parity capture itself runs only on a developer machine.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Install npm dependencies
+        run: npm ci
+      - name: Type-check the workflow
+        run: npm run workflow:typecheck
+      - name: Workflow unit tests
+        run: npm run workflow:test
+      - name: Build the parity tools
+        run: dotnet build parity/Parity.slnx -c Release
+      - name: Check generated contracts for drift
+        run: npm run contracts:check
