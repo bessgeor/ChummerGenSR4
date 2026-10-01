@@ -15,7 +15,7 @@
     "openspec:validate": "openspec validate --all --strict",
     "contracts:generate": "node contracts/scripts/generate.mjs",
     "contracts:check": "node contracts/scripts/generate.mjs --check",
-    "contracts:test": "tsc -p contracts && node --import tsx --test contracts/tests/round-trip.test.ts",
+    "contracts:test": "tsc -p contracts && node --import tsx --test \"contracts/tests/*.test.ts\"",
     "workflow:typecheck": "tsc -p workflow",
     "workflow:test": "node --import tsx --test \"workflow/tests/**/*.test.ts\""
   },

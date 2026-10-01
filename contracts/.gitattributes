@@ -1,0 +1,3 @@
+# Compiled into the parity tools, whose assemblies key the canonical capture cache: pin their line endings
+# so every checkout builds byte-identical assemblies.
+generated/csharp/*.cs text eol=crlf

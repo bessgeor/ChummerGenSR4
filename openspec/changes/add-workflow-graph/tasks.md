@@ -13,7 +13,7 @@
 
 ## 3. CI, docs and identical builds
 
-- [ ] 3.1 Add the GitHub Actions Windows job, update `AGENTS.md` and `README.md` for the workflow, and pin the line endings of the tool and generated C# sources with an exact drift check for generated C#. Evidence: the job's commands pass locally in order (`npm ci`, `workflow:typecheck`, `workflow:test`, the parity Release build, `contracts:check`) and `contracts:test` covers LF C# and CRLF TypeScript; the job itself is listed as unverified until it runs on GitHub.
+- [x] 3.1 Add the GitHub Actions Windows job, update `AGENTS.md` and `README.md` for the workflow, and pin the line endings of the tool and generated C# sources with an exact drift check for generated C#. Evidence: the job's commands pass locally in order (`npm ci`, `workflow:typecheck`, `workflow:test`, the parity Release build, `contracts:check`) and `contracts:test` covers LF C# and CRLF TypeScript; the job itself is listed as unverified until it runs on GitHub.
 
 ## 4. Verification and archive
 

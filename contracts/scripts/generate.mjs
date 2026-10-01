@@ -1,6 +1,8 @@
 // Generates C# (System.Text.Json) and TypeScript zod code from contracts/schemas
 // with the pinned quicktype CLI. With --check, generates into a temporary folder
-// and fails if the checked-in code under contracts/generated differs.
+// and fails if the checked-in code under contracts/generated differs. `--check --against <dir>` checks another
+// folder instead. Generated C# is compared byte for byte (it must have the CRLF endings .gitattributes pins,
+// or the tools compile to different assemblies); generated TypeScript ignores line endings.
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -11,6 +13,8 @@ import { fileURLToPath } from "node:url";
 const contractsDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const schemasDir = join(contractsDir, "schemas");
 const generatedDir = join(contractsDir, "generated");
+const againstIndex = process.argv.indexOf("--against");
+const checkedDir = againstIndex < 0 ? generatedDir : resolve(process.argv[againstIndex + 1] ?? "");
 const require = createRequire(import.meta.url);
 const quicktypeBin = join(dirname(require.resolve("quicktype/package.json")), "dist", "index.js");
 
@@ -58,10 +62,16 @@ function generate(targetDir) {
       "--src-lang", "schema", "--lang", "typescript-zod",
       "--top-level", schema.title, "--out", typescriptFile, schema.file,
     ]);
-    for (const file of [csharpFile, typescriptFile]) {
-      writeFileSync(file, normalize(readFileSync(file, "utf8")));
-    }
+    // C# is written with the CRLF endings .gitattributes pins, so a regenerated file compiles to the same
+    // assembly as a fresh checkout; the capture cache keys on those assemblies.
+    writeFileSync(csharpFile, normalize(readFileSync(csharpFile, "utf8")).replace(/\n/g, "\r\n"));
+    writeFileSync(typescriptFile, normalize(readFileSync(typescriptFile, "utf8")));
   }
+}
+
+/** C# files must match exactly, line endings included; other files match when only their line endings differ. */
+function sameText(file, actual, expected) {
+  return file.endsWith(".cs") ? actual === expected : normalize(actual) === normalize(expected);
 }
 
 function listFiles(root) {
@@ -77,12 +87,12 @@ function check() {
   try {
     generate(scratch);
     const expected = listFiles(scratch);
-    const actual = listFiles(generatedDir);
+    const actual = listFiles(checkedDir);
     const problems = [];
     for (const file of expected) {
       if (!actual.includes(file)) {
         problems.push(`missing: contracts/generated/${file}`);
-      } else if (normalize(readFileSync(join(generatedDir, file), "utf8")) !== readFileSync(join(scratch, file), "utf8")) {
+      } else if (!sameText(file, readFileSync(join(checkedDir, file), "utf8"), readFileSync(join(scratch, file), "utf8"))) {
         problems.push(`stale: contracts/generated/${file}`);
       }
     }
