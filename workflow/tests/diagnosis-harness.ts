@@ -131,7 +131,7 @@ const fingerprints = (candidateSource: string): InputFingerprints => ({
 
 const baseArguments: Arguments = {
   cases: [], captures: [], settingsOverlay: null, threshold: null, caseFile: null, canonicalCache: null,
-  liveCanonical: false, noOcr: false, tessdata: null, only: null, recapture: false, noDiagnosis: false, unattended: false,
+  liveCanonical: false, noOcr: false, tessdata: null, only: null, recapture: false, noDiagnosis: false, noRepair: false, unattended: false,
 };
 
 const details: CaseDetails = {

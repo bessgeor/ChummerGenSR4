@@ -19,7 +19,7 @@ test("capture, compare and workflow options are parsed", () => {
     "--threshold", "0.5", "--case-file", "f.json", "--no-ocr", "--tessdata", "t", "--only", "compare"]);
   deepStrictEqual(parsed, {
     cases: ["a", "b", "c"], captures: ["common"], settingsOverlay: "o", threshold: 0.5, caseFile: "f.json",
-    canonicalCache: null, liveCanonical: false, noOcr: true, tessdata: "t", only: "compare", recapture: false, noDiagnosis: false, unattended: false,
+    canonicalCache: null, liveCanonical: false, noOcr: true, tessdata: "t", only: "compare", recapture: false, noDiagnosis: false, noRepair: false, unattended: false,
   });
 });
 
@@ -55,6 +55,15 @@ test("--no-diagnosis ends the run after triage and contradicts --only diagnose",
   const root = scratch();
   equal(resolveRunOptions(start(["--no-diagnosis"]), {}, { LOCALAPPDATA: root }, root).diagnosis, false);
   equal(resolveRunOptions(start([]), {}, { LOCALAPPDATA: root }, root).diagnosis, true);
+});
+
+test("--no-repair ends the run after diagnosis; the profile sets the repair deadline", () => {
+  const root = scratch();
+  const env = { LOCALAPPDATA: root };
+  equal(start(["--no-repair"]).noRepair, true);
+  equal(resolveRunOptions(start(["--no-repair"]), { repair: { deadlineMinutes: 5 } }, env, root).repair, null);
+  deepStrictEqual(resolveRunOptions(start([]), {}, env, root).repair, { deadlineMinutes: 60 });
+  deepStrictEqual(resolveRunOptions(start([]), { repair: { deadlineMinutes: 5 } }, env, root).repair, { deadlineMinutes: 5 });
 });
 
 test("--resume takes a thread and nothing else", () => {

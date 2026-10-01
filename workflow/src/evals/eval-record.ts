@@ -100,6 +100,21 @@ export function recordNamespace(jobKind: EvalRecord["jobKind"]): string[] {
   return ["eval-record", jobKind];
 }
 
+/**
+ * The ID `<prefix>/<n>` of the next record of a subject's job kind, where the caller already lists attempts 1 to
+ * `listed`, and the stored records after them that the caller never saw: a job that ended the run with `infra`
+ * stored its record first, so only the store knows it.
+ */
+export async function nextRecordId(store: BaseStore, jobKind: EvalRecord["jobKind"], prefix: string, listed: number): Promise<{ recordId: string; attempt: number; unlisted: string[] }> {
+  const unlisted: string[] = [];
+  let attempt = listed + 1;
+  for (;; attempt++) {
+    const id = `${prefix}/${attempt}`;
+    if ((await store.get(recordNamespace(jobKind), id)) === null) return { recordId: id, attempt, unlisted };
+    unlisted.push(id);
+  }
+}
+
 export async function putRecord(store: BaseStore, record: EvalRecord): Promise<void> {
   await store.put(recordNamespace(record.jobKind), record.recordId, EvalRecordSchema.parse(record));
 }
