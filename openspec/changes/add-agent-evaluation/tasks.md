@@ -10,7 +10,7 @@
 
 - [x] 2.1 Add frozen datasets with `npm run eval -- freeze`. Evidence: unit tests on fixture threads for the items, observations (and conflicting runs), gold from a benchmark item and from a review, partitions by cluster, versions, the content hash, and a changed copy refused on load, pass.
 - [x] 2.2 Add eval runs (`npm run eval -- run`, `--resume`) and the paired comparison (`npm run eval -- compare`). Evidence: unit tests with a fake agent runner for both metrics of both job kinds, failures, the summary and its Wilson intervals, resume after a kill, the t-interval and verdicts against hand-computed values, and the comparison's setup errors, pass.
-- [ ] 2.3 Add certificates (`npm run eval -- certify`) and `npm start -- --unattended`; describe evaluation in `AGENTS.md` and `README.md`. Evidence: unit tests for issue and refusal (lower bound, partition, cost) and for the gate (missing, invalid, differing, `--no-diagnosis`, resume), pass; `workflow:typecheck` and `workflow:test` pass.
+- [x] 2.3 Add certificates (`npm run eval -- certify`) and `npm start -- --unattended`; describe evaluation in `AGENTS.md` and `README.md`. Evidence: unit tests for issue and refusal (lower bound, partition, cost) and for the gate (missing, invalid, differing, `--no-diagnosis`, resume), pass; `workflow:typecheck` and `workflow:test` pass.
 
 ## 3. Verification and archive
 

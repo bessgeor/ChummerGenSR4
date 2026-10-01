@@ -12,6 +12,7 @@ import type { WorkflowPaths } from "../paths.js";
 import { addBenchmarkItem, checkBenchmarkItem, readBenchmark } from "./benchmark.js";
 import { CommandOptions } from "./command-options.js";
 import { listRecords } from "./eval-record.js";
+import { certify as issueCertificate } from "./certificate.js";
 import { comparisonLines, compareRuns, metrics } from "./comparison.js";
 import { freezeDataset } from "./dataset.js";
 import { resumeEvalRun, runPartitions, startEvalRun, summaryLines } from "./eval-run.js";
@@ -38,6 +39,8 @@ export const evalUsage = `Usage: npm run eval -- <command> [options]
   run --resume <run>              finish a stopped eval run with its stored settings
   compare --baseline <run> --candidate <run> [--metric prediction|rootCause]
                                   paired comparison of two eval runs with a 95% confidence interval
+  certify --run <run> --metric prediction|rootCause --min-pass <0-1> [--max-mean-cost-usd <usd>]
+                                  certify the run's job kind configuration for unattended runs (npm start -- --unattended)
 
 Exit status: 0 done, 1 certificate refused, 2 a grader job failed, 3 setup error.`;
 
@@ -50,6 +53,8 @@ export type EvalContext = {
   readonly log: (line: string) => void;
   /** The agent settings of the local profile, read when a command needs them. */
   readonly agentSettings: () => AgentSettings;
+  /** The certificates folder of the local profile, or the repository's. */
+  readonly certificatesFolder: () => string;
   readonly agents: AgentRunners;
   readonly quota: QuotaWaiter;
   readonly createScratchFolder: (prefix: string) => ScratchFolder;
@@ -185,7 +190,27 @@ const compare: Command = async (args, context) => {
   return 0;
 };
 
-const commands: Readonly<Record<string, Command>> = { records, benchmark, hindsight, grade, queue, freeze, run, compare };
+const certify: Command = async (args, context) => {
+  const options = CommandOptions.parse("certify", args, ["run", "metric", "min-pass", "max-mean-cost-usd"]);
+  options.required("metric");
+  options.required("min-pass");
+  const folder = context.certificatesFolder();
+  const outcome = issueCertificate(join(context.paths.evalsFolder, "runs", options.required("run")), {
+    metric: options.choice("metric", metrics, "prediction"), minPass: options.number("min-pass", 0, 0, 1),
+    maxMeanCostUsd: options.text("max-mean-cost-usd") === null ? null : options.number("max-mean-cost-usd", 0, Number.MIN_VALUE, Number.MAX_VALUE),
+  }, folder, context.now());
+  if ("refused" in outcome) {
+    context.log(`Certificate refused:\n  ${outcome.refused.join("\n  ")}`);
+    return 1;
+  }
+  const certificate = outcome.certificate;
+  context.log(`Certificate for ${certificate.jobKind}: ${certificate.agent.provider} (${certificate.agent.model ?? "default model"}, effort ${certificate.agent.effort}), `
+    + `${certificate.promptVersion}; ${certificate.metric} ${certificate.passes}/${certificate.samples}, 95% Wilson [${certificate.interval.low.toFixed(3)}, ${certificate.interval.high.toFixed(3)}] `
+    + `>= ${certificate.thresholds.minPass}; ${join(folder, `${certificate.jobKind}.json`)}`);
+  return 0;
+};
+
+const commands: Readonly<Record<string, Command>> = { records, benchmark, hindsight, grade, queue, freeze, run, compare, certify };
 
 /** Runs one evaluation command and returns its exit status; a setup error is thrown. */
 export async function runEvalCommand(args: readonly string[], context: EvalContext): Promise<number> {

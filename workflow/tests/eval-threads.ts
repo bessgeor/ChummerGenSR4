@@ -1,10 +1,11 @@
 import { equal } from "node:assert/strict";
-import { copyFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { InMemoryStore } from "@langchain/langgraph";
 import type { BenchmarkItem } from "../src/evals/benchmark.js";
 import type { FreezeInput } from "../src/evals/dataset.js";
 import { listRecords } from "../src/evals/eval-record.js";
+import { runFolders, type RunSettings, type Sample } from "../src/evals/eval-run.js";
 import { diagnosisHarness, twoClusters } from "./diagnosis-harness.js";
 import { scratch } from "./diagnosis-fixtures.js";
 export function benchmarkItem(clusterId: string, committedUtc: string): BenchmarkItem {
@@ -37,4 +38,23 @@ export async function twoThreads() {
     log: (line) => lines.push(line), ...overrides,
   });
   return { root, store, input, lines, threads: [first.threadId(), second.threadId()] };
+}
+
+/** A run folder with the given settings and one sample per value (the value of both metrics; null: no gold). */
+export function writeRun(folder: string, settings: Partial<RunSettings>, values: readonly (boolean | null)[]): void {
+  mkdirSync(runFolders(folder).samples, { recursive: true });
+  const keys = values.map((_, index) => `i${index}-1`);
+  const full: RunSettings = {
+    schemaVersion: 1, runId: folder.split(/[\\/]/).pop()!, name: null, dataset: { folder: "d", name: "d", version: 1, hash: "h" }, jobKind: "hypothesis", partition: "test",
+    repeat: 1, choice: { provider: "claude", model: null, effort: "medium", timeoutMinutes: 30 }, promptVersion: "hypothesis-v1", modelPool: 2,
+    executables: { claude: "claude", codex: null }, samples: keys, startedUtc: "t", ...settings,
+  };
+  writeFileSync(runFolders(folder).settings, JSON.stringify(full));
+  values.forEach((value, index) => {
+    const sample: Sample = {
+      key: keys[index]!, itemId: `i${index}`, clusterId: "d", repetition: 1, recordId: "r", status: "succeeded", message: null, output: null,
+      prediction: value ?? false, rootCause: value, durationMs: 1000 * (index + 1), costUsd: index === 0 ? null : 0.1,
+    };
+    writeFileSync(runFolders(folder).sample(keys[index]!), JSON.stringify(sample));
+  });
 }

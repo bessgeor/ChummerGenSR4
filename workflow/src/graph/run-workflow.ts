@@ -22,6 +22,8 @@ export type RunDependencies = {
   readonly readCase: (runFolder: string, compared: boolean) => CaseDetails;
   readonly log: (line: string) => void;
   readonly now: () => Date;
+  /** Why an unattended run may not dispatch its model jobs; empty when it may (or is not unattended). */
+  readonly certificateProblems: (options: RunOptions) => readonly string[];
   /** Aborts when the operator interrupts the run (Ctrl+C): running children are stopped and the thread stays resumable. */
   readonly signal?: AbortSignal;
 };
@@ -68,6 +70,7 @@ function report(state: WorkflowStateValue, readCase: RunDependencies["readCase"]
 
 async function start(command: Extract<Command, { kind: "start" }>, dependencies: RunDependencies): Promise<{ threadId: string; input: WorkflowStateValue }> {
   const options = dependencies.resolveOptions(command);
+  requireCertificates(options, dependencies);
   const plan = dependencies.planCases(options);
   for (const name of plan.excluded) dependencies.log(`${name} is left out: none of the requested captures belongs to it.`);
   const threadId = newThreadId(dependencies.now());
@@ -80,15 +83,24 @@ async function start(command: Extract<Command, { kind: "start" }>, dependencies:
   return { threadId, input };
 }
 
-async function checkResumable(threadId: string, graph: WorkflowGraph): Promise<void> {
-  const snapshot = await graph.getState({ configurable: { thread_id: threadId } });
+/** An unattended run starts only when every job kind it dispatches has a certificate for its configuration. */
+function requireCertificates(options: RunOptions, dependencies: RunDependencies): void {
+  const problems = dependencies.certificateProblems(options);
+  if (problems.length > 0) {
+    throw new SetupError(`--unattended needs a certificate for every job kind diagnosis dispatches:\n  ${problems.join("\n  ")}`);
+  }
+}
+
+async function checkResumable(threadId: string, dependencies: RunDependencies): Promise<void> {
+  const snapshot = await dependencies.graph.getState({ configurable: { thread_id: threadId } });
   const values = snapshot.values as Partial<WorkflowStateValue>;
-  if (snapshot.config.configurable?.["checkpoint_id"] === undefined || values.plan === undefined) {
+  if (snapshot.config.configurable?.["checkpoint_id"] === undefined || values.plan === undefined || values.options === undefined) {
     throw new SetupError(`There is no thread ${threadId} to resume.`);
   }
   if (snapshot.next.length === 0) {
     throw new SetupError(`Thread ${threadId} already finished; start a new run instead.`);
   }
+  requireCertificates(values.options, dependencies);
 }
 
 /** Reports a thread whose graph ran to its end; a result that cannot be read is a setup error, and the finished thread has nothing to resume. */
@@ -112,7 +124,7 @@ export async function runWorkflow(command: Exclude<Command, { kind: "help" }>, d
   try {
     let final: WorkflowStateValue;
     if (command.kind === "resume") {
-      await checkResumable(command.threadId, graph);
+      await checkResumable(command.threadId, dependencies);
       log(`Resuming thread ${command.threadId}.`);
       final = await graph.invoke(null, config(command.threadId, dependencies.signal));
     } else {

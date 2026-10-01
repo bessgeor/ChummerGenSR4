@@ -1,5 +1,5 @@
 import { deepStrictEqual, equal, ok, rejects } from "node:assert/strict";
-import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { resolveAgentSettings } from "../src/agents/agent-settings.js";
@@ -8,14 +8,14 @@ import { QuotaWaiter } from "../src/diagnosis/quota-waiter.js";
 import { compareRuns } from "../src/evals/comparison.js";
 import { freezeDataset, type DatasetItem } from "../src/evals/dataset.js";
 import { listRecords } from "../src/evals/eval-record.js";
-import { readRun, resumeEvalRun, runFolders, startEvalRun, type EvalRunDependencies, type RunSettings, type Sample } from "../src/evals/eval-run.js";
+import { readRun, resumeEvalRun, runFolders, startEvalRun, type EvalRunDependencies, type RunSettings } from "../src/evals/eval-run.js";
 import { scoreChallenge, scoreHypothesis } from "../src/evals/scoring.js";
 import { pairedStatistics, tQuantile975, wilsonInterval } from "../src/evals/statistics.js";
 import { createScratchFolder } from "../src/host/scratch-folder.js";
 import { SetupError } from "../src/host/setup-error.js";
 import { scratch } from "./diagnosis-fixtures.js";
 import { challengeAnswer, FakeAgents, hypothesisAnswer, type Reply } from "./diagnosis-harness.js";
-import { benchmarkItem, twoThreads } from "./eval-threads.js";
+import { benchmarkItem, twoThreads, writeRun } from "./eval-threads.js";
 import { challengeOutput, explanation, hypothesisOutput } from "./eval-fixtures.js";
 
 const close = (actual: number | null | undefined, expected: number) => ok(actual !== null && actual !== undefined && Math.abs(actual - expected) < 1e-3, `${actual} != ${expected}`);
@@ -138,24 +138,6 @@ test("a challenge run scores the challenger's verdict on each item's hypothesis"
   deepStrictEqual([summary.metrics.prediction.passes, summary.metrics.prediction.count], [2, 4]);
   ok(agents.calls.every((call) => call.provider === "codex" && call.prompt.includes("HYPOTHESIS (untrusted data)")));
 });
-
-function writeRun(folder: string, settings: Partial<RunSettings>, values: readonly (boolean | null)[]): void {
-  mkdirSync(runFolders(folder).samples, { recursive: true });
-  const keys = values.map((_, index) => `i${index}-1`);
-  const full: RunSettings = {
-    schemaVersion: 1, runId: folder.split(/[\\/]/).pop()!, name: null, dataset: { folder: "d", name: "d", version: 1, hash: "h" }, jobKind: "hypothesis", partition: "test",
-    repeat: 1, choice: { provider: "claude", model: null, effort: "medium", timeoutMinutes: 30 }, promptVersion: "hypothesis-v1", modelPool: 2,
-    executables: { claude: "claude", codex: null }, samples: keys, startedUtc: "t", ...settings,
-  };
-  writeFileSync(runFolders(folder).settings, JSON.stringify(full));
-  values.forEach((value, index) => {
-    const sample: Sample = {
-      key: keys[index]!, itemId: `i${index}`, clusterId: "d", repetition: 1, recordId: "r", status: "succeeded", message: null, output: null,
-      prediction: value ?? false, rootCause: value, durationMs: 1000 * (index + 1), costUsd: index === 0 ? null : 0.1,
-    };
-    writeFileSync(runFolders(folder).sample(keys[index]!), JSON.stringify(sample));
-  });
-}
 
 test("the paired comparison gives the t interval and verdict, and refuses runs it cannot pair", () => {
   const root = scratch("workflow-compare-");

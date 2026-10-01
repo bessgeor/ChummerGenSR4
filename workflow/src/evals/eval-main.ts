@@ -34,6 +34,7 @@ async function main(): Promise<number> {
     return await runEvalCommand(process.argv.slice(2), {
       paths, store, git: processGit(repositoryRoot), now: () => new Date(), log,
       agentSettings: () => resolveAgentSettings(loadProfile(process.env).agents),
+      certificatesFolder: () => resolve(repositoryRoot, loadProfile(process.env).certificates ?? paths.certificates),
       agents: agentRunners(process.env), quota: new QuotaWaiter(randomBytes(8).toString("hex"), undefined, log),
       createScratchFolder, signal: interruptSignal(),
     });
