@@ -5,6 +5,8 @@
     <IsPackable>false</IsPackable>
     <RootNamespace>Parity.Tests</RootNamespace>
     <UseWindowsForms>true</UseWindowsForms>
+    <!-- The app's sources, compiled below, are written without nullable annotations. -->
+    <NoWarn>$(NoWarn);CS8603</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -22,6 +24,13 @@
     <ProjectReference Include="..\..\src\Parity.Compare\Parity.Compare.csproj" />
     <!-- The core library targets .NET Framework and uses only types that .NET also provides. -->
     <ProjectReference Include="..\..\..\Core\Core.csproj" SkipGetTargetFrameworkProperties="true" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Adapters of the app that use only Windows Forms and drawing types and the core library's types, compiled into the tests. -->
+    <Compile Include="..\..\..\Chummer\TreeNodeView.cs" Link="App\TreeNodeView.cs" />
+    <Compile Include="..\..\..\Chummer\ContactColour.cs" Link="App\ContactColour.cs" />
+    <Compile Include="..\..\..\Chummer\WeaponNodeFunction.cs" Link="App\WeaponNodeFunction.cs" />
   </ItemGroup>
 
   <ItemGroup>
