@@ -26,16 +26,21 @@ export type RunOptions = {
   /** The folder of the certificates: the profile's `certificates`, else `workflow/evals/certificates`. */
   readonly certificates: string;
   /**
-   * Whether confirmed clusters are repaired (null with --no-repair) and each attempt's deadline.
+   * Whether confirmed clusters are repaired (null with --no-repair), each attempt's deadline and the attempts a cluster may get.
    */
   readonly repair: RepairSettings | null;
   /** Whether passed repair attempts are widened and promoted (false with --no-widening or --no-repair). */
   readonly widening: boolean;
 };
 
-export type RepairSettings = { readonly deadlineMinutes: number };
+export type RepairSettings = {
+  readonly deadlineMinutes: number;
+  /** How many attempts a cluster may get in a thread, the first included; absent in a thread stored before it existed, which has 1. */
+  readonly maxAttempts?: number;
+};
 
 export const defaultRepairDeadlineMinutes = 60;
+export const defaultRepairMaxAttempts = 2;
 
 function cacheFolder(args: Arguments, profile: Profile, env: Environment): Pick<RunOptions, "canonicalCache" | "canonicalCacheSource"> {
   if (args.liveCanonical) return { canonicalCache: null, canonicalCacheSource: "off" };
@@ -68,7 +73,10 @@ export function resolveRunOptions(args: Arguments, profile: Profile, env: Enviro
     agents: resolveAgentSettings(profile.agents),
     unattended: args.unattended,
     certificates: resolve(repositoryRoot, profile.certificates ?? join("workflow", "evals", "certificates")),
-    repair: args.noRepair ? null : { deadlineMinutes: profile.repair?.deadlineMinutes ?? defaultRepairDeadlineMinutes },
+    repair: args.noRepair ? null : {
+      deadlineMinutes: profile.repair?.deadlineMinutes ?? defaultRepairDeadlineMinutes,
+      maxAttempts: profile.repair?.maxAttempts ?? defaultRepairMaxAttempts,
+    },
     widening: !args.noRepair && !args.noWidening,
   };
 }

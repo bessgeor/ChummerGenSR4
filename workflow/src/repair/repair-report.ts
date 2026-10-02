@@ -36,6 +36,9 @@ export function describeRepair(repairs: Readonly<Record<string, ClusterRepair>>,
   const lines: string[] = [];
   for (const repair of Object.values(repairs)) {
     const head = `Repair ${repair.clusterId}:`;
+    for (const earlier of repair.earlier ?? []) {
+      lines.push(`${head} attempt ${earlier.attempt} rejected by ${earlier.rejectedBy} at ${earlier.stage}: ${earlier.reason}; archive ${earlier.archive}`);
+    }
     const attempt = repair.attempt;
     if (attempt === null) {
       lines.push(`${head} ${repair.status === "budget_exhausted" ? "budget_exhausted: the run budget was spent before its model job" : repair.status}; ${repair.records.length} records`);

@@ -42,7 +42,7 @@ export type ClusterWidening = {
   readonly recordId: string;
   /** The attempt's repair archive. */
   readonly archive: string;
-  /** `widening/<cluster>/` in the thread's folder: the widened source and build, and `widening.json`. */
+  /** `widening/<cluster>/attempt-<n>/` in the thread's folder: the widened source and build, and `widening.json`; every attempt keeps its own folder. */
   readonly folder: string;
   readonly scope: ClusterScope;
   /** The cluster's members as `case/capture`. */
