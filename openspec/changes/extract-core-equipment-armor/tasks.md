@@ -1,0 +1,14 @@
+# Tasks
+
+## 1. Interfaces and move
+
+- [ ] 1.1 Cut the armor, cyberware and gear types unchanged out of `Chummer/clsEquipment.cs` into `Chummer/Armor.cs`, `Chummer/Cyberware.cs` and `Chummer/Gear.cs`. Evidence: `npm run build:candidate` builds; the commit removes from `clsEquipment.cs` only lines that it adds to the three files, which add nothing else but the file's `using` lines, namespace and closing brace.
+- [ ] 1.2 Add `Metatype`, `CHA`, `INT`, `LOG` and `WIL` to `ICharacter`, `NewNode`, `Add` and `Expand` to `ITreeNodeView`, and `IEquipmentWeapon` and `IEquipmentHost` (as `IApplicationHost.Equipment`) to the library, and implement them in the app (`TreeNodeView`, `Weapon`, `WinFormsEquipmentHost`) and the test doubles. Evidence: the candidate builds; `npm run parity:test` passes.
+- [ ] 1.3 In place, make the three files reach the character only through `ICharacter`, tree nodes only through `ITreeNodeView`, the windows and weapons only through `IEquipmentHost`, and drop their Windows Forms and drawing `using` lines; add `GrantedWeaponLists`, `ArmorModNodes` and `EquipmentTreeNodeCreation`, and let the quality's weapon creation use the host's `CreateGrantedWeapon`. Evidence: the candidate builds; a search of the three files finds no `TreeNode`, `ContextMenuStrip`, `Weapon`, `frm` window, `Color`, `SystemColors` or `Character` type besides strings and comments.
+- [ ] 1.4 Move `Chummer/Armor.cs`, `Chummer/Cyberware.cs` and `Chummer/Gear.cs` to `Core/`. Evidence: each rename of the move commit has at least 90% similarity; the candidate builds; the type listing of the executable and the library equals the previous source's types plus the new ones, each once, with the moved types in the library.
+- [ ] 1.5 Test in `parity/tests/Parity.Tests` without a host: gear copied with children of the three gear types into a recording tree node, the character view of gear, the app tree node view's new nodes, adding and expanding, the granted weapon lists' order, `null` failure and casts, the mod node function's context menu, and the argument checks of the equipment host (the same instance, a wrong type, `null`, the parameter's name and the message). Evidence: `npm run parity:test` passes.
+
+## 2. Verification and archive
+
+- [ ] 2.1 Run `npm start` live over the whole case suite on the final source with diagnosis, repair and widening. Record in `verification.md` the canonical SHA-256 before and after, each case's execution outcome (capture status, coverage, where the canonical side came from) apart from its visual result and the compare report's completeness, each discrepancy cluster with the loop's outcome, the thread's outcome, the fixture-tested checks of tasks 1.1 to 1.5 apart from the live evidence, and what remains unverified.
+- [ ] 2.2 Archive the change with `openspec archive extract-core-equipment-armor`. Evidence: `npm run openspec:validate` passes after the archive, recorded in `verification.md`.
