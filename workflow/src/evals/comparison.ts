@@ -7,6 +7,17 @@ export type Metric = (typeof metrics)[number];
 
 export type Verdict = "improved" | "worse" | "no-difference" | "too-few-pairs";
 
+/**
+ * The verdict of a paired difference's interval: `improved` when the whole interval lies on the better side of zero,
+ * `worse` when it lies on the other, `no-difference` when it holds zero, `too-few-pairs` without an interval.
+ * A positive difference is better unless `better` is `lower`.
+ */
+export function verdictOf(interval: Interval | null, better: "higher" | "lower" = "higher"): Verdict {
+  if (interval === null) return "too-few-pairs";
+  const [low, high] = better === "higher" ? [interval.low, interval.high] : [-interval.high, -interval.low];
+  return low > 0 ? "improved" : high < 0 ? "worse" : "no-difference";
+}
+
 export type Comparison = {
   readonly schemaVersion: 1;
   readonly baseline: string;
@@ -65,8 +76,7 @@ export function compareRuns(baselineFolder: string, candidateFolder: string, met
   const valued = [...shares.baseline].filter(([itemId]) => shares.candidate.has(itemId)).map(([itemId, share]) => ({ baseline: share, candidate: shares.candidate.get(itemId)! }));
   const rate = (side: "baseline" | "candidate") => mean(valued.map((pair) => pair[side]));
   const statistics = pairedStatistics(valued.map((pair) => pair.candidate - pair.baseline));
-  const verdict: Verdict = statistics.interval === null ? "too-few-pairs"
-    : statistics.interval.low > 0 ? "improved" : statistics.interval.high < 0 ? "worse" : "no-difference";
+  const verdict = verdictOf(statistics.interval);
   const costed = pairs.filter((pair) => pair.baseline.costUsd !== null && pair.candidate.costUsd !== null);
   const left = configuration(baseline.settings);
   const right = configuration(candidate.settings);

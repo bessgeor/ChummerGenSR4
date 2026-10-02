@@ -20,6 +20,7 @@ import { gradeRecords } from "./grader.js";
 import { labelHindsight } from "./hindsight.js";
 import { recordSummary } from "./record-summary.js";
 import { snapshotBaseCheck } from "./snapshot-base.js";
+import { compareThreads, threadComparisonLines, threadMeasures } from "./thread-comparison.js";
 import { defaultQueueOptions, queueLines, reviewQueue } from "./review-queue.js";
 
 export const evalUsage = `Usage: npm run eval -- <command> [options]
@@ -40,6 +41,9 @@ export const evalUsage = `Usage: npm run eval -- <command> [options]
   run --resume <run>              finish a stopped eval run with its stored settings
   compare --baseline <run> --candidate <run> [--metric prediction|rootCause]
                                   paired comparison of two eval runs with a 95% confidence interval
+  compare-threads --baseline <threads> --candidate <threads>
+                                  paired comparison of finished workflow threads (comma-separated IDs) by cluster:
+                                  fix rate and model time, with 95% confidence intervals
   certify --run <run> --metric prediction|rootCause --min-pass <0-1> [--max-mean-cost-usd <usd>]
                                   certify the run's job kind configuration for unattended runs (npm start -- --unattended)
 
@@ -193,6 +197,26 @@ const compare: Command = async (args, context) => {
   return 0;
 };
 
+const compareThreadsCommand: Command = async (args, context) => {
+  const options = CommandOptions.parse("compare-threads", args, ["baseline", "candidate"]);
+  const ids = (name: string) => {
+    const list = options.required(name).split(",").map((id) => id.trim()).filter((id) => id.length > 0);
+    if (list.length === 0) throw new SetupError(`--${name} names no thread.`);
+    return list;
+  };
+  const sides = { baseline: ids("baseline"), candidate: ids("candidate") };
+  const records = await listRecords(context.store);
+  const measures = (threads: readonly string[]) => threads.flatMap((threadId) => threadMeasures(context.paths.threadFolder(threadId), threadId, records));
+  const comparison = compareThreads(measures(sides.baseline), measures(sides.candidate), sides, context.now());
+  const folder = join(context.paths.evalsFolder, "comparisons");
+  mkdirSync(folder, { recursive: true });
+  const path = join(folder, `threads-${comparison.createdUtc.replace(/[-:]/g, "").replace(/\.\d+/, "")}-${randomBytes(4).toString("hex")}.json`);
+  writeFileSync(path, `${JSON.stringify(comparison, null, 2)}\n`);
+  for (const line of threadComparisonLines(comparison)) context.log(line);
+  context.log(`Comparison: ${path}`);
+  return 0;
+};
+
 const certify: Command = async (args, context) => {
   const options = CommandOptions.parse("certify", args, ["run", "metric", "min-pass", "max-mean-cost-usd"]);
   options.required("metric");
@@ -213,7 +237,7 @@ const certify: Command = async (args, context) => {
   return 0;
 };
 
-const commands: Readonly<Record<string, Command>> = { records, benchmark, hindsight, grade, queue, freeze, run, compare, certify };
+const commands: Readonly<Record<string, Command>> = { records, benchmark, hindsight, grade, queue, freeze, run, compare, "compare-threads": compareThreadsCommand, certify };
 
 /** Runs one evaluation command and returns its exit status; a setup error is thrown. */
 export async function runEvalCommand(args: readonly string[], context: EvalContext): Promise<number> {
