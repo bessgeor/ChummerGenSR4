@@ -26,12 +26,12 @@ import { resolveRunOptions } from "./options/run-options.js";
 import { workflowPaths } from "./paths.js";
 import { hostAttemptBuild, hostNarrowCheck } from "./repair/attempt-host.js";
 import { RepairService } from "./repair/repair-service.js";
-import { CaptureStep } from "./steps/capture-step.js";
+import { CaptureStep, readEnvironmentFingerprint } from "./steps/capture-step.js";
 import { CompareStep, reportPath } from "./steps/compare-step.js";
 import { readCaseDetails } from "./steps/case-details.js";
 import { readDocument } from "./steps/read-document.js";
 import { CompareReportSchema } from "../../contracts/generated/typescript/parity-compare-report.js";
-import { changedInputs } from "./steps/input-fingerprints.js";
+import { captureInputs, changedInputs } from "./steps/input-fingerprints.js";
 import { StepStore } from "./steps/step-store.js";
 import { SqliteStore } from "./store/sqlite-store.js";
 import { processBranchGit } from "./widening/accepted-branch.js";
@@ -86,7 +86,7 @@ async function main(): Promise<number> {
   const stepStore = new StepStore(paths.steps);
   const steps = new HostSteps(paths, host,
     new CaptureStep({ paths, host, store: stepStore, log, now, createScratchFolder, changedInputs }),
-    new CompareStep({ paths, host, store: stepStore, log, now, changedInputs }), stepStore, now);
+    new CompareStep({ paths, host, store: stepStore, log, now, changedInputs }), stepStore, now, createScratchFolder);
 
   // Diagnosis and repair share the model pools and the count of quota waits.
   const agents = agentRunners(process.env);
@@ -105,6 +105,11 @@ async function main(): Promise<number> {
   const widening = new WideningService({
     threadFolder: paths.threadFolder, build: hostAttemptBuild(paths, host), capture: hostLevelCapture(paths, host, createScratchFolder),
     allCases: (caseFile) => planCases(caseFile, [], []).cases, git: processBranchGit(repositoryRoot), now, log,
+    inputs: {
+      environment: (signal) => readEnvironmentFingerprint(paths, host, createScratchFolder, "environment widening", signal),
+      // The levels run widened builds, so the thread's candidate folder is not an input of theirs.
+      changed: (options, fingerprints) => changedInputs(paths, options, fingerprints, captureInputs.filter((name) => name !== "candidate")),
+    },
   });
 
   const checkpointer = SqliteSaver.fromConnString(paths.checkpoints);

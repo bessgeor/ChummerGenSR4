@@ -9,9 +9,11 @@ import { SetupError } from "../src/host/setup-error.js";
 import type { BranchGit } from "../src/widening/accepted-branch.js";
 import type { ClusterWidening } from "../src/widening/cluster-widening.js";
 import type { WideningDocument } from "../src/widening/widening-report.js";
+import type { WideningDependencies } from "../src/widening/widening-service.js";
 import { challengeAnswer, diagnosisHarness, FakeAgents, hypothesisAnswer, twoClusters, type JobCall, type Reply } from "./diagnosis-harness.js";
 import { FakeRepairHost, patchedReply, repairedSource } from "./repair-fixtures.js";
-import { FakeWideningHost, type WideningScript } from "./widening-fixtures.js";
+import { scratch } from "./diagnosis-fixtures.js";
+import { FakeWideningHost, writeCoverage, writeRun, type WideningScript } from "./widening-fixtures.js";
 
 const first = "d-0000000000000100";
 const second = "d-0000000000000400";
@@ -34,13 +36,14 @@ type Options = {
   readonly sameFile?: boolean;
   readonly extra?: Partial<Parameters<typeof diagnosisHarness>[0]>;
   readonly git?: (git: BranchGit) => BranchGit;
+  readonly inputs?: WideningDependencies["inputs"];
 };
 
 function harness(options: Options = {}) {
   return diagnosisHarness({
     spots: options.spots ?? twoClusters, agents: agents(options.sameFile),
     repair: { deadlineMinutes: 60, host: (root) => new FakeRepairHost(root) },
-    widening: { host: (root, names) => new FakeWideningHost(root, names, options.script ?? {}), extraCases: ["gamma"], ...(options.git === undefined ? {} : { git: options.git }) },
+    widening: { host: (root, names) => new FakeWideningHost(root, names, options.script ?? {}), extraCases: ["gamma"], ...(options.git === undefined ? {} : { git: options.git }), ...(options.inputs === undefined ? {} : { inputs: options.inputs }) },
     ...options.extra,
   });
 }
@@ -245,4 +248,92 @@ test("a run killed after the promotion's commit resumes without a second commit"
   equal(git(killed.sourceRepository, "rev-parse", `accepted/${threadId}`), tip);
   equal(git(killed.sourceRepository, "rev-list", "--count", `accepted/${threadId}`), "3");
   equal((await resumed.state(threadId)).widenings[first]!.commit, tip);
+});
+
+test("candidate runs with execution failures are no baseline, while valid ones are", async () => {
+  const root = scratch();
+  const run = harness({
+    script: {
+      observe: (request, name, capture, baseline) => failAt(`widen ${first} character`, "build-alpha", "armor", [1], "same")(request, name, capture, baseline)
+        ?? failAt(`widen ${first} suite`, "career-beta", "armor", [3], "same")(request, name, capture, baseline),
+    },
+    extra: {
+      root,
+      extraSteps: {
+        capture: async (_context, item) => {
+          const runFolder = join(root, "runs", item.name);
+          // The run of build-alpha ended with an execution failure, so its row for the armor capture (no candidate capture) says nothing.
+          if (item.name === "build-alpha") writeRun(runFolder, [{ case: "build-alpha", capture: "armor", passed: false, candidate: null }]);
+          else {
+            writeRun(runFolder, [{ case: "career-beta", capture: "armor", passed: false, candidate: [3], mode: "career" }]);
+            writeCoverage(runFolder, true);
+          }
+          return { case: item.name, status: 1 as const, runFolder, key: "k", reusedFrom: null };
+        },
+      },
+    },
+  });
+  equal(await run.start(), 1);
+  const labels = run.wideningHost.labels().filter((label) => label.startsWith(`widen ${first} `));
+  deepStrictEqual(labels, [`widen ${first} narrow`, `widen ${first} character`, `widen ${first} character baseline`, `widen ${first} mode`, `widen ${first} suite`]);
+  const widening = (await run.state(run.threadId())).widenings[first]!;
+  equal(widening.status, "promoted");
+  deepStrictEqual(widening.levels[1]!.findings.map((finding) => finding.attribution), ["pre-existing"]);
+  deepStrictEqual(widening.levels[3]!.findings.map((finding) => [finding.case, finding.attribution, finding.baselineRun === run.wideningHost.captures[2]!.runFolder]), [["career-beta", "pre-existing", false]]);
+});
+
+test("a widened source that stages the accepted tree is rejected at stage promote and the next cluster is widened", async () => {
+  let adds = 0;
+  // The first promotion's two staging calls (the snapshot's source, then the fix) stage nothing, so its tree is the parent's.
+  const skipStaging = (inner: BranchGit): BranchGit => (args, options) => (args.includes("add") && ++adds <= 2 ? "" : inner(args, options));
+  const run = harness({ git: skipStaging });
+  equal(await run.start(), 1);
+  const threadId = run.threadId();
+  const state = await run.state(threadId);
+  deepStrictEqual(state.widenings[first]!.rejection, {
+    stage: "promote", reason: "the widened source stages the same tree as the accepted source, so there is nothing to commit", executionFailure: false,
+  });
+  equal(state.widenings[first]!.status, "rejected");
+  ok(!existsSync(join(state.widenings[first]!.folder, "source")));
+  equal(state.widenings[second]!.status, "promoted");
+  deepStrictEqual(state.accepted?.promoted, [second]);
+  equal(git(run.sourceRepository, "log", "--format=%s", `accepted/${threadId}`), `Fix discrepancy ${second}\nSource captured by thread ${threadId}\ninitial`);
+  const label = EvalRecordSchema.parse((await run.store.get(recordNamespace("repair"), `${threadId}/${first}/repair/1`))!.value).labels.widening;
+  deepStrictEqual([label?.outcome, label?.stage], ["rejected", "promote"]);
+});
+
+test("a rollback does not need the accepted branch, which a user may have deleted", async () => {
+  let moved = 0;
+  const deleteAfterPromotion = (inner: BranchGit): BranchGit => (args, options) => {
+    const output = inner(args, options);
+    if (args[0] === "update-ref" && args[1] !== "-d" && ++moved === 1) inner(["update-ref", "-d", args[3]!], options);
+    return output;
+  };
+  const run = harness({ git: deleteAfterPromotion, script: { observe: failAt(`widen ${second} suite`, "build-gamma", "armor") } });
+  equal(await run.start(), 1);
+  const state = await run.state(run.threadId());
+  equal(state.widenings[first]!.status, "promoted");
+  deepStrictEqual([state.widenings[second]!.status, state.widenings[second]!.rejection?.stage], ["rejected", "suite"]);
+});
+
+test("level and baseline captures stop when an input of the thread changed since it started", async () => {
+  const environment = harness({
+    spots: [twoClusters[0]!],
+    // The thread started under environment-1.
+    inputs: { environment: async () => "environment-2", changed: async () => [] },
+  });
+  equal(await environment.start(), 3);
+  equal(environment.wideningHost.captures.length, 0);
+  ok(environment.lines.some((line) => line.includes(`widen ${first} narrow: inputs changed since the thread started (environment); start a new thread.`)));
+  const files = harness({ spots: [twoClusters[0]!], inputs: { environment: async () => "environment-1", changed: async () => ["overlay", "captureTools"] } });
+  equal(await files.start(), 3);
+  equal(files.wideningHost.captures.length, 0);
+  ok(files.lines.some((line) => line.includes("inputs changed since the thread started (overlay, captureTools)")));
+});
+
+test("a level run that covered a case that was not selected is a setup error", async () => {
+  const run = harness({ spots: [twoClusters[0]!], script: { alsoCovered: (request) => (request.label === `widen ${first} narrow` ? ["build-delta"] : []) } });
+  equal(await run.start(), 3);
+  ok(run.lines.some((line) => line.includes(`widen ${first} narrow ran 2 cases (build-alpha, build-delta)`)));
+  equal((await run.state(run.threadId())).widenings[first]!.levels.length, 0);
 });

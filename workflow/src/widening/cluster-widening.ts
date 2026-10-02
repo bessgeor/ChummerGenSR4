@@ -21,7 +21,7 @@ export type LevelResult = {
 };
 
 /** Where a rejected widening stopped. */
-export type WideningStage = "apply" | "build" | LevelName;
+export type WideningStage = "apply" | "build" | LevelName | "promote";
 
 export type WideningStatus =
   /** The widened candidate is not built yet. */

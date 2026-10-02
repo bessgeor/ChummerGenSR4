@@ -10,6 +10,8 @@ import { SetupError } from "../host/setup-error.js";
 import type { RunOptions } from "../options/run-options.js";
 import { judgeNarrowCheck, type AttemptBuild } from "../repair/attempt-host.js";
 import type { CheckExecution, ClusterRepair } from "../repair/cluster-repair.js";
+import { requireCoveredCases } from "../steps/capture-step.js";
+import type { InputFingerprints } from "../steps/input-fingerprints.js";
 import { readDocument } from "../steps/read-document.js";
 import { TriageDocumentSchema } from "../triage/triage-document.js";
 import { AcceptedBranch, promote, type BranchGit } from "./accepted-branch.js";
@@ -29,7 +31,17 @@ export type WideningDependencies = {
   readonly git: BranchGit;
   readonly now: () => Date;
   readonly log: (line: string) => void;
+  /** What the pixels of a level or baseline capture depend on besides the executable. */
+  readonly inputs: {
+    /** The capture runner's fingerprint of the environment. */
+    readonly environment: (signal?: AbortSignal) => Promise<string>;
+    /** The names of the thread's inputs that changed since it started; empty when none did. */
+    readonly changed: (options: RunOptions, fingerprints: InputFingerprints) => Promise<readonly string[]>;
+  };
 };
+
+/** A capture run of the thread's candidate, which is the accepted source until a promotion. */
+export type CandidateRun = { readonly runFolder: string; readonly status: 0 | 1 | 2 };
 
 export type WideningPrepareInput = {
   readonly threadId: string;
@@ -37,12 +49,14 @@ export type WideningPrepareInput = {
   readonly clusters: Readonly<Record<string, ClusterDiagnosis>>;
   readonly triagePath: string;
   /** The runs of the thread's candidate, oldest first: its capture runs and its diagnosis check run. */
-  readonly candidateRuns: readonly string[];
+  readonly candidateRuns: readonly CandidateRun[];
 };
 
 export type WideningInput = {
   readonly threadId: string;
   readonly options: RunOptions;
+  /** The fingerprints of the thread's inputs, taken when it started. */
+  readonly fingerprints: InputFingerprints;
   readonly widening: ClusterWidening;
   readonly accepted: AcceptedState;
   readonly signal?: AbortSignal;
@@ -76,7 +90,10 @@ function readAttempt(archive: string) {
 export class WideningService {
   constructor(private readonly dependencies: WideningDependencies) {}
 
-  /** A widening for each cluster whose repair passed, and the accepted state of the thread's snapshot; null when nothing is widened. */
+  /**
+   * A widening for each cluster whose repair passed, and the accepted state of the thread's snapshot; null when nothing
+   * is widened. Only candidate runs without execution failures are baselines.
+   */
   prepare(input: WideningPrepareInput): { widenings: Record<string, ClusterWidening>; accepted: AcceptedState | null } {
     const passed = Object.values(input.repairs).filter((repair) => repair.status === "passed" && repair.attempt !== null);
     if (passed.length === 0) return { widenings: {}, accepted: null };
@@ -96,11 +113,27 @@ export class WideningService {
         status: "pending", build: null, levels: [], rejection: null, commit: null,
       };
     }
+    const baselineRuns: string[] = [];
+    for (const run of input.candidateRuns) {
+      const { execution } = judgeNarrowCheck(run.status, run.runFolder);
+      if (execution.status === 2 || !execution.coverageValid) {
+        this.dependencies.log(`Widening: the run ${run.runFolder} had execution failures, so its rows are no baseline.`);
+      } else {
+        baselineRuns.push(run.runFolder);
+      }
+    }
     const accepted: AcceptedState = {
       branch: `accepted/${input.threadId}`, base: base!, commit: null, source: join(threadFolder, "diagnosis", "source"), build: null,
-      baselineRuns: [...input.candidateRuns], promoted: [],
+      baselineRuns, promoted: [],
     };
     return { widenings, accepted };
+  }
+
+  /** Fails when an input the pixels depend on is not the one the thread started with: its level runs would differ from the baselines for that reason. */
+  private async requireSameInputs(input: WideningInput, label: string): Promise<void> {
+    const changed = [...await this.dependencies.inputs.changed(input.options, input.fingerprints)];
+    if (await this.dependencies.inputs.environment(input.signal) !== input.fingerprints.environment) changed.push("environment");
+    if (changed.length > 0) throw new SetupError(`${label}: inputs changed since the thread started (${changed.join(", ")}); start a new thread.`);
   }
 
   /** The next step of a widening that is not verified or failed: the widened candidate first, then one level. */
@@ -144,7 +177,9 @@ export class WideningService {
       result = { level, ...selection, run: null, baseline: null, findings: [], outcome: "nothing-new", reason: null, executionFailure: false };
     } else {
       const signal = input.signal === undefined ? {} : { signal: input.signal };
+      await this.requireSameInputs(input, label);
       const ran = await this.dependencies.capture({ label, ...selection, candidateExecutable: executable(join(widening.folder, "build")), options, ...signal });
+      requireCoveredCases(label, ran.runFolder, selection.cases);
       const run = judgeNarrowCheck(ran.status, ran.runFolder).execution;
       const judged = await this.judge(input, label, level, run, accepted);
       accepted = judged.accepted;
@@ -174,10 +209,13 @@ export class WideningService {
     let baseline: CheckExecution | null = null;
     if (missing.length > 0) {
       accepted = await this.acceptedBuild(input, accepted);
+      const cases = [...new Set(missing.map((found) => found.row.case))];
+      await this.requireSameInputs(input, `${label} baseline`);
       const ran = await this.dependencies.capture({
-        label: `${label} baseline`, cases: [...new Set(missing.map((found) => found.row.case))], captures: [...new Set(missing.map((found) => found.row.capture))],
+        label: `${label} baseline`, cases, captures: [...new Set(missing.map((found) => found.row.capture))],
         candidateExecutable: executable(accepted.build!), options: input.options, ...(input.signal === undefined ? {} : { signal: input.signal }),
       });
+      requireCoveredCases(`${label} baseline`, ran.runFolder, cases);
       baseline = judgeNarrowCheck(ran.status, ran.runFolder).execution;
       if (baseline.status === 2 || !baseline.coverageValid) return lost(baseline, "baseline capture");
       accepted = { ...accepted, baselineRuns: [...accepted.baselineRuns, ran.runFolder] };
@@ -218,6 +256,8 @@ export class WideningService {
       branch, base: accepted.base, accepted: accepted.commit, snapshotFolder: join(this.dependencies.threadFolder(input.threadId), "diagnosis", "source"),
       widenedSource: join(widening.folder, "source"), trailers: { thread: input.threadId, cluster: widening.clusterId, record: widening.recordId }, summary: attempt.answer.summary,
     });
+    // The rollback step removes the folders, so a promotion interrupted before its checkpoint can be repeated.
+    if (commit === null) return this.failed(widening, "promote", "the widened source stages the same tree as the accepted source, so there is nothing to commit", false);
     const next: AcceptedState = {
       ...accepted, commit, source: join(widening.folder, "source"), build: join(widening.folder, "build"),
       baselineRuns: widening.levels.flatMap((level) => (level.run === null ? [] : [level.run.runFolder])), promoted: [...accepted.promoted, widening.clusterId],
@@ -225,14 +265,16 @@ export class WideningService {
     return this.end({ ...widening, status: "promoted", commit }, store, next);
   }
 
-  /** Discards a failed widening's candidate; the accepted branch must still be where the accepted state says. */
+  /** Discards a failed widening's candidate; the accepted branch is not touched. */
   async rollBack(input: WideningInput, store: BaseStore): Promise<WideningStep> {
-    const { widening, accepted } = input;
+    const { widening } = input;
     if (widening.status !== "failed") throw new Error(`Widening ${widening.clusterId} is ${widening.status}, not failed.`);
-    const tip = new AcceptedBranch(this.dependencies.git, input.threadId, join(widening.folder, "promote.index")).tip();
-    if (tip !== accepted.commit) throw new SetupError(`accepted/${input.threadId} is at ${tip ?? "nothing"}, not at the accepted ${accepted.commit ?? "nothing"}; something else moved it.`);
-    for (const part of ["source", "build"]) rmSync(join(widening.folder, part), { recursive: true, force: true });
+    this.discard(widening);
     return this.end({ ...widening, status: "rejected" }, store, null);
+  }
+
+  private discard(widening: ClusterWidening): void {
+    for (const part of ["source", "build"]) rmSync(join(widening.folder, part), { recursive: true, force: true });
   }
 
   /** Writes the cluster's `widening.json`, labels the repair record and returns the final update. */

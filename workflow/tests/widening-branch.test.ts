@@ -13,6 +13,13 @@ import { archiveWithPatch } from "./widening-fixtures.js";
 const git = (root: string, ...args: string[]) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trim();
 
 /** What a promotion must leave alone: the checked-out commit, the index and the working tree's status. */
+/** A promotion that is expected to make a commit. */
+function committed(promotion: Parameters<typeof promote>[0]): string {
+  const commit = promote(promotion);
+  if (commit === null) throw new Error("The promotion had nothing to commit.");
+  return commit;
+}
+
 function untouched(root: string) {
   return { head: git(root, "rev-parse", "HEAD"), index: git(root, "write-tree"), status: git(root, "status", "--porcelain=v1", "--untracked-files=all") };
 }
@@ -69,7 +76,7 @@ test("the first promotion commits the snapshot's source, then the fix, and leave
   const before = untouched(repo);
   const branch = new AcceptedBranch(processBranchGit(repo), "wf-1", join(scratch(), "promote.index"));
   const trailers = { thread: "wf-1", cluster: "d-1", record: "wf-1/d-1/repair/1" };
-  const fix = promote({ branch, base: snapshot.commit, accepted: null, snapshotFolder: snapshot.folder, widenedSource: widened, trailers, summary: "Restored the field." });
+  const fix = committed({ branch, base: snapshot.commit, accepted: null, snapshotFolder: snapshot.folder, widenedSource: widened, trailers, summary: "Restored the field." });
   deepStrictEqual(untouched(repo), before);
   equal(branch.tip(), fix);
   equal(git(repo, "log", "--format=%s", "accepted/wf-1"), "Fix discrepancy d-1\nSource captured by thread wf-1\ninitial");
@@ -88,7 +95,7 @@ test("the first promotion commits the snapshot's source, then the fix, and leave
   const second = join(scratch(), "widened");
   write(second, "Chummer/frmCreate.cs", "class frmCreate { int restored; }");
   write(second, "Chummer/untracked.cs", "fixed too");
-  const next = promote({ branch, base: snapshot.commit, accepted: fix, snapshotFolder: snapshot.folder, widenedSource: second, trailers: { ...trailers, cluster: "d-2", record: "wf-1/d-2/repair/1" }, summary: "Second." });
+  const next = committed({ branch, base: snapshot.commit, accepted: fix, snapshotFolder: snapshot.folder, widenedSource: second, trailers: { ...trailers, cluster: "d-2", record: "wf-1/d-2/repair/1" }, summary: "Second." });
   equal(git(repo, "rev-parse", `${next}~1`), fix);
   deepStrictEqual(untouched(repo), before);
 });
@@ -103,7 +110,7 @@ test("a snapshot equal to its commit gets no source commit, and a branch moved b
   write(widened, "Chummer/untracked.cs", "new");
   const branch = new AcceptedBranch(processBranchGit(repo), "wf-2", join(scratch(), "promote.index"));
   const trailers = { thread: "wf-2", cluster: "d-1", record: "wf-2/d-1/repair/1" };
-  const fix = promote({ branch, base: snapshot.commit, accepted: null, snapshotFolder: snapshot.folder, widenedSource: widened, trailers, summary: "s" });
+  const fix = committed({ branch, base: snapshot.commit, accepted: null, snapshotFolder: snapshot.folder, widenedSource: widened, trailers, summary: "s" });
   equal(git(repo, "rev-parse", `${fix}~1`), snapshot.commit);
   git(repo, "update-ref", branch.ref, snapshot.commit);
   throws(() => promote({ branch, base: snapshot.commit, accepted: fix, snapshotFolder: snapshot.folder, widenedSource: widened, trailers: { ...trailers, record: "wf-2/d-2/repair/1" }, summary: "s" }),
@@ -111,11 +118,10 @@ test("a snapshot equal to its commit gets no source commit, and a branch moved b
   notEqual(branch.tip(), fix);
 });
 
-test("a widened source that stages the accepted tree is a setup error", async () => {
+test("a widened source that stages the accepted tree has nothing to commit", async () => {
   const repo = repository();
   const snapshot = await createSourceSnapshot(repo, join(scratch(), "source"), processGit(repo));
   const branch = new AcceptedBranch(processBranchGit(repo), "wf-3", join(scratch(), "promote.index"));
-  throws(() => promote({ branch, base: snapshot.commit, accepted: null, snapshotFolder: snapshot.folder, widenedSource: snapshot.folder, trailers: { thread: "wf-3", cluster: "d-1", record: "r" }, summary: "s" }),
-    (error) => error instanceof SetupError && /nothing to commit/.test(error.message));
+  equal(promote({ branch, base: snapshot.commit, accepted: null, snapshotFolder: snapshot.folder, widenedSource: snapshot.folder, trailers: { thread: "wf-3", cluster: "d-1", record: "r" }, summary: "s" }), null);
   equal(branch.tip(), null);
 });

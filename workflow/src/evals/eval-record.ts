@@ -30,8 +30,8 @@ const RepairLabelSchema = z.strictObject({
   outcome: z.enum(["passed", "rejected"]), stage: z.enum(repairStages).nullable(), reason: z.string().nullable(), labelledUtc: z.string(),
 });
 
-/** Where a rejected widening stopped: the patch did not apply, the widened source did not build, or a level failed. */
-export const wideningStages = ["apply", "build", "narrow", "character", "mode", "suite"] as const;
+/** Where a rejected widening stopped: the patch did not apply, the widened source did not build, a level failed, or the verified source changed nothing to promote. */
+export const wideningStages = ["apply", "build", "narrow", "character", "mode", "suite", "promote"] as const;
 export type WideningLabelStage = (typeof wideningStages)[number];
 
 /** The outcome of a passed repair attempt's widening: automatic, never gold. */

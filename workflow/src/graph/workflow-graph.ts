@@ -114,9 +114,9 @@ function applyJob(step: JobStep) {
 
 function wideningInput(state: ClusterTask, config: LangGraphRunnableConfig): WideningInput {
   const widening = state.widenings[state.clusterId];
-  if (widening === undefined || state.accepted === null) throw new Error(`No widening of cluster ${state.clusterId}.`);
+  if (widening === undefined || state.accepted === null || state.fingerprints === null) throw new Error(`No widening of cluster ${state.clusterId}.`);
   return {
-    threadId: state.threadId, options: state.options, widening, accepted: state.accepted,
+    threadId: state.threadId, options: state.options, fingerprints: state.fingerprints, widening, accepted: state.accepted,
     ...(config.signal === undefined ? {} : { signal: config.signal }),
   };
 }
@@ -200,10 +200,14 @@ export function buildWorkflowGraph(steps: WorkflowSteps, diagnosis: DiagnosisSte
     .addNode("finish_repair", (state: WorkflowStateValue) => ({ repairPath: repair.finish(state.threadId, state.repairs) }))
     .addNode("prepare_widening", (state: WorkflowStateValue) => {
       if (state.triageSummary === null) throw new Error("Widening ran before triage.");
-      const candidateRuns = state.plan.flatMap((item) => (state.captures[item.name] === undefined ? [] : [state.captures[item.name]!.runFolder]));
+      const captured = state.plan.flatMap((item) => (state.captures[item.name] === undefined ? [] : [state.captures[item.name]!]));
+      const check = state.diagnosisCheck;
       return widening.prepare({
         threadId: state.threadId, repairs: state.repairs, clusters: state.clusters, triagePath: state.triageSummary.path,
-        candidateRuns: [...candidateRuns, ...(state.diagnosisCheck === null ? [] : [state.diagnosisCheck.runFolder])],
+        candidateRuns: [
+          ...captured.map((outcome) => ({ runFolder: outcome.runFolder, status: outcome.status })),
+          ...(check === null ? [] : [{ runFolder: check.runFolder, status: check.execution.status }]),
+        ],
       });
     })
     .addNode("route_widening", () => ({}))

@@ -19,6 +19,8 @@ export type WideningScript = {
   readonly observe?: (request: LevelCaptureRequest, caseName: string, capture: string, baseline: boolean) => Observed | undefined;
   /** The exit status of a capture, or "hang" to run until its signal stops it; by default 1 with a failing row, else 0. */
   readonly status?: (request: LevelCaptureRequest, baseline: boolean) => 0 | 1 | 2 | "hang" | undefined;
+  /** Cases a run covers besides the requested ones, as the runner does when a case name matches another fixture's file name. */
+  readonly alsoCovered?: (request: LevelCaptureRequest, baseline: boolean) => readonly string[];
 };
 
 /** A fake host for widening: builds write an executable naming their source, and captures answer from a script with real PNGs. */
@@ -55,10 +57,11 @@ export class FakeWideningHost {
       return [observed === undefined ? { case: caseName, capture, passed: true } : { case: caseName, capture, passed: false, candidate: observed.candidate ?? [] }];
     }));
     writeRun(runFolder, rows, 0.05);
-    const coverage = JSON.parse(readFileSync(join(examples, "parity-execution-coverage.example.json"), "utf8")) as { valid: boolean; invalidReasons: string[] };
+    const coverage = JSON.parse(readFileSync(join(examples, "parity-execution-coverage.example.json"), "utf8")) as { valid: boolean; invalidReasons: string[]; cases: { case: string }[] };
     const exit = status ?? (rows.some((row) => !row.passed) ? 1 : 0);
     coverage.valid = exit !== 2;
     coverage.invalidReasons = exit === 2 ? ["failure:build-alpha/candidate"] : [];
+    coverage.cases = [...request.cases, ...(this.script.alsoCovered?.(request, baseline) ?? [])].map((name) => ({ ...coverage.cases[0]!, case: name }));
     writeFileSync(join(runFolder, "coverage.json"), JSON.stringify(coverage));
     return { status: exit, runFolder };
   };
@@ -143,6 +146,14 @@ export function solidPng(width: number, height: number, changed: readonly number
   const samples: number[] = [];
   for (let pixel = 0; pixel < width * height; pixel++) samples.push(...(changed.includes(pixel) ? [200, 10, 10, 255] : [240, 240, 240, 255]));
   return encodePng(width, height, 4, samples);
+}
+
+/** Writes a `coverage.json` into a run folder: valid, or invalid like the example's own execution failure. */
+export function writeCoverage(folder: string, valid: boolean): void {
+  const coverage = JSON.parse(readFileSync(join(examples, "parity-execution-coverage.example.json"), "utf8")) as { valid: boolean; invalidReasons: string[] };
+  coverage.valid = valid;
+  coverage.invalidReasons = valid ? [] : ["failure:build-alpha/candidate"];
+  writeFileSync(join(folder, "coverage.json"), JSON.stringify(coverage));
 }
 
 export type RowSpec = {

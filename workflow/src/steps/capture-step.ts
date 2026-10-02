@@ -134,22 +134,36 @@ export class CaptureStep {
     return { case: item.name, status, runFolder, key: stepKey.key, reusedFrom: null };
   }
 
-  /** The capture runner's fingerprint of the machine and app environment, which decides the pixels. */
-  private async readEnvironment(context: StepContext, item: PlannedCase): Promise<string> {
-    const scratch = this.dependencies.createScratchFolder("workflow-environment-");
-    try {
-      const file = join(scratch.path, "environment.txt");
-      const exit = await this.dependencies.host.run({
-        resource: "cpu", label: `environment ${item.name}`, command: "dotnet",
-        args: [join(this.dependencies.paths.captureTools, "Parity.Capture.dll"), "--environment-fingerprint-file", file],
-        ...(context.signal === undefined ? {} : { signal: context.signal }),
-      });
-      if (exit !== 0 || !existsSync(file)) throw new SetupError(`The capture runner could not fingerprint the environment (exit ${exit}).`);
-      const fingerprint = readFileSync(file, "utf8").trim();
-      if (!/^[0-9a-f]{64}$/.test(fingerprint)) throw new SetupError(`The capture runner wrote an environment fingerprint that is not a SHA-256: '${fingerprint}'.`);
-      return fingerprint;
-    } finally {
-      scratch.remove();
-    }
+  private readEnvironment(context: StepContext, item: PlannedCase): Promise<string> {
+    return readEnvironmentFingerprint(this.dependencies.paths, this.dependencies.host, this.dependencies.createScratchFolder, `environment ${item.name}`, context.signal);
+  }
+}
+
+/** The capture runner's fingerprint of the machine and app environment, which decides the pixels. */
+export async function readEnvironmentFingerprint(
+  paths: WorkflowPaths, host: HostRunner, createScratchFolder: (prefix: string) => ScratchFolder, label: string, signal?: AbortSignal,
+): Promise<string> {
+  const scratch = createScratchFolder("workflow-environment-");
+  try {
+    const file = join(scratch.path, "environment.txt");
+    const exit = await host.run({
+      resource: "cpu", label, command: "dotnet", args: [join(paths.captureTools, "Parity.Capture.dll"), "--environment-fingerprint-file", file],
+      ...(signal === undefined ? {} : { signal }),
+    });
+    if (exit !== 0 || !existsSync(file)) throw new SetupError(`The capture runner could not fingerprint the environment (exit ${exit}).`);
+    const fingerprint = readFileSync(file, "utf8").trim();
+    if (!/^[0-9a-f]{64}$/.test(fingerprint)) throw new SetupError(`The capture runner wrote an environment fingerprint that is not a SHA-256: '${fingerprint}'.`);
+    return fingerprint;
+  } finally {
+    scratch.remove();
+  }
+}
+
+/** Fails a level or baseline capture whose run covered other cases than the selected ones: the runner also matches `--case` against fixture file names. */
+export function requireCoveredCases(subject: string, runFolder: string, expected: readonly string[]): void {
+  const covered = readDocument(join(runFolder, "coverage.json"), RunCasesSchema).cases.map((entry) => entry.case);
+  const wanted = new Set(expected);
+  if (covered.length !== wanted.size || covered.some((name) => !wanted.has(name))) {
+    throw new SetupError(`${subject} ran ${covered.length} cases (${covered.join(", ")}) in ${runFolder}, not only the selected ${[...wanted].join(", ")}; nothing it wrote is used.`);
   }
 }

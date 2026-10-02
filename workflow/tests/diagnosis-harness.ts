@@ -27,7 +27,7 @@ import { FakeRepairHost } from "./repair-fixtures.js";
 import { FakeWideningHost } from "./widening-fixtures.js";
 import { captureNames } from "../src/cases/case-plan.js";
 import { processBranchGit, type BranchGit } from "../src/widening/accepted-branch.js";
-import { WideningService } from "../src/widening/widening-service.js";
+import { WideningService, type WideningDependencies } from "../src/widening/widening-service.js";
 import { plannedCase, readReport, repository, runFolders, scratch, triageDocument, type Spot } from "./diagnosis-fixtures.js";
 
 export const hypothesisAnswer = (claim = "The Skills tab label moved in frmCreate."): HypothesisOutput => ({
@@ -132,7 +132,7 @@ export class FakeAgents implements AgentRunner {
 }
 
 const fingerprints = (candidateSource: string): InputFingerprints => ({
-  canonicalExecutable: "e", canonicalSupport: "s", canonicalSupportStat: "ss", tessdata: "default", candidate: "candidate", overlay: "none", captureTools: "ct", compareTools: "mt", candidateSource,
+  canonicalExecutable: "e", canonicalSupport: "s", canonicalSupportStat: "ss", tessdata: "default", candidate: "candidate", overlay: "none", captureTools: "ct", compareTools: "mt", candidateSource, environment: "environment-1",
 });
 
 const baseArguments: Arguments = {
@@ -177,6 +177,8 @@ export type HarnessOptions = {
     readonly host: (root: string, captureNames: (caseName: string) => readonly string[]) => FakeWideningHost;
     readonly extraCases?: readonly string[];
     readonly git?: (git: BranchGit) => BranchGit;
+    /** The environment and changed-input checks; by default nothing ever changes. */
+    readonly inputs?: WideningDependencies["inputs"];
   };
 };
 
@@ -250,6 +252,7 @@ export function diagnosisHarness(options: HarnessOptions) {
   const widening = new WideningService({
     threadFolder: (threadId) => join(root, "threads", threadId), build: wideningHost.build, capture: wideningHost.capture, allCases: () => allCases,
     git: options.widening?.git?.(branchGit) ?? branchGit, now: () => new Date("2026-10-01T13:00:00Z"), log,
+    inputs: options.widening?.inputs ?? { environment: async () => "environment-1", changed: async () => [] },
   });
   const checkpointer = options.checkpointer ?? new MemorySaver();
   const store = options.store ?? new InMemoryStore();

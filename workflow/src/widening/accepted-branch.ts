@@ -86,18 +86,19 @@ export type Promotion = {
  * Commits the widened source on the accepted branch and returns the commit. The first promotion starts the branch at
  * the snapshot's commit, with a commit of the snapshot's `Chummer/` when that differs. A branch whose tip already
  * carries the attempt's record was moved before an interruption, and its tip is the promotion; any other tip than
- * the accepted commit is a setup error.
+ * the accepted commit is a setup error. A widened source that stages the accepted tree gives null: there is nothing to
+ * commit.
  */
-export function promote(promotion: Promotion): string {
+export function promote(promotion: Promotion): string | null {
   const { branch, trailers } = promotion;
   const tip = branch.tip();
   if (tip !== null && branch.repairRecord(tip) === trailers.record) return tip;
   if (tip !== promotion.accepted) {
-    throw new SetupError(`${branch.ref} is at ${tip ?? "nothing"}, not at the accepted ${promotion.accepted ?? "nothing"}; something else moved it.`);
+    throw new SetupError(`${branch.ref} is at ${tip ?? "nothing"}, not at the accepted ${promotion.accepted ?? "nothing"}; something else moved it or it was deleted, and a thread that can still be resumed needs the branch where it left it.`);
   }
   const parent = promotion.accepted ?? branch.commitSource(promotion.base, promotion.snapshotFolder, sourceMessage(branch.threadId)) ?? promotion.base;
   const fix = branch.commitSource(parent, promotion.widenedSource, fixMessage(trailers, promotion.summary));
-  if (fix === null) throw new SetupError(`The widened source of ${trailers.cluster} stages the same tree as the accepted source, so there is nothing to commit.`);
+  if (fix === null) return null;
   branch.move(fix, tip);
   return fix;
 }
