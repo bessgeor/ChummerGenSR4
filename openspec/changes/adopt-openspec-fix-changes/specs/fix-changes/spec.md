@@ -26,7 +26,7 @@ The workflow SHALL create each fix change with the pinned CLI (`openspec new cha
 - **THEN** the run ends with a setup error holding the CLI's output, and no commit is made
 
 ### Requirement: Fix changes are turned on per thread
-`npm start -- --fix-changes` SHALL start a thread that works in fix changes: priors in diagnosis, planned repair and a fix change with every promotion. The option SHALL be stored with the thread, so a resumed thread keeps it, and a thread stored without it SHALL run without fix changes. Without the option the workflow SHALL run as it does without this capability. `--fix-changes` together with `--unattended` SHALL be a usage error, since no certificate covers the prompts it adds.
+`npm start -- --fix-changes` SHALL start a thread that works in fix changes: priors in diagnosis, planned repair and a fix change with every promotion. The option SHALL be stored with the thread, so a resumed thread keeps it, and a thread stored without it SHALL run without fix changes. Without the option the workflow SHALL run as it does without this capability. `--fix-changes` together with `--unattended` SHALL be a setup error before any step, since no certificate covers the prompts it adds.
 
 #### Scenario: Off by default
 - **WHEN** `npm start` runs without `--fix-changes` and a cluster is promoted
@@ -34,4 +34,4 @@ The workflow SHALL create each fix change with the pinned CLI (`openspec new cha
 
 #### Scenario: With unattended
 - **WHEN** `npm start -- --fix-changes --unattended --no-repair` is given
-- **THEN** the run ends with a usage error before any step
+- **THEN** the run ends with a setup error (exit 3) before any step
