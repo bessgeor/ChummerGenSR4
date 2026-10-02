@@ -1,9 +1,7 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Drawing;
 using System.Linq;
-using System.Windows.Forms;
 using System.Xml;
 using System.Xml.XPath;
 
@@ -45,7 +43,7 @@ namespace Chummer
 		protected List<Gear> _objChildren = new List<Gear>();
 		protected string _strNotes = "";
 		protected string _strLocation = "";
-		protected Character _objCharacter;
+		protected ICharacter _objCharacter;
 		protected string _strAltName = "";
 		protected string _strAltCategory = "";
 		protected string _strAltPage = "";
@@ -60,7 +58,7 @@ namespace Chummer
 		protected bool _blnIncludedInParent = false;
 
 		#region Constructor, Create, Save, Load, and Print Methods
-		public Gear(Character objCharacter)
+		public Gear(ICharacter objCharacter)
 		{
 			// Create the GUID for the new piece of Gear.
 			_guiID = Guid.NewGuid();
@@ -72,15 +70,14 @@ namespace Chummer
 		/// <param name="objCharacter">Character the Gear is being added to.</param>
 		/// <param name="objNode">TreeNode to populate a TreeView.</param>
 		/// <param name="intRating">Selected Rating for the Gear.</param>
-		/// <param name="objWeapons">List of Weapons that should be added to the character.</param>
-		/// <param name="objWeaponNodes">List of TreeNodes to represent the added Weapons</param>
+		/// <param name="funcAddWeapon">Adds each Weapon that should be added to the character with the TreeNode that represents it.</param>
 		/// <param name="strForceValue">Value to forcefully select for any ImprovementManager prompts.</param>
 		/// <param name="blnHacked">Whether or not a Matrix Program has been hacked (removing the Copy Protection and Registration plugins).</param>
 		/// <param name="blnInherent">Whether or not a Program is Inherent to an A.I.</param>
 		/// <param name="blnAddImprovements">Whether or not Improvements should be added to the character.</param>
 		/// <param name="blnCreateChildren">Whether or not child Gear should be created.</param>
 		/// <param name="blnAerodynamic">Whether or not Weapons should be created as Aerodynamic.</param>
-		public void Create(XmlNode objXmlGear, Character objCharacter, TreeNode objNode, int intRating, List<Weapon> objWeapons, List<TreeNode> objWeaponNodes, string strForceValue = "", bool blnHacked = false, bool blnInherent = false, bool blnAddImprovements = true, bool blnCreateChildren = true, bool blnAerodynamic = false)
+		public void Create(XmlNode objXmlGear, ICharacter objCharacter, ITreeNodeView objNode, int intRating, Action<IEquipmentWeapon, ITreeNodeView> funcAddWeapon, string strForceValue = "", bool blnHacked = false, bool blnInherent = false, bool blnAddImprovements = true, bool blnCreateChildren = true, bool blnAerodynamic = false)
 		{
 			_strName = objXmlGear["name"].InnerText;
 			_strCategory = objXmlGear["category"].InnerText;
@@ -257,15 +254,9 @@ namespace Chummer
 
 					if (intMin != 0 || intMax != 0)
 					{
-						frmSelectNumber frmPickNumber = new frmSelectNumber();
 						if (intMax == 0)
 							intMax = 1000000;
-						frmPickNumber.Minimum = intMin;
-						frmPickNumber.Maximum = intMax;
-						frmPickNumber.Description = LanguageManager.Instance.GetString("String_SelectVariableCost").Replace("{0}", DisplayNameShort);
-						frmPickNumber.AllowCancel = false;
-						frmPickNumber.ShowDialog();
-						_strCost = frmPickNumber.SelectedValue.ToString();
+						_strCost = ApplicationHost.Current.Equipment.SelectNumber(intMin, intMax, LanguageManager.Instance.GetString("String_SelectVariableCost").Replace("{0}", DisplayNameShort)).ToString();
 					}
 				}
 			}
@@ -278,13 +269,7 @@ namespace Chummer
 			// If the Gear is Ammunition, ask the user to select a Weapon Category for it to be limited to.
 			if (_strCategory == "Ammunition" && _strName.StartsWith("Ammo:"))
 			{
-				frmSelectWeaponCategory frmPickWeaponCategory = new frmSelectWeaponCategory();
-				frmPickWeaponCategory.Description = LanguageManager.Instance.GetString("String_SelectWeaponCategoryAmmo");
-				if (strForceValue != "")
-					frmPickWeaponCategory.OnlyCategory = strForceValue;
-				frmPickWeaponCategory.ShowDialog();
-
-				_strExtra = frmPickWeaponCategory.SelectedCategory;
+				_strExtra = ApplicationHost.Current.Equipment.SelectWeaponCategory(LanguageManager.Instance.GetString("String_SelectWeaponCategoryAmmo"), strForceValue);
 				objNode.Text += " (" + _strExtra + ")";
 			}
 
@@ -298,10 +283,9 @@ namespace Chummer
 				{
 					XmlNode objXmlWeapon = objXmlWeaponDocument.SelectSingleNode("/chummer/weapons/weapon[name = \"" + objXmlAddWeapon.InnerText + "\" and category = \"Gear\"]");
 
-					TreeNode objGearWeaponNode = new TreeNode();
-					Weapon objGearWeapon = new Weapon(objCharacter);
-					objGearWeapon.Create(objXmlWeapon, objCharacter, objGearWeaponNode, null, null, null);
-					objGearWeaponNode.ForeColor = SystemColors.GrayText;
+					ITreeNodeView objGearWeaponNode = objNode.NewNode();
+					IEquipmentWeapon objGearWeapon = ApplicationHost.Current.Equipment.CreateWeapon(objXmlWeapon, objCharacter, objGearWeaponNode);
+					objGearWeaponNode.ShowAsGrayText();
 					if (blnAerodynamic)
 					{
 						objGearWeapon.Name += " (" + LanguageManager.Instance.GetString("Checkbox_Aerodynamic") + ")";
@@ -311,8 +295,7 @@ namespace Chummer
 						objNode.Text = DisplayName;
 					}
 						
-					objWeaponNodes.Add(objGearWeaponNode);
-					objWeapons.Add(objGearWeapon);
+					funcAddWeapon(objGearWeapon, objGearWeaponNode);
 
 					_guiWeaponID = Guid.Parse(objGearWeapon.InternalId);
 				}
@@ -356,7 +339,7 @@ namespace Chummer
 				foreach (XmlNode objXmlChild in objXmlGear.SelectNodes("gears/gear"))
 				{
 					Gear objChild = new Gear(_objCharacter);
-					TreeNode objChildNode = new TreeNode();
+					ITreeNodeView objChildNode = objNode.NewNode();
 					objChild.Name = objXmlChild["name"].InnerText;
 					objChild.Category = objXmlChild["category"].InnerText;
 					objChild.Avail = "0";
@@ -368,7 +351,7 @@ namespace Chummer
 
 					objChildNode.Text = objChild.DisplayName;
 					objChildNode.Tag = objChild.InternalId;
-					objNode.Nodes.Add(objChildNode);
+					objNode.Add(objChildNode);
 					objNode.Expand();
 				}
 
@@ -386,8 +369,8 @@ namespace Chummer
 					if (_objCharacter.Options.AutomaticCopyProtection && !blnInherent)
 					{
 						Gear objPlugin1 = new Gear(_objCharacter);
-						TreeNode objPlugin1Node = new TreeNode();
-						objPlugin1.Create(objXmlDocument.SelectSingleNode("/chummer/gears/gear[name = \"Copy Protection\"]"), objCharacter, objPlugin1Node, _intRating, null, null);
+						ITreeNodeView objPlugin1Node = objNode.NewNode();
+						objPlugin1.Create(objXmlDocument.SelectSingleNode("/chummer/gears/gear[name = \"Copy Protection\"]"), objCharacter, objPlugin1Node, _intRating, null);
 						if (_intRating == 0)
 							objPlugin1.Rating = 1;
 						objPlugin1.Avail = "0";
@@ -398,14 +381,14 @@ namespace Chummer
 						objPlugin1.Capacity = "[0]";
 						objPlugin1.Parent = this;
 						_objChildren.Add(objPlugin1);
-						objNode.Nodes.Add(objPlugin1Node);
+						objNode.Add(objPlugin1Node);
 					}
 
 					if (_objCharacter.Options.AutomaticRegistration && !blnInherent)
 					{
 						Gear objPlugin2 = new Gear(_objCharacter);
-						TreeNode objPlugin2Node = new TreeNode();
-						objPlugin2.Create(objXmlDocument.SelectSingleNode("/chummer/gears/gear[name = \"Registration\"]"), objCharacter, objPlugin2Node, 0, null, null);
+						ITreeNodeView objPlugin2Node = objNode.NewNode();
+						objPlugin2.Create(objXmlDocument.SelectSingleNode("/chummer/gears/gear[name = \"Registration\"]"), objCharacter, objPlugin2Node, 0, null);
 						objPlugin2.Avail = "0";
 						objPlugin2.Cost = "0";
 						objPlugin2.Cost3 = "0";
@@ -414,15 +397,15 @@ namespace Chummer
 						objPlugin2.Capacity = "[0]";
 						objPlugin2.Parent = this;
 						_objChildren.Add(objPlugin2);
-						objNode.Nodes.Add(objPlugin2Node);
+						objNode.Add(objPlugin2Node);
 						objNode.Expand();
 					}
 
 					if ((objCharacter.Metatype == "A.I." || objCharacter.MetatypeCategory == "Technocritters" || objCharacter.MetatypeCategory == "Protosapients") && blnInherent)
 					{
 						Gear objPlugin3 = new Gear(_objCharacter);
-						TreeNode objPlugin3Node = new TreeNode();
-						objPlugin3.Create(objXmlDocument.SelectSingleNode("/chummer/gears/gear[name = \"Ergonomic\"]"), objCharacter, objPlugin3Node, 0, null, null);
+						ITreeNodeView objPlugin3Node = objNode.NewNode();
+						objPlugin3.Create(objXmlDocument.SelectSingleNode("/chummer/gears/gear[name = \"Ergonomic\"]"), objCharacter, objPlugin3Node, 0, null);
 						objPlugin3.Avail = "0";
 						objPlugin3.Cost = "0";
 						objPlugin3.Cost3 = "0";
@@ -431,11 +414,11 @@ namespace Chummer
 						objPlugin3.Capacity = "[0]";
 						objPlugin3.Parent = this;
 						_objChildren.Add(objPlugin3);
-						objNode.Nodes.Add(objPlugin3Node);
+						objNode.Add(objPlugin3Node);
 
 						Gear objPlugin4 = new Gear(_objCharacter);
-						TreeNode objPlugin4Node = new TreeNode();
-						objPlugin4.Create(objXmlDocument.SelectSingleNode("/chummer/gears/gear[name = \"Optimization\" and category = \"Program Options\"]"), objCharacter, objPlugin4Node, _intRating, null, null);
+						ITreeNodeView objPlugin4Node = objNode.NewNode();
+						objPlugin4.Create(objXmlDocument.SelectSingleNode("/chummer/gears/gear[name = \"Optimization\" and category = \"Program Options\"]"), objCharacter, objPlugin4Node, _intRating, null);
 						if (_intRating == 0)
 							objPlugin4.Rating = 1;
 						objPlugin4.Avail = "0";
@@ -446,7 +429,7 @@ namespace Chummer
 						objPlugin4.Capacity = "[0]";
 						objPlugin4.Parent = this;
 						_objChildren.Add(objPlugin4);
-						objNode.Nodes.Add(objPlugin4Node);
+						objNode.Add(objPlugin4Node);
 						objNode.Expand();
 					}
 				}
@@ -458,7 +441,7 @@ namespace Chummer
 			objNode.Text = DisplayName;
 		}
 
-		protected void CreateChildren(XmlDocument objXmlGearDocument, XmlNode objXmlGear, Gear objParent, TreeNode objNode, Character objCharacter, bool blnHacked)
+		protected void CreateChildren(XmlDocument objXmlGearDocument, XmlNode objXmlGear, Gear objParent, ITreeNodeView objNode, ICharacter objCharacter, bool blnHacked)
 		{
 			// Create Gear by looking up the name of the item we're provided with.
 			if (objXmlGear.SelectNodes("gears/usegear").Count > 0)
@@ -477,10 +460,10 @@ namespace Chummer
 						strChildForceValue = objXmlChild["name"].Attributes["select"].InnerText;
 
 					Gear objChild = new Gear(_objCharacter);
-					TreeNode objChildNode = new TreeNode();
-					List<Weapon> lstChildWeapons = new List<Weapon>();
-					List<TreeNode> lstChildWeaponNodes = new List<TreeNode>();
-					objChild.Create(objXmlGearNode, objCharacter, objChildNode, intChildRating, lstChildWeapons, lstChildWeaponNodes, strChildForceValue, blnHacked);
+					ITreeNodeView objChildNode = objNode.NewNode();
+					// The Weapons of child Gear are created but kept nowhere.
+					Action<IEquipmentWeapon, ITreeNodeView> funcKeepNoWeapon = (objWeapon, objWeaponNode) => { };
+					objChild.Create(objXmlGearNode, objCharacter, objChildNode, intChildRating, funcKeepNoWeapon, strChildForceValue, blnHacked);
 					objChild.Quantity = intChildQty;
 					objChild.Cost = "0";
 					objChild.Cost3 = "0";
@@ -495,7 +478,7 @@ namespace Chummer
 					if (objXmlChild["capacity"] != null)
 						objChild.Capacity = "[" + objXmlChild["capacity"].InnerText + "]";
 
-					objNode.Nodes.Add(objChildNode);
+					objNode.Add(objChildNode);
 					objNode.Expand();
 
 					CreateChildren(objXmlGearDocument, objXmlChild, objChild, objChildNode, objCharacter, blnHacked);
@@ -508,9 +491,8 @@ namespace Chummer
 		/// </summary>
 		/// <param name="objGear">Gear object to copy.</param>
 		/// <param name="objNode">TreeNode for the copied item.</param>
-		/// <param name="objWeapons">List of Weapons created by the copied item.</param>
-		/// <param name="objWeaponNodes">List of TreeNodes for the Weapons created by the copied item.</param>
-		public void Copy(Gear objGear, TreeNode objNode, List<Weapon> objWeapons, List<TreeNode> objWeaponNodes)
+		/// <param name="funcAddWeapon">Adds each Weapon created by the copied item with its TreeNode.</param>
+		public void Copy(Gear objGear, ITreeNodeView objNode, Action<IEquipmentWeapon, ITreeNodeView> funcAddWeapon)
 		{
 			_strName = objGear.Name;
 			_strCategory = objGear.Category;
@@ -553,25 +535,25 @@ namespace Chummer
 
 			foreach (Gear objGearChild in objGear.Children)
 			{
-				TreeNode objChildNode = new TreeNode();
+				ITreeNodeView objChildNode = objNode.NewNode();
 				Gear objChild = new Gear(_objCharacter);
 				if (objGearChild.GetType() == typeof(Commlink))
 				{
 					Commlink objCommlink = new Commlink(_objCharacter);
-					objCommlink.Copy(objGearChild, objChildNode, objWeapons, objWeaponNodes);
+					objCommlink.Copy(objGearChild, objChildNode, funcAddWeapon);
 					objChild = objCommlink;
 				}
 				else if (objGearChild.GetType() == typeof(OperatingSystem))
 				{
 					OperatingSystem objOS = new OperatingSystem(_objCharacter);
-					objOS.Copy(objGearChild, objChildNode, objWeapons, objWeaponNodes);
+					objOS.Copy(objGearChild, objChildNode, funcAddWeapon);
 					objChild = objOS;
 				}
 				else
-					objChild.Copy(objGearChild, objChildNode, objWeapons, objWeaponNodes);
+					objChild.Copy(objGearChild, objChildNode, funcAddWeapon);
 				_objChildren.Add(objChild);
 
-				objNode.Nodes.Add(objChildNode);
+				objNode.Add(objChildNode);
 				objNode.Expand();
 			}
 		}
@@ -2477,7 +2459,7 @@ namespace Chummer
 		private bool _blnActiveCommlink = false;
 
 		#region Constructor, Create, Save, Load, and Print Methods
-		public Commlink(Character objCharacter) : base(objCharacter)
+		public Commlink(ICharacter objCharacter) : base(objCharacter)
 		{
 		}
 
@@ -2488,7 +2470,7 @@ namespace Chummer
 		/// <param name="intRating">Gear Rating.</param>
 		/// <param name="blnAddImprovements">Whether or not Improvements should be added to the character.</param>
 		/// <param name="blnCreateChildren">Whether or not child Gear should be created.</param>
-		public void Create(XmlNode objXmlGear, Character objCharacter, TreeNode objNode, int intRating, bool blnAddImprovements = true, bool blnCreateChildren = true)
+		public void Create(XmlNode objXmlGear, ICharacter objCharacter, ITreeNodeView objNode, int intRating, bool blnAddImprovements = true, bool blnCreateChildren = true)
 		{
 			_strName = objXmlGear["name"].InnerText;
 			_strCategory = objXmlGear["category"].InnerText;
@@ -2595,7 +2577,7 @@ namespace Chummer
 				foreach (XmlNode objXmlChild in objXmlGear.SelectNodes("gears/gear"))
 				{
 					Gear objChild = new Gear(_objCharacter);
-					TreeNode objChildNode = new TreeNode();
+					ITreeNodeView objChildNode = objNode.NewNode();
 					objChild.Name = objXmlChild["name"].InnerText;
 					objChild.Category = objXmlChild["category"].InnerText;
 					objChild.Avail = "0";
@@ -2607,7 +2589,7 @@ namespace Chummer
 
 					objChildNode.Text = objChild.DisplayName;
 					objChildNode.Tag = objChild.InternalId;
-					objNode.Nodes.Add(objChildNode);
+					objNode.Add(objChildNode);
 					objNode.Expand();
 				}
 
@@ -2625,8 +2607,8 @@ namespace Chummer
 					if (_objCharacter.Options.AutomaticCopyProtection)
 					{
 						Gear objPlugin1 = new Gear(_objCharacter);
-						TreeNode objPlugin1Node = new TreeNode();
-						objPlugin1.Create(objXmlDocument.SelectSingleNode("/chummer/gears/gear[name = \"Copy Protection\"]"), objCharacter, objPlugin1Node, _intRating, null, null);
+						ITreeNodeView objPlugin1Node = objNode.NewNode();
+						objPlugin1.Create(objXmlDocument.SelectSingleNode("/chummer/gears/gear[name = \"Copy Protection\"]"), objCharacter, objPlugin1Node, _intRating, null);
 						if (_intRating == 0)
 							objPlugin1.Rating = 1;
 						objPlugin1.Avail = "0";
@@ -2637,14 +2619,14 @@ namespace Chummer
 						objPlugin1.Capacity = "[0]";
 						objPlugin1.Parent = this;
 						_objChildren.Add(objPlugin1);
-						objNode.Nodes.Add(objPlugin1Node);
+						objNode.Add(objPlugin1Node);
 					}
 
 					if (_objCharacter.Options.AutomaticRegistration)
 					{
 						Gear objPlugin2 = new Gear(_objCharacter);
-						TreeNode objPlugin2Node = new TreeNode();
-						objPlugin2.Create(objXmlDocument.SelectSingleNode("/chummer/gears/gear[name = \"Registration\"]"), objCharacter, objPlugin2Node, 0, null, null);
+						ITreeNodeView objPlugin2Node = objNode.NewNode();
+						objPlugin2.Create(objXmlDocument.SelectSingleNode("/chummer/gears/gear[name = \"Registration\"]"), objCharacter, objPlugin2Node, 0, null);
 						objPlugin2.Avail = "0";
 						objPlugin2.Cost = "0";
 						objPlugin2.Cost3 = "0";
@@ -2653,15 +2635,15 @@ namespace Chummer
 						objPlugin2.Capacity = "[0]";
 						objPlugin2.Parent = this;
 						_objChildren.Add(objPlugin2);
-						objNode.Nodes.Add(objPlugin2Node);
+						objNode.Add(objPlugin2Node);
 						objNode.Expand();
 					}
 
 					if ((objCharacter.Metatype == "A.I." || objCharacter.MetatypeCategory == "Technocritters" || objCharacter.MetatypeCategory == "Protosapients"))
 					{
 						Gear objPlugin3 = new Gear(_objCharacter);
-						TreeNode objPlugin3Node = new TreeNode();
-						objPlugin3.Create(objXmlDocument.SelectSingleNode("/chummer/gears/gear[name = \"Ergonomic\"]"), objCharacter, objPlugin3Node, 0, null, null);
+						ITreeNodeView objPlugin3Node = objNode.NewNode();
+						objPlugin3.Create(objXmlDocument.SelectSingleNode("/chummer/gears/gear[name = \"Ergonomic\"]"), objCharacter, objPlugin3Node, 0, null);
 						objPlugin3.Avail = "0";
 						objPlugin3.Cost = "0";
 						objPlugin3.Cost3 = "0";
@@ -2670,11 +2652,11 @@ namespace Chummer
 						objPlugin3.Capacity = "[0]";
 						objPlugin3.Parent = this;
 						_objChildren.Add(objPlugin3);
-						objNode.Nodes.Add(objPlugin3Node);
+						objNode.Add(objPlugin3Node);
 
 						Gear objPlugin4 = new Gear(_objCharacter);
-						TreeNode objPlugin4Node = new TreeNode();
-						objPlugin4.Create(objXmlDocument.SelectSingleNode("/chummer/gears/gear[name = \"Optimization\" and category = \"Program Options\"]"), objCharacter, objPlugin4Node, _intRating, null, null);
+						ITreeNodeView objPlugin4Node = objNode.NewNode();
+						objPlugin4.Create(objXmlDocument.SelectSingleNode("/chummer/gears/gear[name = \"Optimization\" and category = \"Program Options\"]"), objCharacter, objPlugin4Node, _intRating, null);
 						if (_intRating == 0)
 							objPlugin4.Rating = 1;
 						objPlugin4.Avail = "0";
@@ -2685,7 +2667,7 @@ namespace Chummer
 						objPlugin4.Capacity = "[0]";
 						objPlugin4.Parent = this;
 						_objChildren.Add(objPlugin4);
-						objNode.Nodes.Add(objPlugin4Node);
+						objNode.Add(objPlugin4Node);
 						objNode.Expand();
 					}
 				}
@@ -2697,9 +2679,8 @@ namespace Chummer
 		/// </summary>
 		/// <param name="objGear">Gear object to copy.</param>
 		/// <param name="objNode">TreeNode created by copying the item.</param>
-		/// <param name="objWeapons">List of Weapons created by copying the item.</param>
-		/// <param name="objWeaponNodes">List of Weapon TreeNodes created by copying the item.</param>
-		public void Copy(Commlink objGear, TreeNode objNode, List<Weapon> objWeapons, List<TreeNode> objWeaponNodes)
+		/// <param name="funcAddWeapon">Adds each Weapon created by copying the item with its TreeNode.</param>
+		public void Copy(Commlink objGear, ITreeNodeView objNode, Action<IEquipmentWeapon, ITreeNodeView> funcAddWeapon)
 		{
 			_strName = objGear.Name;
 			_strCategory = objGear.Category;
@@ -2738,25 +2719,25 @@ namespace Chummer
 
 			foreach (Gear objGearChild in objGear.Children)
 			{
-				TreeNode objChildNode = new TreeNode();
+				ITreeNodeView objChildNode = objNode.NewNode();
 				Gear objChild = new Gear(_objCharacter);
 				if (objGearChild.GetType() == typeof(Commlink))
 				{
 					Commlink objCommlink = new Commlink(_objCharacter);
-					objCommlink.Copy(objGearChild, objChildNode, objWeapons, objWeaponNodes);
+					objCommlink.Copy(objGearChild, objChildNode, funcAddWeapon);
 					objChild = objCommlink;
 				}
 				else if (objGearChild.GetType() == typeof(OperatingSystem))
 				{
 					OperatingSystem objOS = new OperatingSystem(_objCharacter);
-					objOS.Copy(objGearChild, objChildNode, objWeapons, objWeaponNodes);
+					objOS.Copy(objGearChild, objChildNode, funcAddWeapon);
 					objChild = objOS;
 				}
 				else
-					objChild.Copy(objGearChild, objChildNode, objWeapons, objWeaponNodes);
+					objChild.Copy(objGearChild, objChildNode, funcAddWeapon);
 				_objChildren.Add(objChild);
 
-				objNode.Nodes.Add(objChildNode);
+				objNode.Add(objChildNode);
 				objNode.Expand();
 			}
 		}
@@ -3344,7 +3325,7 @@ namespace Chummer
 		private int _intSystem = 1;
 
 		#region Constructor, Create, Save, Load, and Print Methods
-		public OperatingSystem(Character objCharacter) : base(objCharacter)
+		public OperatingSystem(ICharacter objCharacter) : base(objCharacter)
 		{
 		}
 
@@ -3355,7 +3336,7 @@ namespace Chummer
 		/// <param name="intRating">Selected Rating for the Gear.</param>
 		/// <param name="blnAddImprovements">Whether or not Improvements should be added to the character.</param>
 		/// <param name="blnCreateChildren">Whether or not child Gear should be created.</param>
-		public void Create(XmlNode objXmlGear, Character objCharacter, TreeNode objNode, int intRating, bool blnAddImprovements = true, bool blnCreateChildren = true)
+		public void Create(XmlNode objXmlGear, ICharacter objCharacter, ITreeNodeView objNode, int intRating, bool blnAddImprovements = true, bool blnCreateChildren = true)
 		{
 			_strName = objXmlGear["name"].InnerText;
 			_strCategory = objXmlGear["category"].InnerText;
@@ -3454,9 +3435,8 @@ namespace Chummer
 		/// </summary>
 		/// <param name="objGear">Gear object to copy.</param>
 		/// <param name="objNode">TreeNode created by copying the item.</param>
-		/// <param name="objWeapons">List of Weapons created by copying the item.</param>
-		/// <param name="objWeaponNodes">List of Weapon TreeNodes created by copying the item.</param>
-		public void Copy(OperatingSystem objGear, TreeNode objNode, List<Weapon> objWeapons, List<TreeNode> objWeaponNodes)
+		/// <param name="funcAddWeapon">Adds each Weapon created by copying the item with its TreeNode.</param>
+		public void Copy(OperatingSystem objGear, ITreeNodeView objNode, Action<IEquipmentWeapon, ITreeNodeView> funcAddWeapon)
 		{
 			_strName = objGear.Name;
 			_strCategory = objGear.Category;
@@ -3495,25 +3475,25 @@ namespace Chummer
 
 			foreach (Gear objGearChild in objGear.Children)
 			{
-				TreeNode objChildNode = new TreeNode();
+				ITreeNodeView objChildNode = objNode.NewNode();
 				Gear objChild = new Gear(_objCharacter);
 				if (objGearChild.GetType() == typeof(Commlink))
 				{
 					Commlink objCommlink = new Commlink(_objCharacter);
-					objCommlink.Copy(objGearChild, objChildNode, objWeapons, objWeaponNodes);
+					objCommlink.Copy(objGearChild, objChildNode, funcAddWeapon);
 					objChild = objCommlink;
 				}
 				else if (objGearChild.GetType() == typeof(OperatingSystem))
 				{
 					OperatingSystem objOS = new OperatingSystem(_objCharacter);
-					objOS.Copy(objGearChild, objChildNode, objWeapons, objWeaponNodes);
+					objOS.Copy(objGearChild, objChildNode, funcAddWeapon);
 					objChild = objOS;
 				}
 				else
-					objChild.Copy(objGearChild, objChildNode, objWeapons, objWeaponNodes);
+					objChild.Copy(objGearChild, objChildNode, funcAddWeapon);
 				_objChildren.Add(objChild);
 
-				objNode.Nodes.Add(objChildNode);
+				objNode.Add(objChildNode);
 				objNode.Expand();
 			}
 		}

@@ -24,12 +24,7 @@ namespace Chummer
 		public static void Create(this Quality objQuality, XmlNode objXmlQuality, Character objCharacter, QualitySource objQualitySource, TreeNode objNode, List<Weapon> objWeapons, List<TreeNode> objWeaponNodes, string strForceValue = "")
 		{
 			Func<XmlNode, string> funcAddWeapon = WeaponNodeFunction.Create(
-				(objXmlWeapon, objGearWeaponNode) =>
-				{
-					Weapon objGearWeapon = new Weapon(objCharacter);
-					objGearWeapon.Create(objXmlWeapon, objCharacter, objGearWeaponNode, null, null, null);
-					return objGearWeapon;
-				},
+				(objXmlWeapon, objGearWeaponNode) => WinFormsEquipmentHost.CreateGrantedWeapon(objXmlWeapon, objCharacter, objGearWeaponNode),
 				objGearWeapon => objGearWeapon.InternalId,
 				objWeapons,
 				objWeaponNodes);

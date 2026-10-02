@@ -1,9 +1,7 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Drawing;
 using System.Linq;
-using System.Windows.Forms;
 using System.Xml;
 using System.Xml.XPath;
 
@@ -261,7 +259,7 @@ namespace Chummer
 		private bool _blnDiscountCost = false;
 		private Cyberware _objParent;
 
-		private readonly Character _objCharacter;
+		private readonly ICharacter _objCharacter;
 
 		#region Helper Methods
 		/// <summary>
@@ -294,7 +292,7 @@ namespace Chummer
 		#endregion
 
 		#region Constructor, Create, Save, Load, and Print Methods
-		public Cyberware(Character objCharacter)
+		public Cyberware(ICharacter objCharacter)
 		{
 			// Create the GUID for the new piece of Cyberware.
 			_guiID = Guid.NewGuid();
@@ -308,12 +306,11 @@ namespace Chummer
 		/// <param name="objSource">Source of the piece.</param>
 		/// <param name="intRating">Selected Rating of the piece of Cyberware.</param>
 		/// <param name="objNode">TreeNode to populate a TreeView.</param>
-		/// <param name="objWeapons">List of Weapons that should be added to the Character.</param>
-		/// <param name="objWeaponNodes">List of TreeNode to represent the Weapons added.</param>
+		/// <param name="funcAddWeapon">Adds each Weapon that should be added to the Character with the TreeNode that represents it.</param>
 		/// <param name="blnCreateImprovements">Whether or not Improvements should be created.</param>
 		/// <param name="blnCreateChildren">Whether or not child items should be created.</param>
 		/// <param name="strForced">Force a particular value to be selected by an Improvement prompts.</param>
-		public void Create(XmlNode objXmlCyberware, Character objCharacter, Grade objGrade, Improvement.ImprovementSource objSource, int intRating, TreeNode objNode, List<Weapon> objWeapons, List<TreeNode> objWeaponNodes, bool blnCreateImprovements = true, bool blnCreateChildren = true, string strForced = "")
+		public void Create(XmlNode objXmlCyberware, ICharacter objCharacter, Grade objGrade, Improvement.ImprovementSource objSource, int intRating, ITreeNodeView objNode, Action<IEquipmentWeapon, ITreeNodeView> funcAddWeapon, bool blnCreateImprovements = true, bool blnCreateChildren = true, string strForced = "")
 		{
 			_strName = objXmlCyberware["name"].InnerText;
 			_strCategory = objXmlCyberware["category"].InnerText;
@@ -417,15 +414,9 @@ namespace Chummer
 
 				if (intMin != 0 || intMax != 0)
 				{
-					frmSelectNumber frmPickNumber = new frmSelectNumber();
 					if (intMax == 0)
 						intMax = 1000000;
-					frmPickNumber.Minimum = intMin;
-					frmPickNumber.Maximum = intMax;
-					frmPickNumber.Description = LanguageManager.Instance.GetString("String_SelectVariableCost").Replace("{0}", DisplayNameShort);
-					frmPickNumber.AllowCancel = false;
-					frmPickNumber.ShowDialog();
-					_strCost = frmPickNumber.SelectedValue.ToString();
+					_strCost = ApplicationHost.Current.Equipment.SelectNumber(intMin, intMax, LanguageManager.Instance.GetString("String_SelectVariableCost").Replace("{0}", DisplayNameShort)).ToString();
 				}
 			}
 
@@ -439,12 +430,10 @@ namespace Chummer
 				{
 					XmlNode objXmlWeapon = objXmlWeaponDocument.SelectSingleNode("/chummer/weapons/weapon[name = \"" + objXmlAddWeapon.InnerText + "\" and starts-with(category, \"Cyberware\")]");
 
-					TreeNode objGearWeaponNode = new TreeNode();
-					Weapon objGearWeapon = new Weapon(objCharacter);
-					objGearWeapon.Create(objXmlWeapon, objCharacter, objGearWeaponNode, null, null, null);
-					objGearWeaponNode.ForeColor = SystemColors.GrayText;
-					objWeaponNodes.Add(objGearWeaponNode);
-					objWeapons.Add(objGearWeapon);
+					ITreeNodeView objGearWeaponNode = objNode.NewNode();
+					IEquipmentWeapon objGearWeapon = ApplicationHost.Current.Equipment.CreateWeapon(objXmlWeapon, objCharacter, objGearWeaponNode);
+					objGearWeaponNode.ShowAsGrayText();
+					funcAddWeapon(objGearWeapon, objGearWeaponNode);
 
 					_guiWeaponID = Guid.Parse(objGearWeapon.InternalId);
 				}
@@ -522,11 +511,11 @@ namespace Chummer
 
 					_objChildren.Add(objSubsystem);
 
-					TreeNode objSubsystemNode = new TreeNode();
+					ITreeNodeView objSubsystemNode = objNode.NewNode();
 					objSubsystemNode.Text = objSubsystem.DisplayName;
 					objSubsystemNode.Tag = objSubsystem.InternalId;
-					objSubsystemNode.ForeColor = SystemColors.GrayText;
-					objNode.Nodes.Add(objSubsystemNode);
+					objSubsystemNode.ShowAsGrayText();
+					objNode.Add(objSubsystemNode);
 					objNode.Expand();
 				}
 			}

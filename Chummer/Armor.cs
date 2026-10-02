@@ -1,9 +1,7 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Drawing;
 using System.Linq;
-using System.Windows.Forms;
 using System.Xml;
 using System.Xml.XPath;
 
@@ -41,7 +39,7 @@ namespace Chummer
 		private string _strExtra = "";
 		private Guid _guiWeaponID = new Guid();
 		private XmlNode _nodBonus;
-		private readonly Character _objCharacter;
+		private readonly ICharacter _objCharacter;
 		private string _strNotes = "";
 		private string _strAltName = "";
 		private string _strAltCategory = "";
@@ -50,7 +48,7 @@ namespace Chummer
 		private Armor _objParent;
 
 		#region Constructor, Create, Save, Load, and Print Methods
-		public ArmorMod(Character objCharacter)
+		public ArmorMod(ICharacter objCharacter)
 		{
 			// Create the GUID for the new Armor Mod.
 			_guiID = Guid.NewGuid();
@@ -61,10 +59,9 @@ namespace Chummer
 		/// <param name="objXmlArmorNode">XmlNode to create the object from.</param>
 		/// <param name="objNode">TreeNode to populate a TreeView.</param>
 		/// <param name="intRating">Rating of the selected ArmorMod.</param>
-		/// <param name="objWeapons">List of Weapons that are created by the Armor.</param>
-		/// <param name="objWeaponNodes">List of Weapon Nodes that are created by the Armor.</param>
+		/// <param name="funcAddWeapon">Adds each Weapon that is created by the Armor with its TreeNode.</param>
 		/// <param name="blnSkipCost">Whether or not creating the Armor should skip the Variable price dialogue (should only be used by frmSelectArmor).</param>
-		public void Create(XmlNode objXmlArmorNode, TreeNode objNode, int intRating, List<Weapon> objWeapons, List<TreeNode> objWeaponNodes, bool blnSkipCost = false)
+		public void Create(XmlNode objXmlArmorNode, ITreeNodeView objNode, int intRating, Action<IEquipmentWeapon, ITreeNodeView> funcAddWeapon, bool blnSkipCost = false)
 		{
 			_strName = objXmlArmorNode["name"].InnerText;
 			_strCategory = objXmlArmorNode["category"].InnerText;
@@ -124,12 +121,10 @@ namespace Chummer
 				{
 					XmlNode objXmlWeapon = objXmlWeaponDocument.SelectSingleNode("/chummer/weapons/weapon[name = \"" + objXmlAddWeapon.InnerText + "\" and starts-with(category, \"Cyberware\")]");
 
-					TreeNode objGearWeaponNode = new TreeNode();
-					Weapon objGearWeapon = new Weapon(_objCharacter);
-					objGearWeapon.Create(objXmlWeapon, _objCharacter, objGearWeaponNode, null, null, null);
-					objGearWeaponNode.ForeColor = SystemColors.GrayText;
-					objWeaponNodes.Add(objGearWeaponNode);
-					objWeapons.Add(objGearWeapon);
+					ITreeNodeView objGearWeaponNode = objNode.NewNode();
+					IEquipmentWeapon objGearWeapon = ApplicationHost.Current.Equipment.CreateWeapon(objXmlWeapon, _objCharacter, objGearWeaponNode);
+					objGearWeaponNode.ShowAsGrayText();
+					funcAddWeapon(objGearWeapon, objGearWeaponNode);
 
 					_guiWeaponID = Guid.Parse(objGearWeapon.InternalId);
 				}
@@ -903,7 +898,7 @@ namespace Chummer
 		private int _intBDamage = 0;
 		private int _intIDamage = 0;
 		private bool _blnEquipped = true;
-		private readonly Character _objCharacter;
+		private readonly ICharacter _objCharacter;
 		private List<ArmorMod> _lstArmorMods = new List<ArmorMod>();
 		private List<Gear> _lstGear = new List<Gear>();
 		private string _strNotes = "";
@@ -915,7 +910,7 @@ namespace Chummer
 		private bool _blnDiscountCost = false;
 
 		#region Constructor, Create, Save, Load, and Print Methods
-		public Armor(Character objCharacter)
+		public Armor(ICharacter objCharacter)
 		{
 			// Create the GUID for the new piece of Armor.
 			_guiID = Guid.NewGuid();
@@ -925,10 +920,10 @@ namespace Chummer
 		/// Create a Cyberware from an XmlNode and return the TreeNodes for it.
 		/// <param name="objXmlArmorNode">XmlNode to create the object from.</param>
 		/// <param name="objNode">TreeNode to populate a TreeView.</param>
-		/// <param name="cmsArmorMod">ContextMenuStrip to apply to Armor Mode TreeNodes.</param>
+		/// <param name="funcNewModNode">Creates the TreeNode of an included Armor Mod, with the context menu of Armor Mods.</param>
 		/// <param name="blnSkipCost">Whether or not creating the Armor should skip the Variable price dialogue (should only be used by frmSelectArmor).</param>
 		/// <param name="blnCreateChildren">Whether or not child items should be created.</param>
-		public void Create(XmlNode objXmlArmorNode, TreeNode objNode, ContextMenuStrip cmsArmorMod, bool blnSkipCost = false, bool blnCreateChildren = true)
+		public void Create(XmlNode objXmlArmorNode, ITreeNodeView objNode, Func<ITreeNodeView> funcNewModNode, bool blnSkipCost = false, bool blnCreateChildren = true)
 		{
 			_strName = objXmlArmorNode["name"].InnerText;
 			_strCategory = objXmlArmorNode["category"].InnerText;
@@ -981,15 +976,9 @@ namespace Chummer
 
 					if (intMin != 0 || intMax != 0)
 					{
-						frmSelectNumber frmPickNumber = new frmSelectNumber();
 						if (intMax == 0)
 							intMax = 1000000;
-						frmPickNumber.Minimum = intMin;
-						frmPickNumber.Maximum = intMax;
-						frmPickNumber.Description = LanguageManager.Instance.GetString("String_SelectVariableCost").Replace("{0}", DisplayNameShort);
-						frmPickNumber.AllowCancel = false;
-						frmPickNumber.ShowDialog();
-						_intCost = frmPickNumber.SelectedValue;
+						_intCost = ApplicationHost.Current.Equipment.SelectNumber(intMin, intMax, LanguageManager.Instance.GetString("String_SelectVariableCost").Replace("{0}", DisplayNameShort));
 					}
 				}
 			}
@@ -1027,12 +1016,12 @@ namespace Chummer
 
 					XmlNode objXmlMod = objXmlArmorDocument.SelectSingleNode("/chummer/mods/mod[name = \"" + objXmlArmorMod.InnerText + "\"]");
 					ArmorMod objMod = new ArmorMod(_objCharacter);
-					List<Weapon> lstWeapons = new List<Weapon>();
-					List<TreeNode> lstWeaponNodes = new List<TreeNode>();
+					// The Weapons of included Armor Mods are created but kept nowhere.
+					Action<IEquipmentWeapon, ITreeNodeView> funcKeepNoWeapon = (objWeapon, objWeaponNode) => { };
 
-					TreeNode objModNode = new TreeNode();
+					ITreeNodeView objModNode = funcNewModNode();
 
-					objMod.Create(objXmlMod, objModNode, intRating, lstWeapons, lstWeaponNodes, blnSkipCost);
+					objMod.Create(objXmlMod, objModNode, intRating, funcKeepNoWeapon, blnSkipCost);
 					objMod.Parent = this;
 					objMod.IncludedInArmor = true;
 					objMod.ArmorCapacity = "[0]";
@@ -1040,8 +1029,7 @@ namespace Chummer
 					objMod.MaximumRating = objMod.Rating;
 					_lstArmorMods.Add(objMod);
 
-					objModNode.ContextMenuStrip = cmsArmorMod;
-					objNode.Nodes.Add(objModNode);
+					objNode.Add(objModNode);
 					objNode.Expand();
 				}
 			}
@@ -1062,11 +1050,11 @@ namespace Chummer
 					XmlNode objXmlGear = objXmlGearDocument.SelectSingleNode("/chummer/gears/gear[name = \"" + objXmlArmorGear.InnerText + "\"]");
 					Gear objGear = new Gear(_objCharacter);
 
-					TreeNode objGearNode = new TreeNode();
-					List<Weapon> lstWeapons = new List<Weapon>();
-					List<TreeNode> lstWeaponNodes = new List<TreeNode>();
+					ITreeNodeView objGearNode = objNode.NewNode();
+					// The Weapons of included Gear are created but kept nowhere.
+					Action<IEquipmentWeapon, ITreeNodeView> funcKeepNoWeapon = (objWeapon, objWeaponNode) => { };
 
-					objGear.Create(objXmlGear, _objCharacter, objGearNode, intRating, lstWeapons, lstWeaponNodes, strForceValue, false, false, !blnSkipCost);
+					objGear.Create(objXmlGear, _objCharacter, objGearNode, intRating, funcKeepNoWeapon, strForceValue, false, false, !blnSkipCost);
 					objGear.Capacity = "[0]";
 					objGear.ArmorCapacity = "[0]";
 					objGear.Cost = "0";
@@ -1075,7 +1063,7 @@ namespace Chummer
 					objGear.IncludedInParent = true;
 					_lstGear.Add(objGear);
 
-					objNode.Nodes.Add(objGearNode);
+					objNode.Add(objGearNode);
 					objNode.Expand();
 				}
 			}
