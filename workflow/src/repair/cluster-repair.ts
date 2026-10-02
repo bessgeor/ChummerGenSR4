@@ -31,7 +31,7 @@ export type RepairStatus =
   | "rejected"
   /** The model job failed with invalid_output or refused; the attempt is archived as rejected at stage model. */
   | "failed"
-  /** The run budget was spent before the model job could start. */
+  /** The run budget was spent before the model job could start, or after some of an attempt's jobs finished (the attempt is then archived as rejected at stage model). */
   | "budget_exhausted";
 
 /** A finished attempt of a cluster that was rejected and followed by a next attempt. */

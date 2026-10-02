@@ -44,7 +44,7 @@ export function describeRepair(repairs: Readonly<Record<string, ClusterRepair>>,
       lines.push(`${head} ${repair.status === "budget_exhausted" ? "budget_exhausted: the run budget was spent before its model job" : repair.status}; ${repair.records.length} records`);
       continue;
     }
-    const outcome = attempt.outcome === "passed" ? "PASSED the narrow check" : `${repair.status === "failed" ? "FAILED" : "rejected"} at ${attempt.stage}: ${attempt.reason}`;
+    const outcome = attempt.outcome === "passed" ? "PASSED the narrow check" : `${repair.status === "failed" ? "FAILED" : repair.status === "budget_exhausted" ? "stopped by the run budget" : "rejected"} at ${attempt.stage}: ${attempt.reason}`;
     lines.push(`${head} attempt ${attempt.attempt} ${outcome}; ${repair.records.length} records; archive ${attempt.folder}`);
     const check = attempt.check;
     if (check !== null) {

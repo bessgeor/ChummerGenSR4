@@ -45,7 +45,12 @@ export function clusterEnd(clusterId: string, input: DispositionInput): ClusterE
   if (widening?.status === "promoted") return end("fixed", null, null, widening.commit);
   // A next attempt that could not start leaves no latest attempt: the rejection it followed is the last of the earlier ones.
   const followed = rejection ?? (repair?.earlier ?? []).at(-1) ?? null;
-  const budgetEnd = (): ClusterEnd => followed === null
+  // An attempt the budget stopped after some of its jobs finished is archived with its own reason.
+  const stopped = repair?.status === "budget_exhausted" ? repair.attempt : null;
+  const previous = (repair?.earlier ?? []).at(-1) ?? null;
+  const budgetEnd = (): ClusterEnd => stopped !== null
+    ? end("budget_exhausted", stopped.stage, previous === null ? stopped.reason : `${stopped.reason}; the attempt it followed was rejected by ${previous.rejectedBy} at ${previous.stage}: ${previous.reason}`)
+    : followed === null
     ? end("budget_exhausted", null, "the run budget was spent before a model job could start")
     : end("budget_exhausted", followed.stage, `the run budget was spent before a next attempt; ${followed.reason}`);
   if (diagnosis?.status === "budget_exhausted" || repair?.status === "budget_exhausted" || input.budgetBlocked.includes(clusterId)) return budgetEnd();

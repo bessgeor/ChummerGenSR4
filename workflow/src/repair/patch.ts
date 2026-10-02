@@ -50,6 +50,11 @@ function entries(root: string): { files: Map<string, string>; others: string[] }
   return { files, others: others.sort() };
 }
 
+/** The SHA-256 of every file under a folder, by relative path with `/`. */
+export function fileHashes(root: string): Map<string, string> {
+  return new Map([...entries(root).files].map(([path, file]) => [path, sha256(readFileSync(file))]));
+}
+
 /** Runs `git diff --no-index` in `folder` on two of its paths (or /dev/null) and returns the diff with the layout folders taken out of its paths. */
 function fileDiff(folder: string, before: string, after: string): string {
   let text: string;

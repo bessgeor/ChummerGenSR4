@@ -162,8 +162,10 @@ test("the model job's time limit is the smaller of its own and the deadline", as
   const agents = setup.agents;
   const run = agents.run.bind(agents);
   agents.run = async (job) => {
+    // The limit is set when the job gets its place, so it is read once the job has run.
+    const result = await run(job);
     if (job.kind === "repair") limit = job.choice.timeoutMinutes;
-    return run(job);
+    return result;
   };
   await setup.service.repair(setup.input(setup.repairs[cluster]!), setup.store);
   equal(limit, 5);

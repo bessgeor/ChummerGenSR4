@@ -121,6 +121,9 @@ test("each cluster ends at the stage where its route stopped", () => {
   // A next attempt that was refused at the budget keeps the rejection it followed.
   const refused = clusterEnd("d-1", { clusters: challenged, check: check("confirmed"), repairs: { "d-1": repair("budget_exhausted", null, 1) }, widenings: {}, budgetBlocked: [] });
   deepStrictEqual([refused.disposition, refused.attempts, refused.stage, refused.reason], ["budget_exhausted", 1, "check", "the run budget was spent before a next attempt; r"]);
+  // An attempt the budget stopped after some of its jobs finished keeps its own reason and the rejection it followed.
+  const stopped = clusterEnd("d-1", { clusters: challenged, check: check("confirmed"), repairs: { "d-1": repair("budget_exhausted", { ...attempt(2, "model"), reason: "spent after 1 job" }, 1) }, widenings: {}, budgetBlocked: [] });
+  deepStrictEqual([stopped.disposition, stopped.attempts, stopped.stage, stopped.reason], ["budget_exhausted", 2, "model", "spent after 1 job; the attempt it followed was rejected by repair at check: r"]);
   deepStrictEqual(end({ ...confirmed, repairs: { "d-1": repair("passed", attempt(1, null)) } }).disposition, "not_widened");
   deepStrictEqual(end({ ...confirmed, repairs: { "d-1": repair("passed", attempt(1, null)) }, widenings: { "d-1": widening("rejected", "suite") } }), { disposition: "widening_rejected", attempts: 1, stage: "suite", commit: null });
   deepStrictEqual(end({ ...confirmed, repairs: { "d-1": repair("passed", attempt(2, null), 1) }, widenings: { "d-1": widening("promoted", null, false, 2) } }), { disposition: "fixed", attempts: 2, stage: null, commit: "c0ffee" });

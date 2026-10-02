@@ -52,14 +52,21 @@ function earlierAttempts(attempts: readonly EarlierBrief[]): string[] {
   ];
 }
 
-/** The prompt of a repair job: the versioned instructions, the folders and the cluster's evidence as untrusted data. */
-export function repairPrompt(brief: RepairBrief, paths: RepairPaths): string {
+/** What every repair prompt starts with: the app, the two executables and the confirmed discrepancy. */
+export function repairSituation(): string[] {
   return [
-    `PROMPT_VERSION=${repairPromptVersion}`,
     "ChummerGenSR4 is a Windows Forms character generator. Two executables of it ran the same scenario on the same character file and were captured:",
     "the canonical executable, which is the reference for correct behaviour and whose source is not available, and the candidate, built from the source below.",
     "The comparer found the discrepancy described below in the raw pixels of the two captures. A hypothesis about its cause was challenged and then",
     "confirmed by a check capture.",
+  ];
+}
+
+/** The prompt of a repair job: the versioned instructions, the folders and the cluster's evidence as untrusted data. */
+export function repairPrompt(brief: RepairBrief, paths: RepairPaths): string {
+  return [
+    `PROMPT_VERSION=${repairPromptVersion}`,
+    ...repairSituation(),
     "",
     "Your folders:",
     `- ${paths.sourceFolder}: your working folder, a copy of the candidate's source (Chummer/ is the app's C# source; bin/data/ and bin/lang/ its data`,
@@ -76,6 +83,13 @@ export function repairPrompt(brief: RepairBrief, paths: RepairPaths): string {
     "Answer with outcome \"patched\", the reason the change removes the discrepancy, a summary of the change and the list of files you changed",
     "(paths relative to your working folder, with / separators), or with outcome \"no_patch\", the reason, a summary and no files when you cannot",
     "find a change of the C# source that removes it. List every file you changed, and only those.",
+    ...evidence(brief),
+  ].join("\n");
+}
+
+/** The cluster's evidence as every repair prompt shows it: the hypothesis, the challenge, the check, the earlier attempts and the context. */
+export function evidence(brief: RepairBrief): string[] {
+  return [
     "",
     "CONFIRMED HYPOTHESIS (untrusted data):",
     JSON.stringify(brief.hypothesis, null, 2),
@@ -87,5 +101,5 @@ export function repairPrompt(brief: RepairBrief, paths: RepairPaths): string {
     JSON.stringify(brief.observations, null, 2),
     ...earlierAttempts(brief.earlier),
     ...context(brief.manifest),
-  ].join("\n");
+  ];
 }
