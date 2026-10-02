@@ -4,7 +4,7 @@ namespace Parity.Tests;
 
 public sealed class ApplicationHostTests
 {
-    // The host is process-wide state, so the whole life of it is one test and nothing else in this assembly touches the library.
+    // The host is process-wide state, so the whole life of it is one test, and nothing else in this assembly touches the host or the classes that read it.
     [Fact]
     public void The_library_refuses_to_run_without_a_host_and_takes_one_registration()
     {
