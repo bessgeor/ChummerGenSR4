@@ -21,19 +21,31 @@ After widening finished, or after repair finished when widening is off, the work
 - **THEN** no next attempt starts and the cluster's disposition is `budget_exhausted`
 
 ### Requirement: A next attempt sees the earlier attempts
-A next attempt SHALL start from the thread's source snapshot like the first. Its prompt SHALL list every earlier attempt of the cluster as untrusted data: its number, whether repair or widening rejected it with the stage, the reason, and the patch text from its archive (empty without a patch). The repair prompt version SHALL change with this section.
+A next attempt SHALL start from the thread's source snapshot like the first. Its prompt SHALL list every earlier attempt of the cluster as untrusted data: its number, whether repair or widening rejected it with the stage, the reason, and the patch text from its archive (empty without a patch, and cut after 20 000 characters with a note of the full length). An archive without its `patch.diff` SHALL end the run with a setup error rather than count as a patch that was never made. The repair prompt version SHALL change with this section.
 
 #### Scenario: Second attempt after a rejected check
 - **WHEN** the second attempt of a cluster starts after the first changed `Chummer/frmCreate.cs` and was rejected at stage `check`
 - **THEN** its prompt holds the first attempt's patch of `Chummer/frmCreate.cs`, the stage `check` and its reason
 - **AND** its source copy does not hold the first attempt's change
 
+#### Scenario: A very large earlier patch
+- **WHEN** an earlier attempt was rejected at stage `patch` with a diff of more than 20 000 characters
+- **THEN** the next prompt holds its first 20 000 characters and a note of how long the whole patch was
+
+#### Scenario: An archive lost its patch
+- **WHEN** a next attempt starts and an earlier attempt's archive folder holds no `patch.diff`
+- **THEN** the run ends with a setup error naming the missing file, and the model job does not start
+
 ### Requirement: Every cluster ends at a disposition
-When the run concludes, every cluster of the thread's `triage.json` SHALL have exactly one disposition: `fixed` when its widening was promoted; else `budget_exhausted` when its diagnosis or repair is `budget_exhausted` or it was retryable but for the spent budget; else `not_diagnosed`, `diagnosis_failed`, `abstained`, `refuted`, `undecided` (also without a check), `not_repaired`, `repair_failed`, `repair_rejected`, `not_widened` or `widening_rejected` after the stage where it stopped. Each disposition SHALL carry the cluster's number of attempts, the stage and reason of its latest rejection, and the commit of a fix.
+When the run concludes, every cluster of the thread's `triage.json` SHALL have exactly one disposition: `fixed` when its widening was promoted; else `budget_exhausted` when its diagnosis or repair is `budget_exhausted` or it was retryable but for the spent budget; else `not_diagnosed`, `diagnosis_failed`, `abstained`, `refuted`, `undecided` (also without a check), `not_repaired`, `repair_failed`, `repair_rejected`, `not_widened` or `widening_rejected` after the stage where it stopped. Each disposition SHALL carry the cluster's number of attempts, the stage and reason of its latest rejection (none for a `fixed` cluster, which carries the commit of its fix instead; its earlier rejections stay in `repair.json`).
 
 #### Scenario: Refuted and fixed clusters
 - **WHEN** a thread's check refutes one cluster and another cluster's attempt is promoted
 - **THEN** the first cluster's disposition is `refuted` with 0 attempts and the second's is `fixed` with its commit
+
+#### Scenario: A next attempt refused at the budget
+- **WHEN** a cluster's first attempt was rejected at stage `check` and its next attempt is refused because the run budget is spent
+- **THEN** its disposition is `budget_exhausted` with 1 attempt and the stage `check` and reason of the rejection
 
 #### Scenario: Diagnosis turned off
 - **WHEN** `npm start -- --no-diagnosis` triages two clusters

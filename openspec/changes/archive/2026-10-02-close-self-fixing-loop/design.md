@@ -45,7 +45,7 @@ A cluster is retryable when all hold:
 
 ### Next attempt
 
-The attempt runs exactly like the first: a scratch copy of the thread's snapshot, the guard, the build and the narrow check. Its prompt adds `EARLIER ATTEMPTS (untrusted data)`, a list per earlier attempt of its number, where it was rejected (`repair` with its stage, or `widening` with its stage), the reason and the patch text from the attempt's archive (`patch.diff`, empty when there was none). The repair prompt version becomes `repair-v2`. Starting from the snapshot, not from the source accepted since, keeps every attempt's patch comparable with the snapshot the cluster's context was sealed on; a patch that conflicts with a promotion is rejected at `apply` and not retried.
+The attempt runs exactly like the first: a scratch copy of the thread's snapshot, the guard, the build and the narrow check. Its prompt adds `EARLIER ATTEMPTS (untrusted data)`, a list per earlier attempt of its number, where it was rejected (`repair` with its stage, or `widening` with its stage), the reason and the patch text from the attempt's archive (`patch.diff`, empty when there was none, cut after 20 000 characters with a note of the full length, so that a patch the guard rejected for its size cannot fill the next job's context). An archive is written whole with its `patch.diff`, so a missing file means the archive was lost: the run ends with a setup error. The repair prompt version becomes `repair-v2`. Starting from the snapshot, not from the source accepted since, keeps every attempt's patch comparable with the snapshot the cluster's context was sealed on; a patch that conflicts with a promotion is rejected at `apply` and not retried.
 
 ### Widening per attempt
 
@@ -69,7 +69,7 @@ Each cluster of `triage.json` gets one disposition, decided in this order:
 | `not_widened` | its latest attempt passed, with widening off |
 | `widening_rejected` | its latest widening was rejected |
 
-With the disposition go the number of attempts, the latest stage and reason, and the commit of a fix.
+With the disposition go the number of attempts, the stage and reason of the latest rejection (none for a `fixed` cluster, whose earlier rejections stay in `repair.json`), and the commit of a fix. A cluster whose next attempt was refused at the budget has no latest attempt; its rejection is the last of its earlier ones, and `budget_exhausted` carries that stage and reason like the cluster that was only blocked from a next attempt.
 
 ### Outcome
 
@@ -92,4 +92,4 @@ A promoted attempt passed all four widening levels on the accepted source, and e
 
 ## What fixture tests prove and what only a live run can
 
-Fixture tests (the real services with fake agents, a fake host with real run folders and PNGs, and a real git repository) prove the retry rules, the earlier attempts in the prompt, the per-attempt widening folders, the second-round widening on the accepted source, every disposition and outcome, `outcome.json`, the report lines, the unchanged exit status, a resume across a retry, and that a thread stored without the new fields resumes. Only live runs prove the outcome over the real suite and that a real repair attempt is routed through widening to `verified_for_scope` on the desktop lane; a next attempt after a real rejection depends on the model and is proven live only if one occurs.
+Fixture tests (the real services with fake agents, a fake host with real run folders and PNGs, and a real git repository) prove the retry rules, the earlier attempts in the prompt, the per-attempt widening folders, the second-round widening on the accepted source, every disposition and outcome, `outcome.json`, the report lines, the unchanged exit status, a resume across a retry, and that a thread stored without the new fields resumes. Only live runs prove the outcome over the real suite and that a real repair attempt is routed through widening to `verified_for_scope` on the desktop lane; a next attempt after a real rejection depends on the model and is proven live only if one occurs. A benchmark item needs a person's accepted fix of a real discrepancy in the source's history; the suite has none on the current source, and a seeded edit is not a discrepancy of its history, so the live runs write no item.

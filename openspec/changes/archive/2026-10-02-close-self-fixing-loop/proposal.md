@@ -12,6 +12,8 @@ A thread now runs every discrepancy cluster through diagnosis, repair and wideni
 
 Area: tooling only (the `workflow/` workspace and docs). The Chummer app, `bin/`, the capture runner, the comparer and the contracts are untouched. Evidence: graph tests with fake agents and a fake host (a next attempt after a rejection at repair and at widening, no next attempt after an execution failure, at the attempt limit or with the budget spent, the earlier attempts in the prompt, every disposition and outcome, `outcome.json` and the report, a resume), and live `npm start` runs: one over the whole suite on the current source, and one with a seeded discrepancy through diagnosis, repair, widening and promotion to `verified_for_scope`, with a kill and a resume, and the canonical hash before and after each.
 
+Scope of the live evidence: on the current source the suite has no discrepancy between the candidate and the canonical executable, so the whole-suite run is the loop's baseline (its counts are 13 cases, 211 rows, 0 clusters) and the only discrepancy the loop can be run on live is a seeded one, which shows the route and the outcome but is not a discrepancy of the source's history. The change therefore writes no benchmark item: an item records the fix a person accepted for a real discrepancy, and a fix of a seeded edit is not one.
+
 ## Capabilities
 
 ### New Capabilities

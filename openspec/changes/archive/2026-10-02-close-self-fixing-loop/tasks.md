@@ -9,5 +9,5 @@
 
 ## 2. Verification and archive
 
-- [x] 2.1 Run `npm start` live over the whole suite on the current source, and a scoped run with a seeded discrepancy routed through diagnosis, repair and widening to its outcome, with a kill and a resume. Record in `verification.md` the canonical hash before and after, each case's execution outcome apart from its visual result, each cluster's disposition and the thread's outcome and measures, fixture-tested scope apart from live evidence, and what remains unverified.
-- [ ] 2.2 Archive the change with `openspec archive close-self-fixing-loop`. Evidence: `npm run openspec:validate` passes after the archive, recorded in `verification.md`.
+- [x] 2.1 Run `npm start` live over the whole suite on the current source, and a scoped run with a seeded discrepancy routed through diagnosis, repair and widening to its outcome, with a kill and a resume. Record in `verification.md` the canonical hash before and after, each case's execution outcome apart from its visual result, each cluster's disposition and the thread's outcome and measures, fixture-tested scope apart from live evidence, and what remains unverified, including that no benchmark item was written because the suite has no real discrepancy to take one from.
+- [x] 2.2 Archive the change with `openspec archive close-self-fixing-loop`. Evidence: `npm run openspec:validate` passes after the archive, recorded in `verification.md`.
