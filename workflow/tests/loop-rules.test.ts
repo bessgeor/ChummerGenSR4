@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { resolveAgentSettings } from "../src/agents/agent-settings.js";
 import type { CheckResult } from "../src/diagnosis/check.js";
 import type { ClusterDiagnosis } from "../src/diagnosis/cluster-diagnosis.js";
+import { exitStatus } from "../src/graph/run-workflow.js";
 import { clusterEnd, type ClusterEnd, type DispositionInput } from "../src/loop/disposition.js";
 import { threadOutcome } from "../src/loop/outcome.js";
 import { latestRejection, nextAttempts, retryLimits, retryPlan } from "../src/loop/retry.js";
@@ -138,4 +139,12 @@ test("a thread is verified for its scope only when every cluster is fixed and th
   equal(threadOutcome([fixed, { ...fixed, clusterId: "d-2", disposition: "refuted" }], clean), "findings_remaining");
   equal(threadOutcome([{ ...fixed, disposition: "budget_exhausted" }, { ...fixed, clusterId: "d-2", disposition: "refuted" }], clean), "budget_exhausted");
   equal(threadOutcome([{ ...fixed, disposition: "budget_exhausted" }], { cases: [], otherFindings: 2 }), "budget_exhausted");
+});
+
+test("an execution failure of an earlier widening counts in the exit status", () => {
+  const level = { level: "mode" as const, cases: ["build-gamma"], captures: null, run: execution(2), baseline: null, findings: [], outcome: "failed" as const, reason: "lost", executionFailure: true };
+  const lost = { ...widening("rejected", "mode", true), levels: [level] };
+  equal(exitStatus({ captures: {}, compares: {}, widenings: {}, earlierWidenings: [lost] }), 2);
+  equal(exitStatus({ captures: {}, compares: {}, widenings: {}, earlierWidenings: [widening("rejected", "mode")] }), 0);
+  equal(exitStatus({ captures: {}, compares: {}, widenings: { "d-1": lost } }), 2);
 });
