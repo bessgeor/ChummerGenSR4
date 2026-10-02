@@ -93,11 +93,6 @@ namespace Chummer
 		private static bool _blnDatesIncludeTime = true;
 		private static bool _blnPrintToFileFirst = false;
 
-		// Omae Information.
-		private static string _strOmaeUserName = "";
-		private static string _strOmaePassword = "";
-		private static bool _blnOmaeAutoLogin = false;
-
 		private XmlDocument _objXmlClipboard = new XmlDocument();
 		private ClipboardContentType _objClipboardContentType = new ClipboardContentType();
 
@@ -167,31 +162,6 @@ namespace Chummer
 			{
 			}
 
-			// Omae Settings.
-			// Username.
-			try
-			{
-				_strOmaeUserName = Registry.CurrentUser.CreateSubKey("Software\\Chummer").GetValue("omaeusername").ToString();
-			}
-			catch
-			{
-			}
-			// Password.
-			try
-			{
-				_strOmaePassword = Registry.CurrentUser.CreateSubKey("Software\\Chummer").GetValue("omaepassword").ToString();
-			}
-			catch
-			{
-			}
-			// AutoLogin.
-			try
-			{
-				_blnOmaeAutoLogin = Convert.ToBoolean(Registry.CurrentUser.CreateSubKey("Software\\Chummer").GetValue("omaeautologin").ToString());
-			}
-			catch
-			{
-			}
 			// Language.
 			try
 			{
@@ -325,51 +295,6 @@ namespace Chummer
 			set
 			{
 				_blnPrintToFileFirst = value;
-			}
-		}
-
-		/// <summary>
-		/// Omae user name.
-		/// </summary>
-		public string OmaeUserName
-		{
-			get
-			{
-				return _strOmaeUserName;
-			}
-			set
-			{
-				_strOmaeUserName = value;
-			}
-		}
-
-		/// <summary>
-		/// Omae password (Base64 encoded).
-		/// </summary>
-		public string OmaePassword
-		{
-			get
-			{
-				return _strOmaePassword;
-			}
-			set
-			{
-				_strOmaePassword = value;
-			}
-		}
-
-		/// <summary>
-		/// Omae AutoLogin.
-		/// </summary>
-		public bool OmaeAutoLogin
-		{
-			get
-			{
-				return _blnOmaeAutoLogin;
-			}
-			set
-			{
-				_blnOmaeAutoLogin = value;
 			}
 		}
 
