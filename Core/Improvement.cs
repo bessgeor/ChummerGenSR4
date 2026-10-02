@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Xml;
 using System.Xml.XPath;
@@ -824,6 +825,9 @@ namespace Chummer
 
 	public class ImprovementManager
 	{
+		// The culture in which the results of expressions are formatted and read, the same as GlobalOptions.CultureInfo, without reading the options.
+		private static readonly CultureInfo _objCultureInfo = new CultureInfo("en-US");
+
 		private readonly IImprovementCharacter _objCharacter;
 		private readonly IImprovementDialogs _objDialogs;
 
@@ -1097,7 +1101,7 @@ namespace Chummer
 				XPathExpression xprValue = nav.Compile(strReturn);
 
 				// Treat this as a decimal value so any fractions can be rounded down. This is currently only used by the Boosted Reflexes Cyberware from SR2050.
-				decimal decValue = Convert.ToDecimal(nav.Evaluate(xprValue).ToString(), GlobalOptions.Instance.CultureInfo);
+				decimal decValue = Convert.ToDecimal(Convert.ToString(nav.Evaluate(xprValue), _objCultureInfo), _objCultureInfo);
 				decValue = Math.Floor(decValue);
 				int intValue = Convert.ToInt32(decValue);
 

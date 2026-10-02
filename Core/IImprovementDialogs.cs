@@ -5,7 +5,7 @@ namespace Chummer
 {
 	/// <summary>
 	/// The selections that the bonuses of improvements ask the user for. Each method returns the selected value, or null when the user cancelled.
-	/// A forced value of "" forces nothing.
+	/// A forced value of "" forces nothing. A dialog that opens a window for a character takes the character it was written for: the application's dialogs throw an ArgumentException for any other IImprovementCharacter.
 	/// </summary>
 	public interface IImprovementDialogs
 	{
