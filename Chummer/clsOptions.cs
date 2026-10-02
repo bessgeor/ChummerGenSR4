@@ -96,9 +96,6 @@ namespace Chummer
 		private XmlDocument _objXmlClipboard = new XmlDocument();
 		private ClipboardContentType _objClipboardContentType = new ClipboardContentType();
 
-		public static GradeList CyberwareGrades = new GradeList();
-		public static GradeList BiowareGrades = new GradeList();
-
 		// PDF information.
 		public static string _strPDFAppPath = "";
 		public static List<SourcebookInfo> _lstSourcebookInfo = new List<SourcebookInfo>();
@@ -217,8 +214,6 @@ namespace Chummer
 				}
 			}
 
-			CyberwareGrades.LoadList(Improvement.ImprovementSource.Cyberware);
-			BiowareGrades.LoadList(Improvement.ImprovementSource.Bioware);
 		}
 
 		GlobalOptions()

@@ -2202,7 +2202,22 @@ namespace Chummer
 	/// </summary>
 	public class GradeList : IEnumerable<Grade>
 	{
+		/// <summary>
+		/// Grades of Cyberware.
+		/// </summary>
+		public static GradeList CyberwareGrades = new GradeList();
+		/// <summary>
+		/// Grades of Bioware.
+		/// </summary>
+		public static GradeList BiowareGrades = new GradeList();
+
 		private List<Grade> _lstGrades = new List<Grade>();
+
+		static GradeList()
+		{
+			CyberwareGrades.LoadList(Improvement.ImprovementSource.Cyberware);
+			BiowareGrades.LoadList(Improvement.ImprovementSource.Bioware);
+		}
 
 		#region Methods
 		/// <summary>
@@ -2318,23 +2333,23 @@ namespace Chummer
 		{
 			if (objSource == Improvement.ImprovementSource.Bioware)
 			{
-				foreach (Grade objGrade in GlobalOptions.BiowareGrades)
+				foreach (Grade objGrade in GradeList.BiowareGrades)
 				{
 					if (objGrade.Name == strValue)
 						return objGrade;
 				}
 
-				return GlobalOptions.BiowareGrades.GetGrade("Standard");
+				return GradeList.BiowareGrades.GetGrade("Standard");
 			}
 			else
 			{
-				foreach (Grade objGrade in GlobalOptions.CyberwareGrades)
+				foreach (Grade objGrade in GradeList.CyberwareGrades)
 				{
 					if (objGrade.Name == strValue)
 						return objGrade;
 				}
 
-				return GlobalOptions.CyberwareGrades.GetGrade("Standard");
+				return GradeList.CyberwareGrades.GetGrade("Standard");
 			}
 		}
 		#endregion
