@@ -44,7 +44,7 @@ namespace Chummer
 	/// <summary>
 	/// Class that holds all of the information that makes up a complete Character.
 	/// </summary>
-	public class Character
+	public class Character : IImprovementCharacter
 	{
 		private readonly ImprovementManager _objImprovementManager;
 		private readonly CharacterOptions _objOptions = new CharacterOptions();
@@ -3202,6 +3202,32 @@ namespace Chummer
 			}
 		}
 
+		IImprovementAttribute IImprovementCharacter.GetAttribute(string strAttribute)
+		{
+			return GetAttribute(strAttribute);
+		}
+
+		/// <summary>
+		/// Convert every Adapsin Cyberware Grade of the character's Cyberware to its non-Adapsin version.
+		/// </summary>
+		public void ConvertAdapsinGrades()
+		{
+			foreach (Cyberware objCyberware in Cyberware)
+			{
+				if (objCyberware.Grade.Adapsin)
+				{
+					// Determine which GradeList to use for the Cyberware.
+					GradeList objGradeList;
+					if (objCyberware.SourceType == Improvement.ImprovementSource.Bioware)
+						objGradeList = GradeList.BiowareGrades;
+					else
+						objGradeList = GradeList.CyberwareGrades;
+
+					objCyberware.Grade = objGradeList.GetGrade(objCyberware.Grade.Name.Replace("(Adapsin)", string.Empty).Trim());
+				}
+			}
+		}
+
 		/// <summary>
 		/// Body (BOD) Attribute.
 		/// </summary>
@@ -4201,6 +4227,14 @@ namespace Chummer
 			}
 		}
 
+		IEnumerable<IImprovementSkill> IImprovementCharacter.Skills
+		{
+			get
+			{
+				return Skills;
+			}
+		}
+
 		/// <summary>
 		/// Skill Groups.
 		/// </summary>
@@ -4344,6 +4378,14 @@ namespace Chummer
 			get
 			{
 				return _lstWeapons;
+			}
+		}
+
+		IEnumerable<IImprovementWeapon> IImprovementCharacter.Weapons
+		{
+			get
+			{
+				return Weapons;
 			}
 		}
 
