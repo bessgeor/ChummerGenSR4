@@ -1,0 +1,25 @@
+name: fix
+version: 1
+description: A fix of one discrepancy between the canonical executable and the candidate - proposal, tasks, verification
+artifacts:
+  - id: proposal
+    generates: proposal.md
+    description: The discrepancy, the hypothesis about its cause and the evidence for it
+    template: proposal.md
+    requires: []
+  - id: tasks
+    generates: tasks.md
+    description: The fix's subtasks with the files they changed and their blockers
+    template: tasks.md
+    requires:
+      - proposal
+  - id: verification
+    generates: verification.md
+    description: The narrow check and the widening levels that verified the fix
+    template: verification.md
+    requires:
+      - tasks
+apply:
+  requires:
+    - tasks
+  tracks: tasks.md
