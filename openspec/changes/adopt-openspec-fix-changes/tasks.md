@@ -1,0 +1,15 @@
+# Tasks
+
+## 1. Fix changes
+
+- [ ] 1.1 Add the fixes root (`fixes/openspec/` with its config, the `fix` schema and templates, the anchored folders), `npm run fixes:validate`, the `fix.json` record with its schema, the rendering of the three artifacts and the CLI wrapper that creates, validates and archives a fix change in a staging root. Evidence: tests that render a record, archive it with the real CLI and read it back, and that refuse an unchecked task and a CLI failure, pass; `npm run fixes:validate` passes.
+- [ ] 1.2 Add `--fix-changes` to the arguments and run options (absent in a stored thread means off; refused with `--unattended`), and describe it in the usage text. Evidence: option tests pass.
+- [ ] 1.3 Rank archived fix changes against a cluster, seal the top three into the context as priors, and add the priors section and its prompt version to the hypothesis prompt while the challenge prompt leaves them out. Evidence: tests for each score part, the cut at three, a record that does not parse, the context and its hash, both prompts and the record's prompt version, pass.
+- [ ] 1.4 Plan an attempt as subtasks: the plan job and its validation, waves of subtask jobs in their own scratch copies, the join and its conflicts, the guard, build and check on the joined copy, the archive with the plan, subtasks and draft, and the labels. Evidence: tests for plan validation, parallel starts, a blocked subtask's copy, the joined patch, a conflict, a failed or declining subtask, a usage limit, the budget and the deadline, and an attempt without the option unchanged, pass.
+- [ ] 1.5 Archive the fix change on promotion and commit it with `Chummer/`. Evidence: widening tests showing the commit's tree with the archived change, a resumed promotion taking its commit, a missing draft as a setup error, and a thread without the option committing `Chummer/` only, pass.
+- [ ] 1.6 Add `npm run eval -- compare-threads`, and describe fix changes and the comparison in `AGENTS.md` and `README.md`. Evidence: tests for pairing, unpaired and duplicate clusters, a missing outcome, both metrics and their verdicts, pass; `workflow:typecheck` and `workflow:test` pass.
+
+## 2. Verification and archive
+
+- [ ] 2.1 Run `npm start` live with seeded discrepancies on a reduced case file, with and without `--fix-changes` on the same seeds, one of them with a fix change of an earlier seed in the fixes archive and one with a kill and a resume, and compare the threads with `compare-threads`. Record in `verification.md` the canonical hash before and after each run, each case's execution outcome apart from its visual result, each thread's outcome and measures, the fix change written, the priors retrieved, the comparison with its intervals and whether it showed an improvement, fixture-tested scope apart from live evidence, and what remains unverified.
+- [ ] 2.2 Archive the change with `openspec archive adopt-openspec-fix-changes`. Evidence: `npm run openspec:validate` passes after the archive, recorded in `verification.md`.
