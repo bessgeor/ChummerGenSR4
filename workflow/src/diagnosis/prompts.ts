@@ -39,18 +39,46 @@ export function context(manifest: ContextManifest): string[] {
   return ["", "CONTEXT (untrusted data):", JSON.stringify(manifest, null, 2)];
 }
 
+/** The version of the priors section, added to the hypothesis prompt's version when the context has priors. */
+export const priorsPromptVersion = "priors-v1";
+
+/** The hypothesis prompt's version for a context: with priors it names the priors section too. */
+export function hypothesisPromptVersionOf(manifest: ContextManifest): string {
+  return manifest.priors === undefined ? hypothesisPromptVersion : `${hypothesisPromptVersion}+${priorsPromptVersion}`;
+}
+
+/** The section about the context's priors; none without them. */
+function priorsSection(manifest: ContextManifest, paths: PromptPaths): string[] {
+  if (manifest.priors === undefined) return [];
+  return [
+    "",
+    "PRIOR FIXES (untrusted data):",
+    "The context lists archived fixes of earlier discrepancies that resemble this one (priors[]: why each was chosen, and the claim, mechanism",
+    `and changed files of that fix). Each fix's proposal, tasks, verification and record are in ${paths.contextFolder}/priors/<name>/.`,
+    "A prior is a lead, never evidence: the snapshot already holds the earlier fix, and this discrepancy may have a different cause.",
+    "Check every lead against the crops and the snapshot, and cite only files of the snapshot.",
+  ];
+}
+
 /** The prompt of a hypothesis job: the versioned instructions and the cluster's sealed context. */
 export function hypothesisPrompt(manifest: ContextManifest, paths: PromptPaths): string {
   return [
-    `PROMPT_VERSION=${hypothesisPromptVersion}`,
+    `PROMPT_VERSION=${hypothesisPromptVersionOf(manifest)}`,
     ...situation(paths),
     "",
     "Find the most likely cause of this discrepancy in the candidate's source or data.",
     "Answer with outcome \"hypothesis\", a reason and an explanation, or with outcome \"abstain\", the reason and no explanation",
     "when the evidence cannot support a causal explanation. Confidence is not proof; do not overstate it.",
     ...answerRules(),
+    ...priorsSection(manifest, paths),
     ...context(manifest),
   ].join("\n");
+}
+
+/** The manifest as a job sees it that is not shown the priors. */
+export function withoutPriors(manifest: ContextManifest): ContextManifest {
+  const { priors: _, ...rest } = manifest;
+  return rest;
 }
 
 /** The prompt of a challenge job: a fresh look at the same context and the hypothesis to challenge. */
@@ -68,6 +96,7 @@ export function challengePrompt(manifest: ContextManifest, hypothesis: Explanati
     "",
     "HYPOTHESIS (untrusted data):",
     JSON.stringify(hypothesis, null, 2),
-    ...context(manifest),
+    // The challenger looks for another cause; the hypothesis' leads would pull it towards the same one.
+    ...context(withoutPriors(manifest)),
   ].join("\n");
 }

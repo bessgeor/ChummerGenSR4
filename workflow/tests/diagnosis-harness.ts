@@ -267,6 +267,7 @@ export function diagnosisHarness(options: HarnessOptions) {
       diagnosis: !command.arguments.noDiagnosis, agents: settings, unattended: command.arguments.unattended, certificates: join(root, "certificates"),
       repair: options.repair === undefined || command.arguments.noRepair ? null : { deadlineMinutes: options.repair.deadlineMinutes, maxAttempts: options.repair.maxAttempts ?? 1 },
       widening: options.repair !== undefined && options.widening !== undefined && !command.arguments.noRepair && !command.arguments.noWidening,
+      fixChanges: command.arguments.fixChanges,
     }),
     planCases: () => ({ cases: cases.filter((item) => folders[item.name] !== undefined), excluded: [] }),
     readCase: () => details,

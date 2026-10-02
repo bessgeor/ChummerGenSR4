@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import type { CompareReport } from "../../../contracts/generated/typescript/parity-compare-report.js";
@@ -7,6 +7,7 @@ import { captureNames } from "../cases/case-plan.js";
 import { SetupError } from "../host/setup-error.js";
 import { sha256File, sha256Text } from "../steps/fingerprint.js";
 import type { TriageDocument } from "../triage/triage-document.js";
+import { rankFixes, type ArchivedFix } from "../fixes/retrieval.js";
 import type { SourceSnapshot } from "./source-snapshot.js";
 
 /** At most this many members of a cluster go into its context; the manifest says how many there are. */
@@ -42,6 +43,14 @@ export const ContextManifestSchema = z.strictObject({
     /** The snapshot folder, relative to the context folder. */
     folder: z.string(), identity: z.string(), commit: z.string(), candidate: z.string(),
   }),
+  /** Archived fixes that resemble the cluster, best first; absent when the thread works without fix changes or none resembles it. */
+  priors: z.array(z.strictObject({
+    /** The archived change's folder name; its files are in `priors/<name>/`. */
+    name: z.string(), score: z.number(), reasons: z.array(z.string()),
+    cluster: z.string(), claim: z.string(), mechanism: z.string(), files: z.array(z.string()),
+    /** Paths relative to the context folder, with their SHA-256, so the context hash covers them. */
+    artifacts: z.array(z.strictObject({ path: z.string(), sha256: z.string() })),
+  })).min(1).optional(),
 });
 export type ContextManifest = z.infer<typeof ContextManifestSchema>;
 
@@ -71,7 +80,39 @@ export type ContextInput = {
   readonly snapshot: SourceSnapshot;
   /** The fingerprint of the candidate app the thread captured. */
   readonly candidate: string;
+  /** The repository's archived fix changes to rank as priors, or null when the thread works without fix changes. */
+  readonly fixes?: readonly ArchivedFix[] | null;
 };
+
+/** The files of an archived fix change a prior carries into the context. */
+const priorFiles = ["proposal.md", "tasks.md", "verification.md", "fix.json"] as const;
+
+/** Ranks the archived fixes against the sealed members and copies the best into `priors/`; nothing when none resembles the cluster. */
+async function sealPriors(fixes: readonly ArchivedFix[], cluster: ContextManifest["cluster"], members: ContextManifest["members"], folder: string): Promise<ContextManifest["priors"]> {
+  const ranked = rankFixes({
+    imageHash: cluster.imageHash, cases: cluster.cases, captures: cluster.captures,
+    ocr: members.flatMap((member) => [member.canonicalOcr.text, member.candidateOcr.text]),
+  }, fixes);
+  if (ranked.length === 0) return undefined;
+  const priors: NonNullable<ContextManifest["priors"]> = [];
+  for (const fix of ranked) {
+    const artifacts: { path: string; sha256: string }[] = [];
+    for (const file of priorFiles) {
+      const source = join(fix.folder, file);
+      if (!existsSync(source)) throw new SetupError(`The archived fix change ${fix.folder} has no ${file}.`);
+      const path = `priors/${fix.name}/${file}`;
+      mkdirSync(join(folder, "priors", fix.name), { recursive: true });
+      copyFileSync(source, join(folder, path));
+      artifacts.push({ path, sha256: await sha256File(join(folder, path)) });
+    }
+    const { record } = fix;
+    priors.push({
+      name: fix.name, score: fix.score, reasons: [...fix.reasons], cluster: record.cluster.id, claim: record.hypothesis.claim, mechanism: record.hypothesis.mechanism,
+      files: record.patch.files.map((file) => file.path), artifacts,
+    });
+  }
+  return priors;
+}
 
 function copyCrop(source: string, folder: string, name: string): string {
   if (!existsSync(source)) throw new SetupError(`The crop ${source} that the diagnosis context needs does not exist.`);
@@ -89,6 +130,8 @@ export async function sealContext(input: ContextInput, folder: string): Promise<
     if (found === undefined) throw new SetupError(`Cluster ${cluster.id} names case ${name}, which the case file does not have.`);
     return found;
   };
+  // A folder sealed before holds its priors; the manifest lists only the ones ranked now.
+  rmSync(join(folder, "priors"), { recursive: true, force: true });
   const members: ContextManifest["members"] = [];
   const scenarios: ContextManifest["scenarios"] = [];
   for (const [index, member] of cluster.members.slice(0, maximumMembers).entries()) {
@@ -116,13 +159,16 @@ export async function sealContext(input: ContextInput, folder: string): Promise<
       });
     }
   }
+  const sealedCluster = { id: cluster.id, imageHash: cluster.imageHash, known: cluster.known, cases: cluster.cases, captures: cluster.captures, members: cluster.members.length };
+  const priors = input.fixes === null || input.fixes === undefined ? undefined : await sealPriors(input.fixes, sealedCluster, members, folder);
   const manifest = ContextManifestSchema.parse({
     schemaVersion: 1,
-    cluster: { id: cluster.id, imageHash: cluster.imageHash, known: cluster.known, cases: cluster.cases, captures: cluster.captures, members: cluster.members.length },
+    cluster: sealedCluster,
     members,
     scenarios,
     vocabulary: input.cases.map((item) => ({ case: item.name, mode: item.mode, captures: captureNames(item) })),
     source: { folder: "../source", identity: input.snapshot.identity, commit: input.snapshot.commit, candidate: input.candidate },
+    ...(priors === undefined ? {} : { priors }),
   });
   writeFileSync(join(folder, "context.json"), `${JSON.stringify(manifest, null, 2)}\n`);
   return { folder, hash: contextHash(manifest), manifest };

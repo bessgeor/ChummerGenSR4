@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { BaseStore } from "@langchain/langgraph-checkpoint";
 import { z } from "zod";
@@ -8,7 +8,8 @@ import type { ContextManifest } from "../diagnosis/context.js";
 import {
   ChallengeOutputSchema, challengePromptVersion, HypothesisOutputSchema, hypothesisPromptVersion, type ChallengeOutput, type HypothesisOutput,
 } from "../diagnosis/job-schemas.js";
-import { challengePrompt, hypothesisPrompt } from "../diagnosis/prompts.js";
+import { stageJobFolder } from "../diagnosis/job-folder.js";
+import { challengePrompt, hypothesisPrompt, withoutPriors } from "../diagnosis/prompts.js";
 import type { QuotaWaiter } from "../diagnosis/quota-waiter.js";
 import { validateChallenge, validateHypothesis } from "../diagnosis/validation.js";
 import { removalFailure, type ScratchFolder } from "../host/scratch-folder.js";
@@ -221,8 +222,9 @@ async function runSample(
         workspace: { folder: staged.context, readOnly: [staged.source] },
         logFile: join(dependencies.runsFolder, settings.runId, "logs", `${item.itemId}-${repetition}-${attempt}.jsonl`),
         mayStart: () => {
-          cpSync(copies.context(item.contextHash), staged.context, { recursive: true });
-          cpSync(sourceCopy, staged.source, { recursive: true });
+          // Runs measure the prompt versions of `promptVersions`, which have no priors section: a context frozen from a
+          // thread with fix changes is shown without its priors.
+          stageJobFolder(staged, copies.context(item.contextHash), sourceCopy, true);
           started = dependencies.now();
           return true;
         },
@@ -230,7 +232,7 @@ async function runSample(
       };
       const paths = { contextFolder: staged.context, snapshotFolder: staged.source };
       result = settings.jobKind === "hypothesis"
-        ? await runner.run<HypothesisOutput>({ ...common, prompt: hypothesisPrompt(manifest, paths), schema: HypothesisOutputSchema,
+        ? await runner.run<HypothesisOutput>({ ...common, prompt: hypothesisPrompt(withoutPriors(manifest), paths), schema: HypothesisOutputSchema,
           validate: (output) => validateHypothesis(output, manifest, sourceCopy) })
         : await runner.run<ChallengeOutput>({ ...common, prompt: challengePrompt(manifest, item.hypothesis!, paths), schema: ChallengeOutputSchema,
           validate: (output) => validateChallenge(output, item.hypothesis!, manifest, sourceCopy) });

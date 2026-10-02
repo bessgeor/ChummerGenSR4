@@ -8,6 +8,7 @@ import { listRecords } from "../src/evals/eval-record.js";
 import { runFolders, type RunSettings, type Sample } from "../src/evals/eval-run.js";
 import { diagnosisHarness, twoClusters } from "./diagnosis-harness.js";
 import { scratch } from "./diagnosis-fixtures.js";
+import { archivedFix, fixRecord } from "./fix-fixtures.js";
 export function benchmarkItem(clusterId: string, committedUtc: string): BenchmarkItem {
   return {
     schemaVersion: 1, itemId: `${clusterId}-fix`, kind: "fix",
@@ -19,7 +20,7 @@ export function benchmarkItem(clusterId: string, committedUtc: string): Benchmar
 }
 
 /** Two finished threads over the same fixture runs in one store: both diagnosed the same two clusters. */
-export async function twoThreads() {
+export async function twoThreads(options: { priors?: boolean } = {}) {
   const root = scratch();
   const store = new InMemoryStore();
   // The fake triage step writes triage.json beside the threads; the real one writes it into the thread folder.
@@ -34,7 +35,9 @@ export async function twoThreads() {
       delete process.env["GIT_AUTHOR_DATE"];
       delete process.env["GIT_COMMITTER_DATE"];
     }
-    equal(await harness.start(), 1);
+    // With priors the repository archives a fix that resembles the first cluster, and the thread works with fix changes.
+    if (options.priors === true) archivedFix(join(harness.sourceRepository, "fixes", "openspec", "changes", "archive"), fixRecord({ clusterId: "d-similar", members: [{ case: "build-alpha", capture: "skills" }] }));
+    equal(await harness.start(options.priors === true ? { fixChanges: true, noRepair: true } : undefined), 1);
     copyFileSync(join(root, "triage.json"), join(root, "threads", harness.threadId(), "triage.json"));
     return harness;
   };
