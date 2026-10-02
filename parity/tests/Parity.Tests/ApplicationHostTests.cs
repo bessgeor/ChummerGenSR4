@@ -62,5 +62,14 @@ public sealed class ApplicationHostTests
                 throw new InvalidOperationException("This test asks for no selection.");
             }
         }
+
+        public IEquipmentHost Equipment
+        {
+            get
+            {
+                Calls.Add(nameof(Equipment));
+                throw new InvalidOperationException("This test creates no equipment.");
+            }
+        }
     }
 }

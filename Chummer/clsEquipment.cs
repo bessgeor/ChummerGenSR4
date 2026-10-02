@@ -25,7 +25,7 @@ namespace Chummer
 	/// <summary>
 	/// A Weapon.
 	/// </summary>
-	public class Weapon : IImprovementWeapon
+	public class Weapon : IImprovementWeapon, IEquipmentWeapon
 	{
 		private Guid _guiID = new Guid();
 		private string _strName = "";
