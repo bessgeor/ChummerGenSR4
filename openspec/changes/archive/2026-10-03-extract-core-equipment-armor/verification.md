@@ -104,7 +104,7 @@ The same command was started again once the foreground was clear (thread `wf-202
 Triage found 0 clusters; diagnosis, repair and widening ran on 0 clusters. All 13 cases are therefore within the threshold on this source with valid coverage, but across two threads: 11 cases in the whole-suite thread and these two in the re-run. The candidate source is the same in both (the compiled source identity above); no single run covers all 13.
 ## Archive
 
-The archive is the last commit of the change; its output is recorded in this section by that commit.
+The archive is the last commit of the change. `npx openspec archive extract-core-equipment-armor --yes` printed `Specs updated successfully.` (`+ 1 added`, `~ 1 modified` in `openspec/specs/core-library/spec.md`) and `Change 'extract-core-equipment-armor' archived as '2026-10-03-extract-core-equipment-armor'.`; `npm run openspec:validate` then printed `Totals: 13 passed, 0 failed (13 items)`.
 
 ## Unverified
 
