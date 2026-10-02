@@ -4,7 +4,6 @@ using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Xml;
-using System.Windows.Forms;
 using Microsoft.Win32;
 
 // MRUChanged Event Handler.
