@@ -109,7 +109,7 @@ test("a passed attempt edits only its own copy, is built and checked narrowly, a
   ok(readFileSync(join(attempt.folder, "files", "before", "Chummer", "frmCreate.cs"), "utf8").includes("moved"));
   ok(existsSync(join(attempt.folder, "build.log")));
   const stored = EvalRecordSchema.parse((await setup.store.get(recordNamespace("repair"), recordId))!.value);
-  deepStrictEqual([stored.jobKind, stored.origin, stored.subject, stored.promptVersion, stored.result.status], ["repair", "workflow", { kind: "discrepancy-cluster", id: cluster }, "repair-v2", "succeeded"]);
+  deepStrictEqual([stored.jobKind, stored.origin, stored.subject, stored.promptVersion, stored.result.status], ["repair", "workflow", { kind: "discrepancy-cluster", id: cluster }, "repair-v3", "succeeded"]);
   deepStrictEqual({ ...stored.labels, repair: { ...stored.labels.repair!, labelledUtc: "t" } }, { ...noLabels, repair: { outcome: "passed", stage: null, reason: null, labelledUtc: "t" } });
 });
 

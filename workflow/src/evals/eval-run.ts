@@ -4,6 +4,7 @@ import type { BaseStore } from "@langchain/langgraph-checkpoint";
 import { z } from "zod";
 import { efforts, providers, wasNotStarted, type AgentResult, type AgentRunner } from "../agents/agent-job.js";
 import type { AgentSettings } from "../agents/agent-settings.js";
+import { compiledFoldersIn } from "../compiled-source.js";
 import type { ContextManifest } from "../diagnosis/context.js";
 import {
   ChallengeOutputSchema, challengePromptVersion, HypothesisOutputSchema, hypothesisPromptVersion, type ChallengeOutput, type HypothesisOutput,
@@ -230,7 +231,7 @@ async function runSample(
         },
         signal,
       };
-      const paths = { contextFolder: staged.context, snapshotFolder: staged.source };
+      const paths = { contextFolder: staged.context, snapshotFolder: staged.source, compiledFolders: compiledFoldersIn(sourceCopy) };
       result = settings.jobKind === "hypothesis"
         ? await runner.run<HypothesisOutput>({ ...common, prompt: hypothesisPrompt(withoutPriors(manifest), paths), schema: HypothesisOutputSchema,
           validate: (output) => validateHypothesis(output, manifest, sourceCopy) })

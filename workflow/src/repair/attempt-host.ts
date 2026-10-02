@@ -11,7 +11,7 @@ import type { CheckExecution } from "./cluster-repair.js";
 
 export type AttemptBuildRequest = {
   readonly label: string;
-  /** The folder that holds the patched `Chummer/`. */
+  /** The folder that holds the patched `Chummer/` and `Core/`; the build needs both. */
   readonly source: string;
   /** The output folder: the executable goes to `bin/`, intermediate files to `obj/`. */
   readonly output: string;

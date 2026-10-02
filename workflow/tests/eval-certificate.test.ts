@@ -22,7 +22,7 @@ test("a certificate is issued when the interval's lower bound meets the threshol
   ok("certificate" in outcome);
   const certificate = outcome.certificate;
   deepStrictEqual([certificate.jobKind, certificate.agent, certificate.promptVersion, certificate.run, certificate.items, certificate.passes, certificate.rate],
-    ["hypothesis", { provider: "claude", model: null, effort: "medium" }, "hypothesis-v1", "er-1", 20, 20, 1]);
+    ["hypothesis", { provider: "claude", model: null, effort: "medium" }, "hypothesis-v2", "er-1", 20, 20, 1]);
   ok(certificate.interval.low > 0.83 && certificate.interval.low < 0.84);
   equal(certificate.meanCostUsd, null);
   deepStrictEqual(JSON.parse(readFileSync(certificatePath(join(root, "certificates"), "hypothesis"), "utf8")), certificate);
@@ -70,7 +70,7 @@ test("a certificate is refused for a small sample, another partition, an incompl
 function writeCertificate(folder: string, jobKind: "hypothesis" | "challenge", overrides: Partial<Certificate> = {}): void {
   const certificate: Certificate = {
     schemaVersion: 1, jobKind, agent: { provider: jobKind === "hypothesis" ? "claude" : "codex", model: null, effort: "medium" },
-    promptVersion: `${jobKind}-v1`, run: "er-1", dataset: { name: "d", version: 1, hash: "h", partition: "test" }, metric: "prediction",
+    promptVersion: `${jobKind}-v2`, run: "er-1", dataset: { name: "d", version: 1, hash: "h", partition: "test" }, metric: "prediction",
     items: 20, passes: 20, rate: 1, interval: { low: 0.84, high: 1 }, thresholds: { minPass: 0.8, maxMeanCostUsd: null }, meanCostUsd: null, issuedUtc: "t",
     ...overrides,
   };
@@ -90,7 +90,7 @@ test("the gate names each job kind without a valid certificate for the run's con
   writeCertificate(folder, "challenge", { jobKind: "hypothesis" });
   match(certificateProblems(folder, ["challenge"], settings)[0]!, /invalid \(it is for hypothesis\)/);
   writeCertificate(folder, "challenge", { promptVersion: "challenge-v0" });
-  match(certificateProblems(folder, ["challenge"], settings)[0]!, /prompt version challenge-v0, the run uses challenge-v1/);
+  match(certificateProblems(folder, ["challenge"], settings)[0]!, /prompt version challenge-v0, the run uses challenge-v2/);
   writeCertificate(folder, "hypothesis");
   writeCertificate(folder, "challenge");
   deepStrictEqual(certificateProblems(folder, ["hypothesis", "challenge"], settings), []);

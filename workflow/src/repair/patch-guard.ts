@@ -1,7 +1,7 @@
+import { compiledFoldersText, isCompiledPath } from "../compiled-source.js";
 import type { Patch } from "./patch.js";
 
-/** The only folder a repair may change: the app's compiled source. Data and translations are staged from the canonical app. */
-export const repairableFolder = "Chummer/";
+// A repair may change only the compiled source (see compiled-source.ts). Data and translations are staged from the canonical app.
 export const maximumFiles = 10;
 /** Added plus removed lines over every file. */
 export const maximumChangedLines = 300;
@@ -17,7 +17,7 @@ export function guardPatch(patch: Patch, declared: readonly string[]): string[] 
   if (unchanged.length > 0) violations.push(`listed in the answer but not changed: ${unchanged.join(", ")}`);
   for (const path of patch.others) violations.push(`${path} is neither a file nor a folder`);
   for (const file of patch.files) {
-    if (!file.path.startsWith(repairableFolder)) violations.push(`${file.path} is outside ${repairableFolder}`);
+    if (!isCompiledPath(file.path)) violations.push(`${file.path} is outside ${compiledFoldersText}`);
     if (file.change === "deleted") violations.push(`${file.path} is deleted`);
     if (file.binary) violations.push(`${file.path} holds a NUL byte`);
   }

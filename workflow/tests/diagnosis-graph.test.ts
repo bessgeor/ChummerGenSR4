@@ -33,7 +33,9 @@ test("hypotheses fan out per cluster, and challenges start once every hypothesis
   deepStrictEqual(Object.values(clusters).map((cluster) => cluster.status), ["challenged", "challenged"]);
   const first = Object.values(clusters)[0]!;
   equal(first.records.length, 2);
-  ok(calls[0]!.prompt.startsWith("PROMPT_VERSION=hypothesis-v1"));
+  ok(calls[0]!.prompt.startsWith("PROMPT_VERSION=hypothesis-v2"));
+  // The prompt is built before the job's scratch copy exists, and still names the compiled folders of the snapshot.
+  for (const call of calls) ok(call.prompt.includes("(Chummer/ and Core/ are the app's C# source, bin/data/ and bin/lang/"), call.prompt);
   equal(calls[0]!.images.length, 2);
   ok(calls.find((call) => call.kind === "challenge")!.prompt.includes("The Skills tab label moved in frmCreate."));
   const record = EvalRecordSchema.parse((await harness.store.get(recordNamespace("hypothesis"), first.records[0]!))!.value);
@@ -221,11 +223,11 @@ test("a job that waited in the model pool does not start once the jobs before it
 });
 
 test("an edit of the compiled source without a rebuild ends the run with 3 before any job", async () => {
-  // The candidate's build recorded the source as it was; Chummer/ is edited afterwards and not built again.
+  // The candidate's build recorded the source as it was; a file of Chummer/ is edited afterwards and not built again.
   const harness = diagnosisHarness({ spots: [twoClusters[0]!], afterTriage: (repository) => writeFileSync(join(repository, "Chummer", "frmCreate.cs"), "class frmCreate { int edited; }") });
   equal(await harness.start(), 3);
   equal(harness.agents.calls.length, 0);
-  ok(harness.lines.some((line) => /Setup error: The compiled source \(Chummer\/\) differs from the source the candidate was built from .*Build again: run without --only/.test(line)), harness.lines.join("\n"));
+  ok(harness.lines.some((line) => /Setup error: The compiled source \(Chummer\/ and Core\/\) differs from the source the candidate was built from .*Build again: run without --only/.test(line)), harness.lines.join("\n"));
 });
 
 test("a data or language file edited after the build gives no failure", async () => {

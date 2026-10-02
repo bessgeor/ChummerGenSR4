@@ -19,7 +19,7 @@ const cluster = "d-0000000000000100";
 function agents(): FakeAgents {
   return new FakeAgents((call: JobCall): Reply => {
     if (call.kind !== "repair") return { answer: call.kind === "challenge" ? challengeAnswer() : hypothesisAnswer() };
-    if (call.prompt.startsWith("PROMPT_VERSION=repair-plan-v1")) {
+    if (call.prompt.startsWith("PROMPT_VERSION=repair-plan-v2")) {
       return { answer: { outcome: "planned", reason: "One location.", summary: "Restore the label.", tasks: [{ id: 1, title: "Restore", instructions: "Move it back.", files: ["Chummer/frmCreate.cs"], blockedBy: [] }] } };
     }
     return patchedReply({ "Chummer/frmCreate.cs": repairedSource })(call);
@@ -81,7 +81,7 @@ test("without fix changes the fix commit holds Chummer/ only", async () => {
   equal(await run.start(), 1);
   const branch = `accepted/${run.threadId()}`;
   equal(git(run.sourceRepository, "diff", "--name-only", `${branch}~1`, branch), "Chummer/frmCreate.cs");
-  ok(!run.agents.calls.some((call) => call.prompt.startsWith("PROMPT_VERSION=repair-plan-v1")));
+  ok(!run.agents.calls.some((call) => call.prompt.startsWith("PROMPT_VERSION=repair-plan-v2")));
 });
 
 test("a promotion resumed after its commit takes the commit and archives nothing again", async () => {

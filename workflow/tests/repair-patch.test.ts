@@ -103,6 +103,9 @@ function patchOf(files: PatchFile[], others: string[] = []): Patch {
 
 test("the guard passes a small declared patch of the app's source", () => {
   deepStrictEqual(guardPatch(patchOf([file("Chummer/frmCreate.cs"), file("Chummer/New.cs", { change: "added", before: null })]), ["Chummer/New.cs", "Chummer/frmCreate.cs"]), []);
+  // The class library is compiled source too; a folder whose name only starts like it is not.
+  deepStrictEqual(guardPatch(patchOf([file("Core/XmlManager.cs"), file("Chummer/frmCreate.cs")]), ["Core/XmlManager.cs", "Chummer/frmCreate.cs"]), []);
+  deepStrictEqual(guardPatch(patchOf([file("CoreExtra/a.cs")]), ["CoreExtra/a.cs"]), ["CoreExtra/a.cs is outside Chummer/ and Core/"]);
 });
 
 test("the guard names every rule a patch breaks", () => {
@@ -110,7 +113,7 @@ test("the guard names every rule a patch breaks", () => {
     [patchOf([]), [], /the patch is empty/],
     [patchOf([file("Chummer/a.cs"), file("Chummer/b.cs")]), ["Chummer/a.cs"], /changed but not listed in the answer: Chummer\/b\.cs/],
     [patchOf([file("Chummer/a.cs")]), ["Chummer/a.cs", "Chummer/c.cs"], /listed in the answer but not changed: Chummer\/c\.cs/],
-    [patchOf([file("bin/data/skills.xml")]), ["bin/data/skills.xml"], /bin\/data\/skills\.xml is outside Chummer\//],
+    [patchOf([file("bin/data/skills.xml")]), ["bin/data/skills.xml"], /bin\/data\/skills\.xml is outside Chummer\/ and Core\//],
     [patchOf([file("Chummer/old.cs", { change: "deleted", after: null })]), ["Chummer/old.cs"], /Chummer\/old\.cs is deleted/],
     [patchOf([file("Chummer/icon.bin", { binary: true })]), ["Chummer/icon.bin"], /holds a NUL byte/],
     [patchOf([file("Chummer/a.cs")], ["Chummer/link"]), ["Chummer/a.cs"], /Chummer\/link is neither a file nor a folder/],
@@ -146,7 +149,8 @@ test("the repair prompt carries its version, the two folders, the rules, and the
   const paths = { sourceFolder: "C:/scratch/source", contextFolder: "C:/scratch/d-1" };
   const prompt = repairPrompt({ manifest, hypothesis, challenge: null, observations, earlier: [] }, paths);
   ok(prompt.startsWith(`PROMPT_VERSION=${repairPromptVersion}\n`));
-  for (const text of ["C:/scratch/source", "C:/scratch/d-1", "untrusted data", "Chummer/", "no_patch", hypothesis.claim, "visual difference (0.01)", manifest.cluster.id]) {
+  ok(prompt.startsWith("PROMPT_VERSION=repair-v3\n"));
+  for (const text of ["C:/scratch/source", "C:/scratch/d-1", "untrusted data", "Chummer/ and Core/ are the app's C# source", "under Chummer/ and Core/", "no_patch", hypothesis.claim, "visual difference (0.01)", manifest.cluster.id]) {
     ok(prompt.includes(text), text);
   }
   ok(!prompt.includes("EARLIER ATTEMPTS"));

@@ -1,18 +1,19 @@
 import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { compiledFolders, isCompiledPath } from "../compiled-source.js";
 import { SetupError } from "../host/setup-error.js";
 import { sha256File, sha256Lines } from "../steps/fingerprint.js";
 
 /** The folders the candidate is built and run from: the app's source and its tracked data and translations. */
-export const snapshotFolders = ["Chummer", "bin/data", "bin/lang"] as const;
+export const snapshotFolders = [...compiledFolders, "bin/data", "bin/lang"] as const;
 
-/** The folder the candidate is compiled from. `bin/data` and `bin/lang` are no build input: capture steps copy them into each staged app. */
-const compiledFolder = "Chummer/";
-
-/** SHA-256 over the lines (`path<TAB>SHA-256`) of the compiled source files among the snapshot lines. */
+/**
+ * SHA-256 over the lines (`path<TAB>SHA-256`) of the compiled source files among the snapshot lines. `bin/data` and `bin/lang`
+ * are no build input: capture steps copy them into each staged app.
+ */
 function compiledIdentityOf(lines: readonly string[]): string {
-  return sha256Lines(lines.filter((line) => line.startsWith(compiledFolder)));
+  return sha256Lines(lines.filter((line) => isCompiledPath(line)));
 }
 
 export type SourceSnapshot = {
@@ -20,7 +21,7 @@ export type SourceSnapshot = {
   readonly folder: string;
   /** SHA-256 over the sorted relative paths and their files' SHA-256. */
   readonly identity: string;
-  /** The same over the compiled source (`Chummer/`) only: what the candidate's build recorded. */
+  /** The same over the compiled source (`Chummer/` and `Core/`) only: what the candidate's build recorded. */
   readonly compiledIdentity: string;
   /** The commit the working tree was on when the snapshot was taken. */
   readonly commit: string;
@@ -53,7 +54,7 @@ function sourcePaths(repositoryRoot: string, git: Git): string[] {
 /** The identity of the compiled source of the working tree now, without copying anything; equals `compiledIdentity` of a snapshot taken now. */
 export async function compiledSourceIdentity(repositoryRoot: string, git: Git): Promise<string> {
   const lines: string[] = [];
-  for (const path of sourcePaths(repositoryRoot, git).filter((item) => item.startsWith(compiledFolder))) {
+  for (const path of sourcePaths(repositoryRoot, git).filter((item) => isCompiledPath(item))) {
     lines.push(`${path}\t${await sha256File(join(repositoryRoot, path))}`);
   }
   return sha256Lines(lines);

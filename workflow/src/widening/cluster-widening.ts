@@ -62,7 +62,7 @@ export type AcceptedState = {
   readonly base: string;
   /** The branch's commit, or null until the first promotion. */
   readonly commit: string | null;
-  /** The folder whose `Chummer/` is the accepted source. */
+  /** The folder whose `Chummer/` and `Core/` are the accepted source; the build needs both. */
   readonly source: string;
   /** The folder whose `bin/` holds the accepted build, or null until one is needed. */
   readonly build: string | null;

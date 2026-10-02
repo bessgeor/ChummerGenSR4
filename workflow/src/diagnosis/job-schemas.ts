@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-export const hypothesisPromptVersion = "hypothesis-v1";
-export const challengePromptVersion = "challenge-v1";
+export const hypothesisPromptVersion = "hypothesis-v2";
+export const challengePromptVersion = "challenge-v2";
 
 export const mechanisms = ["layout", "text", "data", "rendering", "resources", "timing", "other"] as const;
 

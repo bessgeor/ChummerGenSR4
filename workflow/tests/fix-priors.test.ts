@@ -101,18 +101,18 @@ test("the hypothesis prompt presents the priors with its own version; the challe
   const archive = join(root, "archive");
   archivedFix(archive, fixRecord({ clusterId: "d-similar", members: [{ case: "build-alpha", capture: "skills" }] }));
   const { manifest } = await sealContext(contextInput(root, readArchivedFixes(archive)), join(root, "context"));
-  const paths = { contextFolder: "C:/job/context", snapshotFolder: "C:/job/source" };
+  const paths = { contextFolder: "C:/job/context", snapshotFolder: "C:/job/source", compiledFolders: ["Chummer", "Core"] };
   const prompt = hypothesisPrompt(manifest, paths);
-  equal(hypothesisPromptVersionOf(manifest), "hypothesis-v1+priors-v1");
-  ok(prompt.startsWith("PROMPT_VERSION=hypothesis-v1+priors-v1\n"));
+  equal(hypothesisPromptVersionOf(manifest), "hypothesis-v2+priors-v1");
+  ok(prompt.startsWith("PROMPT_VERSION=hypothesis-v2+priors-v1\n"));
   ok(prompt.includes("PRIOR FIXES (untrusted data):"));
   ok(prompt.includes("C:/job/context/priors/<name>/"));
   ok(prompt.includes("2026-10-01-fix-d-similar-1a2b3c4d"));
   const challenge = challengePrompt(manifest, hypothesisAnswer().explanation!, paths);
   ok(!challenge.includes("fix-d-similar") && !challenge.includes("PRIOR FIXES"));
   const { priors: _, ...plain } = manifest;
-  equal(hypothesisPromptVersionOf(plain), "hypothesis-v1");
-  ok(hypothesisPrompt(plain, paths).startsWith("PROMPT_VERSION=hypothesis-v1\n") && !hypothesisPrompt(plain, paths).includes("PRIOR FIXES"));
+  equal(hypothesisPromptVersionOf(plain), "hypothesis-v2");
+  ok(hypothesisPrompt(plain, paths).startsWith("PROMPT_VERSION=hypothesis-v2\n") && !hypothesisPrompt(plain, paths).includes("PRIOR FIXES"));
 });
 
 test("a job staged without priors holds neither the priors folder nor the manifest's priors, and a new seal drops priors it no longer lists", async () => {
@@ -154,12 +154,12 @@ test("a thread with fix changes ranks the repository's archived fixes into the h
   ok(!challenge.prompt.includes("fix-d-similar"));
   ok(!challenge.workspace.contextFiles.includes("priors"));
   const threadId = harness.threadId();
-  equal((await getRecord(harness.store, "hypothesis", `${threadId}/d-0000000000000100/hypothesis/1`)).promptVersion, "hypothesis-v1+priors-v1");
-  equal((await getRecord(harness.store, "challenge", `${threadId}/d-0000000000000100/challenge/1`)).promptVersion, "challenge-v1");
+  equal((await getRecord(harness.store, "hypothesis", `${threadId}/d-0000000000000100/hypothesis/1`)).promptVersion, "hypothesis-v2+priors-v1");
+  equal((await getRecord(harness.store, "challenge", `${threadId}/d-0000000000000100/challenge/1`)).promptVersion, "challenge-v2");
   ok(harness.lines.includes("Diagnosis: 1 archived fix changes to rank as priors."));
 
   const plain = diagnosisHarness({ spots: [{ case: "build-alpha", capture: "skills", x: 100 }], repository: harness.sourceRepository });
   await plain.start({ noRepair: true });
   ok(!plain.agents.calls.find((call) => call.kind === "hypothesis")!.prompt.includes("PRIOR FIXES"));
-  equal((await getRecord(plain.store, "hypothesis", `${plain.threadId()}/d-0000000000000100/hypothesis/1`)).promptVersion, "hypothesis-v1");
+  equal((await getRecord(plain.store, "hypothesis", `${plain.threadId()}/d-0000000000000100/hypothesis/1`)).promptVersion, "hypothesis-v2");
 });

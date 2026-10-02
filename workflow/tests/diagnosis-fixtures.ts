@@ -108,6 +108,7 @@ export function repository(): string {
   write(root, ".gitignore", "Chummer/obj/\n");
   write(root, "Chummer/frmCreate.cs", "class frmCreate {}");
   write(root, "Chummer/deleted.cs", "gone");
+  write(root, "Core/XmlManager.cs", "class XmlManager {}");
   write(root, "bin/data/skills.xml", "<skills/>");
   write(root, "bin/lang/en-us.xml", "<lang/>");
   write(root, "bin/ChummerGenSR4.exe", "binary");
