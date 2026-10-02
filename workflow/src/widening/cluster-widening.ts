@@ -75,10 +75,14 @@ export type WideningUpdate = { readonly clusterId: string } & Partial<Omit<Clust
 
 const final: readonly WideningStatus[] = ["promoted", "rejected"];
 
-/** Merges widening updates by cluster; each update replaces the fields it names. */
-export function mergeWidenings(current: Readonly<Record<string, ClusterWidening>>, update: Readonly<Record<string, WideningUpdate>>): Record<string, ClusterWidening> {
+/** Merges widening updates by cluster; each update replaces the fields it names, and null removes the cluster's widening. */
+export function mergeWidenings(current: Readonly<Record<string, ClusterWidening>>, update: Readonly<Record<string, WideningUpdate | null>>): Record<string, ClusterWidening> {
   const merged: Record<string, ClusterWidening> = { ...current };
   for (const [id, change] of Object.entries(update)) {
+    if (change === null) {
+      delete merged[id];
+      continue;
+    }
     const existing = merged[id];
     if (existing === undefined && (change.status === undefined || change.archive === undefined)) throw new Error(`A partial update for widening ${id}, which the thread does not have.`);
     merged[id] = { ...(existing ?? {}), ...change } as ClusterWidening;

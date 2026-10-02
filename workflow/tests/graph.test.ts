@@ -3,7 +3,9 @@ import { test } from "node:test";
 import { InMemoryStore, MemorySaver } from "@langchain/langgraph";
 import { resolveAgentSettings } from "../src/agents/agent-settings.js";
 import type { PlannedCase } from "../src/cases/case-plan.js";
-import { buildWorkflowGraph, nodeMode, type DiagnosisSteps, type RepairSteps, type WideningSteps, type WorkflowSteps } from "../src/graph/workflow-graph.js";
+import { buildWorkflowGraph, nodeMode, type DiagnosisSteps, type LoopSteps, type RepairSteps, type WideningSteps, type WorkflowSteps } from "../src/graph/workflow-graph.js";
+import type { Conclusion, ConcludeInput } from "../src/loop/loop-service.js";
+import type { OutcomeDocument } from "../src/loop/outcome.js";
 import { exitStatus, runWorkflow, type RunDependencies } from "../src/graph/run-workflow.js";
 import { SetupError } from "../src/host/setup-error.js";
 import type { Arguments, NodeName } from "../src/options/arguments.js";
@@ -117,13 +119,29 @@ const noWidening: WideningSteps = {
   },
 };
 
+/** Records each conclusion; the loop itself is tested with the diagnosis harness. */
+class FakeLoop implements LoopSteps {
+  readonly concluded: string[] = [];
+
+  conclude(input: ConcludeInput): Conclusion {
+    this.concluded.push(input.threadId);
+    const document: OutcomeDocument = {
+      threadId: input.threadId, outcome: "verified_for_scope", scope: { cases: input.plan.map((item) => item.name), captures: null },
+      problems: { cases: [], otherFindings: 0 }, clusters: [], accepted: null,
+      measures: { clusters: 0, fixed: 0, fixRate: null, attempts: 0, modelMilliseconds: 0, elapsedMilliseconds: null }, concludedUtc: "2026-10-01T12:00:00Z",
+    };
+    return { document, path: "outcome.json" };
+  }
+}
+
 const baseArguments: Arguments = {
   cases: [], captures: [], settingsOverlay: null, threshold: null, caseFile: null, canonicalCache: null,
   liveCanonical: false, noOcr: false, tessdata: null, only: null, recapture: false, noDiagnosis: false, noRepair: false, noWidening: false, unattended: false,
 };
 
 function harness(cases: string[], steps = new FakeSteps(), checkpointer = new MemorySaver(), signal?: AbortSignal) {
-  const graph = buildWorkflowGraph(steps, noDiagnosis, noRepair, noWidening).compile({ checkpointer, store: new InMemoryStore() });
+  const loop = new FakeLoop();
+  const graph = buildWorkflowGraph(steps, noDiagnosis, noRepair, noWidening, loop).compile({ checkpointer, store: new InMemoryStore() });
   const lines: string[] = [];
   const readCalls: [string, boolean][] = [];
   const dependencies: RunDependencies = {
@@ -145,7 +163,7 @@ function harness(cases: string[], steps = new FakeSteps(), checkpointer = new Me
   };
   const startRun = (only: NodeName | null = null) => runWorkflow({ kind: "start", arguments: { ...baseArguments, only } }, dependencies);
   const threadId = () => /Thread (wf-\S+):/.exec(lines.join("\n"))?.[1] ?? "";
-  return { steps, lines, dependencies, startRun, threadId, checkpointer, readCalls };
+  return { steps, lines, dependencies, startRun, threadId, checkpointer, readCalls, loop };
 }
 
 test("compare of each case overlaps the capture of the next, and triage runs last", async () => {
@@ -209,6 +227,10 @@ test("--only runs one node, reuses the nodes before it and skips the nodes after
   const triage = harness(["a"]);
   equal(await triage.startRun("triage"), 0);
   deepStrictEqual(triage.steps.calls, ["capture a reuse-only", "compare a reuse-only", "triage"]);
+  // A run that triaged concludes; one that ended before triage has no outcome.
+  deepStrictEqual([triage.loop.concluded, capture.loop.concluded, compare.loop.concluded], [[triage.threadId()], [], []]);
+  ok(triage.lines.at(-2)!.startsWith("Outcome: verified_for_scope; 0 of 0 clusters fixed, "), triage.lines.join("\n"));
+  ok(!capture.lines.some((line) => line.startsWith("Outcome: ")));
 });
 
 test("each case's execution outcome is reported apart from its visual outcome", async () => {

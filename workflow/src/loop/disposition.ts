@@ -43,8 +43,12 @@ export function clusterEnd(clusterId: string, input: DispositionInput): ClusterE
     ({ clusterId, disposition, attempts, stage, reason, commit });
   const rejection = repair === undefined ? null : latestRejection(repair, widening);
   if (widening?.status === "promoted") return end("fixed", null, null, widening.commit);
-  if (diagnosis?.status === "budget_exhausted" || repair?.status === "budget_exhausted") return end("budget_exhausted", null, "the run budget was spent before a model job could start");
-  if (input.budgetBlocked.includes(clusterId)) return end("budget_exhausted", rejection?.stage ?? null, `the run budget was spent before a next attempt; ${rejection?.reason ?? ""}`.trim());
+  // A next attempt that could not start leaves no latest attempt: the rejection it followed is the last of the earlier ones.
+  const followed = rejection ?? (repair?.earlier ?? []).at(-1) ?? null;
+  const budgetEnd = (): ClusterEnd => followed === null
+    ? end("budget_exhausted", null, "the run budget was spent before a model job could start")
+    : end("budget_exhausted", followed.stage, `the run budget was spent before a next attempt; ${followed.reason}`);
+  if (diagnosis?.status === "budget_exhausted" || repair?.status === "budget_exhausted" || input.budgetBlocked.includes(clusterId)) return budgetEnd();
   if (diagnosis === undefined) return end("not_diagnosed");
   if (diagnosis.status === "failed") return end("diagnosis_failed", diagnosis.failure?.job ?? null, diagnosis.failure === null ? null : `${diagnosis.failure.kind}: ${diagnosis.failure.message}`);
   if (diagnosis.status === "abstained") return end("abstained", "hypothesis", diagnosis.hypothesis?.output.reason ?? null);

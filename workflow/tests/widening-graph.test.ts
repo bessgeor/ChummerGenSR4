@@ -87,7 +87,7 @@ test("passed attempts are widened one after the other through the levels and pro
   equal(state.widenings[second]!.levels[2]!.outcome, "nothing-new");
   const document = documentOf(run.root, threadId);
   deepStrictEqual([document.totals.promoted, document.totals.rejected], [2, 0]);
-  ok(existsSync(join(run.root, "threads", threadId, "widening", first, "widening.json")));
+  ok(existsSync(join(run.root, "threads", threadId, "widening", first, "attempt-1", "widening.json")));
   ok(run.lines.includes(`Widening ${second}: attempt 1 PROMOTED as ${tip} on accepted/${threadId}`));
   ok(run.lines.some((line) => line.startsWith(`Widening ${first} narrow execution: capture status 0, coverage valid, `)));
   ok(run.lines.includes(`Widening ${first} narrow visual: 1 passed, 0 failed (target 0, introduced 0, changed 0, pre-existing 0, unattributed 0); PASSED`));

@@ -9,6 +9,8 @@ import type { NodeName } from "../options/arguments.js";
 import type { RunOptions } from "../options/run-options.js";
 import { nextRepairRoute, type ClusterRepair } from "../repair/cluster-repair.js";
 import type { RepairInput, RepairStep } from "../repair/repair-service.js";
+import type { Conclusion, ConcludeInput } from "../loop/loop-service.js";
+import { nextAttempts, retryLimits, retryPlan } from "../loop/retry.js";
 import type { InputFingerprints } from "../steps/input-fingerprints.js";
 import type { StepContext, StepMode, StepOutcome } from "../steps/step-outcome.js";
 import { nextWideningRoute, type AcceptedState, type ClusterWidening } from "../widening/cluster-widening.js";
@@ -59,7 +61,13 @@ export interface WideningSteps {
   promote(input: WideningInput, store: BaseStore): Promise<WideningStep>;
   rollBack(input: WideningInput, store: BaseStore): Promise<WideningStep>;
   /** Writes the thread's `widening.json` and returns its path. */
-  finish(threadId: string, widenings: Readonly<Record<string, ClusterWidening>>, accepted: AcceptedState | null): string;
+  finish(threadId: string, widenings: Readonly<Record<string, ClusterWidening>>, accepted: AcceptedState | null, earlier: readonly ClusterWidening[]): string;
+}
+
+/** The end of the loop behind the graph's `conclude` node. */
+export interface LoopSteps {
+  /** Decides every cluster's disposition and the thread's outcome, and writes `outcome.json`. */
+  conclude(input: ConcludeInput): Conclusion;
 }
 
 const order: readonly NodeName[] = ["capture", "compare", "triage", "diagnose"];
@@ -125,6 +133,12 @@ function applyWidening(step: WideningStep) {
   return { widenings: { [step.update.clusterId]: step.update }, ...(step.accepted === null ? {} : { accepted: step.accepted }) };
 }
 
+/** After the last widening (or repair, when widening is off): the next attempts when a cluster may have one, else the conclusion. */
+function loopRoute(state: WorkflowStateValue): "retry_repair" | "conclude" {
+  const plan = retryPlan(state.repairs, state.widenings, retryLimits(state.options, state.agentMilliseconds));
+  return plan.retry.length > 0 ? "retry_repair" : "conclude";
+}
+
 function repairInput(state: ClusterTask, config: LangGraphRunnableConfig): RepairInput {
   const repair = state.repairs[state.clusterId];
   const cluster = state.clusters[state.clusterId];
@@ -142,9 +156,11 @@ function repairInput(state: ClusterTask, config: LangGraphRunnableConfig): Repai
  * for quota when a job hit a usage limit; each job is one task, so a resumed thread repeats only unfinished jobs.
  * Repair then sends one attempt per confirmed cluster the same way, and waits for quota the same way. Widening
  * then takes the passed attempts one at a time: `route_widening` sends the first unfinished one to its next step
- * (the widened candidate or one level, the promotion or the rollback), so every step is checkpointed on its own.
+ * (the widened candidate or one level, the promotion or the rollback), so every step is checkpointed on its own. After
+ * that, a cluster whose attempt was rejected and may have another goes back to `route_repair` through `retry_repair`, and
+ * its passed next attempt is widened on the source accepted so far; when none may, `conclude` ends the thread with its outcome.
  */
-export function buildWorkflowGraph(steps: WorkflowSteps, diagnosis: DiagnosisSteps, repair: RepairSteps, widening: WideningSteps) {
+export function buildWorkflowGraph(steps: WorkflowSteps, diagnosis: DiagnosisSteps, repair: RepairSteps, widening: WideningSteps, loop: LoopSteps) {
   return new StateGraph(WorkflowState)
     .addNode("build", async (state: WorkflowStateValue, config: LangGraphRunnableConfig) => {
       const only = state.options.only;
@@ -203,7 +219,7 @@ export function buildWorkflowGraph(steps: WorkflowSteps, diagnosis: DiagnosisSte
       const captured = state.plan.flatMap((item) => (state.captures[item.name] === undefined ? [] : [state.captures[item.name]!]));
       const check = state.diagnosisCheck;
       return widening.prepare({
-        threadId: state.threadId, repairs: state.repairs, clusters: state.clusters, triagePath: state.triageSummary.path,
+        threadId: state.threadId, repairs: state.repairs, clusters: state.clusters, triagePath: state.triageSummary.path, widenings: state.widenings, accepted: state.accepted ?? null,
         candidateRuns: [
           ...captured.map((outcome) => ({ runFolder: outcome.runFolder, status: outcome.status })),
           ...(check === null ? [] : [{ runFolder: check.runFolder, status: check.execution.status }]),
@@ -216,7 +232,21 @@ export function buildWorkflowGraph(steps: WorkflowSteps, diagnosis: DiagnosisSte
       applyWidening(await widening.promote(wideningInput(state, config), requireStore(config))))
     .addNode("roll_back", async (state: ClusterTask, config: LangGraphRunnableConfig) =>
       applyWidening(await widening.rollBack(wideningInput(state, config), requireStore(config))))
-    .addNode("finish_widening", (state: WorkflowStateValue) => ({ wideningPath: widening.finish(state.threadId, state.widenings, state.accepted) }))
+    .addNode("finish_widening", (state: WorkflowStateValue) => ({ wideningPath: widening.finish(state.threadId, state.widenings, state.accepted, state.earlierWidenings ?? []) }))
+    .addNode("retry_repair", (state: WorkflowStateValue) => {
+      const plan = retryPlan(state.repairs, state.widenings, retryLimits(state.options, state.agentMilliseconds));
+      return nextAttempts(plan.retry, state.repairs, state.widenings);
+    })
+    .addNode("conclude", (state: WorkflowStateValue) => {
+      if (state.triageSummary === null) throw new Error("The thread concluded before triage.");
+      const { document, path } = loop.conclude({
+        threadId: state.threadId, options: state.options, plan: state.plan, captures: state.captures, compares: state.compares,
+        triagePath: state.triageSummary.path, otherFindings: state.triageSummary.otherFindings, clusters: state.clusters ?? {}, check: state.diagnosisCheck ?? null,
+        repairs: state.repairs ?? {}, widenings: state.widenings ?? {}, accepted: state.accepted ?? null, agentMilliseconds: state.agentMilliseconds ?? 0,
+        startedUtc: state.startedUtc ?? null,
+      });
+      return { outcome: document, outcomePath: path };
+    })
     .addEdge(START, "build")
     .addConditionalEdges("build", (state: WorkflowStateValue) => {
       if (state.plan.length === 0) throw new SetupError("No case is planned, so nothing can be captured.");
@@ -235,7 +265,7 @@ export function buildWorkflowGraph(steps: WorkflowSteps, diagnosis: DiagnosisSte
       return done && nodeMode("triage", state.options.only) !== "skip" ? ["triage"] : [];
     }, ["triage"])
     .addConditionalEdges("triage", (state: WorkflowStateValue) =>
-      (state.options.diagnosis && nodeMode("diagnose", state.options.only) !== "skip" ? "prepare_diagnosis" : END), ["prepare_diagnosis", END])
+      (state.options.diagnosis && nodeMode("diagnose", state.options.only) !== "skip" ? "prepare_diagnosis" : "conclude"), ["prepare_diagnosis", "conclude"])
     .addEdge("prepare_diagnosis", "route_diagnosis")
     .addConditionalEdges("route_diagnosis", (state: WorkflowStateValue) => {
       const route = nextDiagnosisRoute(state.clusters, (state.diagnosisCheck ?? null) !== null);
@@ -251,7 +281,7 @@ export function buildWorkflowGraph(steps: WorkflowSteps, diagnosis: DiagnosisSte
     .addEdge("challenge", "route_diagnosis")
     .addEdge("wait_for_quota", "route_diagnosis")
     .addEdge("check", "route_diagnosis")
-    .addConditionalEdges("finish_diagnosis", (state: WorkflowStateValue) => (repairs(state.options) ? "prepare_repair" : END), ["prepare_repair", END])
+    .addConditionalEdges("finish_diagnosis", (state: WorkflowStateValue) => (repairs(state.options) ? "prepare_repair" : "conclude"), ["prepare_repair", "conclude"])
     .addEdge("prepare_repair", "route_repair")
     .addConditionalEdges("route_repair", (state: WorkflowStateValue) => {
       const route = nextRepairRoute(state.repairs);
@@ -264,7 +294,7 @@ export function buildWorkflowGraph(steps: WorkflowSteps, diagnosis: DiagnosisSte
     // As with diagnosis, the router runs once after every attempt of the step finished.
     .addEdge("repair", "route_repair")
     .addEdge("wait_for_repair_quota", "route_repair")
-    .addConditionalEdges("finish_repair", (state: WorkflowStateValue) => (widens(state.options) ? "prepare_widening" : END), ["prepare_widening", END])
+    .addConditionalEdges("finish_repair", (state: WorkflowStateValue) => (widens(state.options) ? "prepare_widening" : loopRoute(state)), ["prepare_widening", "retry_repair", "conclude"])
     .addEdge("prepare_widening", "route_widening")
     .addConditionalEdges("route_widening", (state: WorkflowStateValue) => {
       const route = nextWideningRoute(state.widenings);
@@ -273,5 +303,7 @@ export function buildWorkflowGraph(steps: WorkflowSteps, diagnosis: DiagnosisSte
     .addEdge("widen", "route_widening")
     .addEdge("promote", "route_widening")
     .addEdge("roll_back", "route_widening")
-    .addEdge("finish_widening", END);
+    .addConditionalEdges("finish_widening", loopRoute, ["retry_repair", "conclude"])
+    .addEdge("retry_repair", "route_repair")
+    .addEdge("conclude", END);
 }

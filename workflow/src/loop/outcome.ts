@@ -41,10 +41,12 @@ function minutes(milliseconds: number): string {
   return `${(milliseconds / 60_000).toFixed(1)} min`;
 }
 
+const attemptCount = (count: number): string => `${count} ${count === 1 ? "attempt" : "attempts"}`;
+
 /** The loop lines of the end-of-run report: each cluster's disposition, then the outcome with its counts. */
 export function describeOutcome(document: OutcomeDocument, path: string): string[] {
   const lines = document.clusters.map((end) => {
-    const head = `Loop ${end.clusterId}: ${end.disposition} after ${end.attempts} attempts`;
+    const head = `Loop ${end.clusterId}: ${end.disposition} after ${attemptCount(end.attempts)}`;
     if (end.commit !== null) return `${head}; ${end.commit}`;
     return end.stage === null && end.reason === null ? head : `${head}; ${end.stage ?? "-"}: ${end.reason ?? "-"}`;
   });
@@ -53,7 +55,7 @@ export function describeOutcome(document: OutcomeDocument, path: string): string
   }
   if (document.problems.otherFindings > 0) lines.push(`Loop scope: ${document.problems.otherFindings} other findings without pixel analysis`);
   const { measures } = document;
-  lines.push(`Outcome: ${document.outcome}; ${measures.fixed} of ${measures.clusters} clusters fixed, ${measures.attempts} attempts, `
+  lines.push(`Outcome: ${document.outcome}; ${measures.fixed} of ${measures.clusters} clusters fixed, ${attemptCount(measures.attempts)}, `
     + `model time ${minutes(measures.modelMilliseconds)}, elapsed ${measures.elapsedMilliseconds === null ? "unknown" : minutes(measures.elapsedMilliseconds)}; ${path}`);
   return lines;
 }

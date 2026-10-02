@@ -20,6 +20,7 @@ import { defaultLaneSettings, DesktopLane } from "./host/desktop-lane.js";
 import { ProcessHostRunner } from "./host/host-runner.js";
 import { createScratchFolder } from "./host/scratch-folder.js";
 import { SetupError } from "./host/setup-error.js";
+import { LoopService } from "./loop/loop-service.js";
 import { parseArguments, usage } from "./options/arguments.js";
 import { loadProfile, localDataFolder } from "./options/profile.js";
 import { resolveRunOptions } from "./options/run-options.js";
@@ -115,7 +116,7 @@ async function main(): Promise<number> {
   const checkpointer = SqliteSaver.fromConnString(paths.checkpoints);
   const store = new SqliteStore(paths.store);
   try {
-    const graph = buildWorkflowGraph(steps, diagnosis, repair, widening).compile({ checkpointer, store });
+    const graph = buildWorkflowGraph(steps, diagnosis, repair, widening, new LoopService({ threadFolder: paths.threadFolder, now })).compile({ checkpointer, store });
     return await runWorkflow(command, {
       graph,
       resolveOptions: (start) => resolveRunOptions(start.arguments, profile, process.env, repositoryRoot),
