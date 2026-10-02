@@ -2288,7 +2288,7 @@ namespace Chummer
 	/// <summary>
 	/// A piece of Cyberware.
 	/// </summary>
-	public class Cyberware
+	public class Cyberware : ICharacterCyberware
 	{
 		private Guid _guiID = new Guid();
 		private string _strName = "";
@@ -9494,7 +9494,7 @@ namespace Chummer
 	/// <summary>
 	/// Standard Character Gear.
 	/// </summary>
-	public class Gear
+	public class Gear : ICharacterGear
 	{
 		protected Guid _guiID = new Guid();
 		protected string _strName = "";
@@ -10907,6 +10907,14 @@ namespace Chummer
 			get
 			{
 				return _objChildren;
+			}
+		}
+
+		IEnumerable<ICharacterGear> ICharacterGear.Children
+		{
+			get
+			{
+				return Children;
 			}
 		}
 
