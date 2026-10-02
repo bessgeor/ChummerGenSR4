@@ -825,8 +825,9 @@ namespace Chummer
 
 	public class ImprovementManager
 	{
-		private readonly Character _objCharacter;
-		
+		private readonly IImprovementCharacter _objCharacter;
+		private readonly IImprovementDialogs _objDialogs;
+
 		// String that will be used to limit the selection in Pick forms.
 		private string _strLimitSelection = "";
 
@@ -834,10 +835,27 @@ namespace Chummer
 		private string _strForcedValue = "";
 		private readonly List<Improvement> _lstTransaction = new List<Improvement>();
 
-		public ImprovementManager(Character objCharacter)
+		/// <summary>
+		/// Create a manager that asks for selections with the application's dialogs, after loading the selected language.
+		/// </summary>
+		/// <param name="objCharacter">Character whose Improvements are managed, or null.</param>
+		public ImprovementManager(IImprovementCharacter objCharacter)
+			: this(objCharacter, new WinFormsImprovementDialogs())
 		{
 			LanguageManager.Instance.Load(GlobalOptions.Instance.Language, null);
+		}
+
+		/// <summary>
+		/// Create a manager that asks for selections with the given dialogs. It reads neither the application host nor the language.
+		/// </summary>
+		/// <param name="objCharacter">Character whose Improvements are managed, or null.</param>
+		/// <param name="objDialogs">Dialogs that ask for the selections of bonuses.</param>
+		public ImprovementManager(IImprovementCharacter objCharacter, IImprovementDialogs objDialogs)
+		{
+			if (objDialogs == null)
+				throw new ArgumentNullException("objDialogs");
 			_objCharacter = objCharacter;
+			_objDialogs = objDialogs;
 		}
 
 		#region Properties
@@ -1062,17 +1080,17 @@ namespace Chummer
 			if (strValue.Contains("Rating") || strValue.Contains("BOD") || strValue.Contains("AGI") || strValue.Contains("REA") || strValue.Contains("STR") || strValue.Contains("CHA") || strValue.Contains("INT") || strValue.Contains("LOG") || strValue.Contains("WIL") || strValue.Contains("EDG") || strValue.Contains("MAG") || strValue.Contains("RES"))
 			{
 				// If the value contain an Attribute name, replace it with the character's Attribute.
-				strValue = strValue.Replace("BOD", _objCharacter.BOD.TotalValue.ToString());
-				strValue = strValue.Replace("AGI", _objCharacter.AGI.TotalValue.ToString());
-				strValue = strValue.Replace("REA", _objCharacter.REA.TotalValue.ToString());
-				strValue = strValue.Replace("STR", _objCharacter.STR.TotalValue.ToString());
-				strValue = strValue.Replace("CHA", _objCharacter.CHA.TotalValue.ToString());
-				strValue = strValue.Replace("INT", _objCharacter.INT.TotalValue.ToString());
-				strValue = strValue.Replace("LOG", _objCharacter.LOG.TotalValue.ToString());
-				strValue = strValue.Replace("WIL", _objCharacter.WIL.TotalValue.ToString());
-				strValue = strValue.Replace("EDG", _objCharacter.EDG.TotalValue.ToString());
-				strValue = strValue.Replace("MAG", _objCharacter.MAG.TotalValue.ToString());
-				strValue = strValue.Replace("RES", _objCharacter.RES.TotalValue.ToString());
+				strValue = strValue.Replace("BOD", _objCharacter.GetAttribute("BOD").TotalValue.ToString());
+				strValue = strValue.Replace("AGI", _objCharacter.GetAttribute("AGI").TotalValue.ToString());
+				strValue = strValue.Replace("REA", _objCharacter.GetAttribute("REA").TotalValue.ToString());
+				strValue = strValue.Replace("STR", _objCharacter.GetAttribute("STR").TotalValue.ToString());
+				strValue = strValue.Replace("CHA", _objCharacter.GetAttribute("CHA").TotalValue.ToString());
+				strValue = strValue.Replace("INT", _objCharacter.GetAttribute("INT").TotalValue.ToString());
+				strValue = strValue.Replace("LOG", _objCharacter.GetAttribute("LOG").TotalValue.ToString());
+				strValue = strValue.Replace("WIL", _objCharacter.GetAttribute("WIL").TotalValue.ToString());
+				strValue = strValue.Replace("EDG", _objCharacter.GetAttribute("EDG").TotalValue.ToString());
+				strValue = strValue.Replace("MAG", _objCharacter.GetAttribute("MAG").TotalValue.ToString());
+				strValue = strValue.Replace("RES", _objCharacter.GetAttribute("RES").TotalValue.ToString());
 
 				XmlDocument objXmlDocument = new XmlDocument();
 				XPathNavigator nav = objXmlDocument.CreateNavigator();
@@ -1159,19 +1177,10 @@ namespace Chummer
 						_strLimitSelection = _strForcedValue;
 
 					// Display the Select Text window and record the value that was entered.
-					frmSelectText frmPickText = new frmSelectText();
-					frmPickText.Description = LanguageManager.Instance.GetString("String_Improvement_SelectText").Replace("{0}", strFriendlyName);
-
-					if (_strLimitSelection != "")
-					{
-						frmPickText.SelectedValue = _strLimitSelection;
-						frmPickText.Opacity = 0;
-					}
-
-					frmPickText.ShowDialog();
+					string strText = _objDialogs.SelectText(strFriendlyName, _strLimitSelection);
 
 					// Make sure the dialogue window was not canceled.
-					if (frmPickText.DialogResult == DialogResult.Cancel)
+					if (strText == null)
 					{
 						Rollback();
 						blnSuccess = false;
@@ -1180,12 +1189,12 @@ namespace Chummer
 						return false;
 					}
 
-					_strSelectedValue = frmPickText.SelectedValue;
+					_strSelectedValue = strText;
 					if (blnConcatSelectedValue)
 						strSourceName += " (" + _strSelectedValue + ")";
 
 					// Create the Improvement.
-					CreateImprovement(frmPickText.SelectedValue, objImprovementSource, strSourceName, Improvement.ImprovementType.Text, strUnique);
+					CreateImprovement(strText, objImprovementSource, strSourceName, Improvement.ImprovementType.Text, strUnique);
 				}
 			}
 
@@ -1245,15 +1254,10 @@ namespace Chummer
 				// Select Restricted (select Restricted items for Fake Licenses).
 				if (NodeExists(nodBonus, "selectrestricted"))
 				{
-					frmSelectItem frmPickItem = new frmSelectItem();
-					frmPickItem.Character = _objCharacter;
-					if (_strForcedValue != string.Empty)
-						frmPickItem.ForceItem = _strForcedValue;
-					frmPickItem.AllowAutoSelect = false;
-					frmPickItem.ShowDialog();
+					string strItem = _objDialogs.SelectRestrictedItem(_objCharacter, _strForcedValue);
 
 					// Make sure the dialogue window was not canceled.
-					if (frmPickItem.DialogResult == DialogResult.Cancel)
+					if (strItem == null)
 					{
 						Rollback();
 						blnSuccess = false;
@@ -1262,41 +1266,34 @@ namespace Chummer
 						return false;
 					}
 
-					_strSelectedValue = frmPickItem.SelectedItem;
+					_strSelectedValue = strItem;
 					if (blnConcatSelectedValue)
 						strSourceName += " (" + _strSelectedValue + ")";
 
 					// Create the Improvement.
-					CreateImprovement(frmPickItem.SelectedItem, objImprovementSource, strSourceName, Improvement.ImprovementType.Restricted, strUnique);
+					CreateImprovement(strItem, objImprovementSource, strSourceName, Improvement.ImprovementType.Restricted, strUnique);
 				}
 
 				// Select a Skill.
 				if (NodeExists(nodBonus, "selectskill"))
 				{
 					// Display the Select Skill window and record which Skill was selected.
-					frmSelectSkill frmPickSkill = new frmSelectSkill(_objCharacter);
-					if (strFriendlyName != "")
-						frmPickSkill.Description = LanguageManager.Instance.GetString("String_Improvement_SelectSkillNamed").Replace("{0}", strFriendlyName);
-					else
-						frmPickSkill.Description = LanguageManager.Instance.GetString("String_Improvement_SelectSkill");
-
+					string strOnlySkillGroup = null;
+					string strOnlyCategory = null;
+					string strExcludeCategory = null;
+					string strLimitToSkill = null;
 					if (nodBonus.SelectSingleNode("selectskill").OuterXml.Contains("skillgroup"))
-						frmPickSkill.OnlySkillGroup = nodBonus.SelectSingleNode("selectskill").Attributes["skillgroup"].InnerText;
+						strOnlySkillGroup = nodBonus.SelectSingleNode("selectskill").Attributes["skillgroup"].InnerText;
 					else if (nodBonus.SelectSingleNode("selectskill").OuterXml.Contains("skillcategory"))
-						frmPickSkill.OnlyCategory = nodBonus.SelectSingleNode("selectskill").Attributes["skillcategory"].InnerText;
+						strOnlyCategory = nodBonus.SelectSingleNode("selectskill").Attributes["skillcategory"].InnerText;
 					else if (nodBonus.SelectSingleNode("selectskill").OuterXml.Contains("excludecategory"))
-						frmPickSkill.ExcludeCategory = nodBonus.SelectSingleNode("selectskill").Attributes["excludecategory"].InnerText;
+						strExcludeCategory = nodBonus.SelectSingleNode("selectskill").Attributes["excludecategory"].InnerText;
 					else if (nodBonus.SelectSingleNode("selectskill").OuterXml.Contains("limittoskill"))
-						frmPickSkill.LimitToSkill = nodBonus.SelectSingleNode("selectskill").Attributes["limittoskill"].InnerText;
-					if (_strForcedValue != "")
-					{
-						frmPickSkill.OnlySkill = _strForcedValue;
-						frmPickSkill.Opacity = 0;
-					}
-					frmPickSkill.ShowDialog();
+						strLimitToSkill = nodBonus.SelectSingleNode("selectskill").Attributes["limittoskill"].InnerText;
+					string strSelectedSkill = _objDialogs.SelectSkill(_objCharacter, strFriendlyName, strOnlySkillGroup, strOnlyCategory, strExcludeCategory, strLimitToSkill, _strForcedValue);
 
 					// Make sure the dialogue window was not canceled.
-					if (frmPickSkill.DialogResult == DialogResult.Cancel)
+					if (strSelectedSkill == null)
 					{
 						Rollback();
 						blnSuccess = false;
@@ -1312,16 +1309,16 @@ namespace Chummer
 							blnAddToRating = true;
 					}
 
-					_strSelectedValue = frmPickSkill.SelectedSkill;
+					_strSelectedValue = strSelectedSkill;
 					if (blnConcatSelectedValue)
 						strSourceName += " (" + _strSelectedValue + ")";
 
 					// Find the selected Skill.
-					foreach (Skill objSkill in _objCharacter.Skills)
+					foreach (IImprovementSkill objSkill in _objCharacter.Skills)
 					{
-						if (frmPickSkill.SelectedSkill.Contains("Exotic Melee Weapon") || frmPickSkill.SelectedSkill.Contains("Exotic Ranged Weapon") || frmPickSkill.SelectedSkill.Contains("Pilot Exotic Vehicle"))
+						if (strSelectedSkill.Contains("Exotic Melee Weapon") || strSelectedSkill.Contains("Exotic Ranged Weapon") || strSelectedSkill.Contains("Pilot Exotic Vehicle"))
 						{
-							if (objSkill.Name + " (" + objSkill.Specialization + ")" == frmPickSkill.SelectedSkill)
+							if (objSkill.Name + " (" + objSkill.Specialization + ")" == strSelectedSkill)
 							{
 								// We've found the selected Skill.
 								if (nodBonus.SelectSingleNode("selectskill").InnerXml.Contains("val"))
@@ -1333,7 +1330,7 @@ namespace Chummer
 						}
 						else
 						{
-							if (objSkill.Name == frmPickSkill.SelectedSkill)
+							if (objSkill.Name == strSelectedSkill)
 							{
 								// We've found the selected Skill.
 								if (nodBonus.SelectSingleNode("selectskill").InnerXml.Contains("val"))
@@ -1353,25 +1350,10 @@ namespace Chummer
 					if (nodBonus["selectskillgroup"].Attributes["excludecategory"] != null)
 						strExclude = nodBonus["selectskillgroup"].Attributes["excludecategory"].InnerText;
 
-					frmSelectSkillGroup frmPickSkillGroup = new frmSelectSkillGroup();
-					if (strFriendlyName != "")
-						frmPickSkillGroup.Description = LanguageManager.Instance.GetString("String_Improvement_SelectSkillGroupName").Replace("{0}", strFriendlyName);
-					else
-						frmPickSkillGroup.Description = LanguageManager.Instance.GetString("String_Improvement_SelectSkillGroup");
-
-					if (_strForcedValue != "")
-					{
-						frmPickSkillGroup.OnlyGroup = _strForcedValue;
-						frmPickSkillGroup.Opacity = 0;
-					}
-
-					if (strExclude != string.Empty)
-						frmPickSkillGroup.ExcludeCategory = strExclude;
-
-					frmPickSkillGroup.ShowDialog();
+					string strSkillGroup = _objDialogs.SelectSkillGroup(strFriendlyName, _strForcedValue, strExclude);
 
 					// Make sure the dialogue window was not canceled.
-					if (frmPickSkillGroup.DialogResult == DialogResult.Cancel)
+					if (strSkillGroup == null)
 					{
 						Rollback();
 						blnSuccess = false;
@@ -1387,7 +1369,7 @@ namespace Chummer
 							blnAddToRating = true;
 					}
 
-					_strSelectedValue = frmPickSkillGroup.SelectedSkillGroup;
+					_strSelectedValue = strSkillGroup;
 
 					CreateImprovement(_strSelectedValue, objImprovementSource, strSourceName, Improvement.ImprovementType.SkillGroup, strUnique, ValueToInt(nodBonus["selectskillgroup"]["bonus"].InnerText, intRating), 1, 0, 0, 0, 0, strExclude, blnAddToRating);
 				}
@@ -1396,48 +1378,33 @@ namespace Chummer
 				if (NodeExists(nodBonus, "selectattribute"))
 				{
 					// Display the Select Attribute window and record which Skill was selected.
-					frmSelectAttribute frmPickAttribute = new frmSelectAttribute();
-					if (strFriendlyName != "")
-						frmPickAttribute.Description = LanguageManager.Instance.GetString("String_Improvement_SelectAttributeNamed").Replace("{0}", strFriendlyName);
-					else
-						frmPickAttribute.Description = LanguageManager.Instance.GetString("String_Improvement_SelectAttribute");
-
-					// Add MAG and/or RES to the list of Attributes if they are enabled on the form.
-					if (_objCharacter.MAGEnabled)
-						frmPickAttribute.AddMAG();
-					if (_objCharacter.RESEnabled)
-						frmPickAttribute.AddRES();
-
+					List<string> lstLimitTo = null;
 					if (nodBonus["selectattribute"].InnerXml.Contains("<attribute>"))
 					{
 						List<string> strValue = new List<string>();
 						foreach (XmlNode objXmlAttribute in nodBonus["selectattribute"].SelectNodes("attribute"))
 							strValue.Add(objXmlAttribute.InnerText);
-						frmPickAttribute.LimitToList(strValue);
+						lstLimitTo = strValue;
 					}
 
+					List<string> lstRemove = null;
 					if (nodBonus["selectattribute"].InnerXml.Contains("<excludeattribute>"))
 					{
 						List<string> strValue = new List<string>();
 						foreach (XmlNode objXmlAttribute in nodBonus["selectattribute"].SelectNodes("excludeattribute"))
 							strValue.Add(objXmlAttribute.InnerText);
-						frmPickAttribute.RemoveFromList(strValue);
+						lstRemove = strValue;
 					}
 
 					// Check to see if there is only one possible selection because of _strLimitSelection.
 					if (_strForcedValue != "")
 						_strLimitSelection = _strForcedValue;
 
-					if (_strLimitSelection != "")
-					{
-						frmPickAttribute.SingleAttribute(_strLimitSelection);
-						frmPickAttribute.Opacity = 0;
-					}
-
-					frmPickAttribute.ShowDialog();
+					// Add MAG and/or RES to the list of Attributes if they are enabled on the form.
+					string strSelectedAttribute = _objDialogs.SelectAttribute(strFriendlyName, _objCharacter.MAGEnabled, _objCharacter.RESEnabled, lstLimitTo, lstRemove, _strLimitSelection);
 
 					// Make sure the dialogue window was not canceled.
-					if (frmPickAttribute.DialogResult == DialogResult.Cancel)
+					if (strSelectedAttribute == null)
 					{
 						Rollback();
 						blnSuccess = false;
@@ -1446,7 +1413,7 @@ namespace Chummer
 						return false;
 					}
 
-					_strSelectedValue = frmPickAttribute.SelectedAttribute;
+					_strSelectedValue = strSelectedAttribute;
 					if (blnConcatSelectedValue)
 						strSourceName += " (" + _strSelectedValue + ")";
 
@@ -1466,7 +1433,7 @@ namespace Chummer
 					if (nodBonus["selectattribute"].InnerXml.Contains("aug"))
 						intAugMax = ValueToInt(nodBonus["selectattribute"]["aug"].InnerXml, intRating);
 
-					string strAttribute = frmPickAttribute.SelectedAttribute;
+					string strAttribute = strSelectedAttribute;
 
 					if (nodBonus["selectattribute"]["affectbase"] != null)
 						strAttribute += "Base";
@@ -1478,12 +1445,6 @@ namespace Chummer
 				if (NodeExists(nodBonus, "swapskillattribute"))
 				{
 					// Display the Select Attribute window and record which Skill was selected.
-					frmSelectAttribute frmPickAttribute = new frmSelectAttribute();
-					if (strFriendlyName != "")
-						frmPickAttribute.Description = LanguageManager.Instance.GetString("String_Improvement_SelectAttributeNamed").Replace("{0}", strFriendlyName);
-					else
-						frmPickAttribute.Description = LanguageManager.Instance.GetString("String_Improvement_SelectAttribute");
-
 					List<string> strValue = new List<string>();
 					strValue.Add("LOG");
 					strValue.Add("WIL");
@@ -1492,30 +1453,23 @@ namespace Chummer
 					strValue.Add("EDG");
 					strValue.Add("MAG");
 					strValue.Add("RES");
-					frmPickAttribute.RemoveFromList(strValue);
 
+					List<string> strLimitValue = null;
 					if (nodBonus["swapskillattribute"].InnerXml.Contains("<attribute>"))
 					{
-						List<string> strLimitValue = new List<string>();
+						strLimitValue = new List<string>();
 						foreach (XmlNode objXmlAttribute in nodBonus["swapskillattribute"].SelectNodes("attribute"))
 							strLimitValue.Add(objXmlAttribute.InnerText);
-						frmPickAttribute.LimitToList(strLimitValue);
 					}
 
 					// Check to see if there is only one possible selection because of _strLimitSelection.
 					if (_strForcedValue != "")
 						_strLimitSelection = _strForcedValue;
 
-					if (_strLimitSelection != "")
-					{
-						frmPickAttribute.SingleAttribute(_strLimitSelection);
-						frmPickAttribute.Opacity = 0;
-					}
-
-					frmPickAttribute.ShowDialog();
+					string strSelectedAttribute = _objDialogs.SelectSwapSkillAttribute(strFriendlyName, strValue, strLimitValue, _strLimitSelection);
 
 					// Make sure the dialogue window was not canceled.
-					if (frmPickAttribute.DialogResult == DialogResult.Cancel)
+					if (strSelectedAttribute == null)
 					{
 						Rollback();
 						blnSuccess = false;
@@ -1524,31 +1478,25 @@ namespace Chummer
 						return false;
 					}
 
-					_strSelectedValue = frmPickAttribute.SelectedAttribute;
+					_strSelectedValue = strSelectedAttribute;
 					if (blnConcatSelectedValue)
 						strSourceName += " (" + _strSelectedValue + ")";
 
-					CreateImprovement(frmPickAttribute.SelectedAttribute, objImprovementSource, strSourceName, Improvement.ImprovementType.SwapSkillAttribute, strUnique);
+					CreateImprovement(strSelectedAttribute, objImprovementSource, strSourceName, Improvement.ImprovementType.SwapSkillAttribute, strUnique);
 				}
 
 				// Select a Spell.
 				if (NodeExists(nodBonus, "selectspell"))
 				{
 					// Display the Select Spell window.
-					frmSelectSpell frmPickSpell = new frmSelectSpell(_objCharacter);
-
+					string strLimitCategory = null;
 					if (nodBonus["selectspell"].Attributes["category"] != null)
-						frmPickSpell.LimitCategory = nodBonus["selectspell"].Attributes["category"].InnerText;
-					if (_strForcedValue != "")
-					{
-						frmPickSpell.ForceSpellName = _strForcedValue;
-						frmPickSpell.Opacity = 0;
-					}
+						strLimitCategory = nodBonus["selectspell"].Attributes["category"].InnerText;
 
-					frmPickSpell.ShowDialog();
+					string strSelectedSpell = _objDialogs.SelectSpell(_objCharacter, strLimitCategory, _strForcedValue);
 
 					// Make sure the dialogue window was not canceled.
-					if (frmPickSpell.DialogResult == DialogResult.Cancel)
+					if (strSelectedSpell == null)
 					{
 						Rollback();
 						blnSuccess = false;
@@ -1557,11 +1505,11 @@ namespace Chummer
 						return false;
 					}
 
-					_strSelectedValue = frmPickSpell.SelectedSpell;
+					_strSelectedValue = strSelectedSpell;
 					if (blnConcatSelectedValue)
 						strSourceName += " (" + _strSelectedValue + ")";
 
-					CreateImprovement(frmPickSpell.SelectedSpell, objImprovementSource, strSourceName, Improvement.ImprovementType.Text, strUnique);
+					CreateImprovement(strSelectedSpell, objImprovementSource, strSourceName, Improvement.ImprovementType.Text, strUnique);
 				}
 
 				// Affect a Specific Attribute.
@@ -1935,11 +1883,10 @@ namespace Chummer
 				// Check for Mentor Spirit bonuses.
 				if (NodeExists(nodBonus, "selectmentorspirit"))
 				{
-					frmSelectMentorSpirit frmPickMentorSpirit = new frmSelectMentorSpirit(_objCharacter);
-					frmPickMentorSpirit.ShowDialog();
+					MentorSpiritSelection objMentorSpirit = _objDialogs.SelectMentorSpirit(_objCharacter, null);
 
 					// Make sure the dialogue window was not canceled.
-					if (frmPickMentorSpirit.DialogResult == DialogResult.Cancel)
+					if (objMentorSpirit == null)
 					{
 						Rollback();
 						blnSuccess = false;
@@ -1948,14 +1895,14 @@ namespace Chummer
 						return blnSuccess;
 					}
 
-					_strSelectedValue = frmPickMentorSpirit.SelectedMentor;
+					_strSelectedValue = objMentorSpirit.SelectedMentor;
 					string strHoldValue = _strSelectedValue;
 					if (blnConcatSelectedValue)
 						strSourceName += " (" + _strSelectedValue + ")";
 
-					if (frmPickMentorSpirit.BonusNode != null)
+					if (objMentorSpirit.BonusNode != null)
 					{
-						blnSuccess = CreateImprovements(objImprovementSource, strSourceName, frmPickMentorSpirit.BonusNode, blnConcatSelectedValue, intRating, strFriendlyName);
+						blnSuccess = CreateImprovements(objImprovementSource, strSourceName, objMentorSpirit.BonusNode, blnConcatSelectedValue, intRating, strFriendlyName);
 						if (!blnSuccess)
 						{
 							Rollback();
@@ -1965,11 +1912,11 @@ namespace Chummer
 						}
 					}
 
-					if (frmPickMentorSpirit.Choice1BonusNode != null)
+					if (objMentorSpirit.Choice1BonusNode != null)
 					{
 						string strForce = _strForcedValue;
-						_strForcedValue = frmPickMentorSpirit.Choice1;
-						blnSuccess = CreateImprovements(objImprovementSource, strSourceName, frmPickMentorSpirit.Choice1BonusNode, blnConcatSelectedValue, intRating, strFriendlyName);
+						_strForcedValue = objMentorSpirit.Choice1;
+						blnSuccess = CreateImprovements(objImprovementSource, strSourceName, objMentorSpirit.Choice1BonusNode, blnConcatSelectedValue, intRating, strFriendlyName);
 						if (!blnSuccess)
 						{
 							Rollback();
@@ -1978,14 +1925,14 @@ namespace Chummer
 							return blnSuccess;
 						}
 						_strForcedValue = strForce;
-						_objCharacter.Improvements.Last().Notes = frmPickMentorSpirit.Choice1;
+						_objCharacter.Improvements.Last().Notes = objMentorSpirit.Choice1;
 					}
 
-					if (frmPickMentorSpirit.Choice2BonusNode != null)
+					if (objMentorSpirit.Choice2BonusNode != null)
 					{
 						string strForce = _strForcedValue;
-						_strForcedValue = frmPickMentorSpirit.Choice2;
-						blnSuccess = CreateImprovements(objImprovementSource, strSourceName, frmPickMentorSpirit.Choice2BonusNode, blnConcatSelectedValue, intRating, strFriendlyName);
+						_strForcedValue = objMentorSpirit.Choice2;
+						blnSuccess = CreateImprovements(objImprovementSource, strSourceName, objMentorSpirit.Choice2BonusNode, blnConcatSelectedValue, intRating, strFriendlyName);
 						if (!blnSuccess)
 						{
 							Rollback();
@@ -1994,7 +1941,7 @@ namespace Chummer
 							return blnSuccess;
 						}
 						_strForcedValue = strForce;
-						_objCharacter.Improvements.Last().Notes = frmPickMentorSpirit.Choice2;
+						_objCharacter.Improvements.Last().Notes = objMentorSpirit.Choice2;
 					}
 
 					_strSelectedValue = strHoldValue;
@@ -2003,12 +1950,10 @@ namespace Chummer
 				// Check for Paragon bonuses.
 				if (NodeExists(nodBonus, "selectparagon"))
 				{
-					frmSelectMentorSpirit frmPickMentorSpirit = new frmSelectMentorSpirit(_objCharacter);
-					frmPickMentorSpirit.XmlFile = "paragons.xml";
-					frmPickMentorSpirit.ShowDialog();
+					MentorSpiritSelection objMentorSpirit = _objDialogs.SelectMentorSpirit(_objCharacter, "paragons.xml");
 
 					// Make sure the dialogue window was not canceled.
-					if (frmPickMentorSpirit.DialogResult == DialogResult.Cancel)
+					if (objMentorSpirit == null)
 					{
 						Rollback();
 						blnSuccess = false;
@@ -2017,14 +1962,14 @@ namespace Chummer
 						return blnSuccess;
 					}
 
-					_strSelectedValue = frmPickMentorSpirit.SelectedMentor;
+					_strSelectedValue = objMentorSpirit.SelectedMentor;
 					string strHoldValue = _strSelectedValue;
 					if (blnConcatSelectedValue)
 						strSourceName += " (" + _strSelectedValue + ")";
 
-					if (frmPickMentorSpirit.BonusNode != null)
+					if (objMentorSpirit.BonusNode != null)
 					{
-						blnSuccess = CreateImprovements(objImprovementSource, strSourceName, frmPickMentorSpirit.BonusNode, blnConcatSelectedValue, intRating, strFriendlyName);
+						blnSuccess = CreateImprovements(objImprovementSource, strSourceName, objMentorSpirit.BonusNode, blnConcatSelectedValue, intRating, strFriendlyName);
 						if (!blnSuccess)
 						{
 							Rollback();
@@ -2034,11 +1979,11 @@ namespace Chummer
 						}
 					}
 
-					if (frmPickMentorSpirit.Choice1BonusNode != null)
+					if (objMentorSpirit.Choice1BonusNode != null)
 					{
 						string strForce = _strForcedValue;
-						_strForcedValue = frmPickMentorSpirit.Choice1;
-						blnSuccess = CreateImprovements(objImprovementSource, strSourceName, frmPickMentorSpirit.Choice1BonusNode, blnConcatSelectedValue, intRating, strFriendlyName);
+						_strForcedValue = objMentorSpirit.Choice1;
+						blnSuccess = CreateImprovements(objImprovementSource, strSourceName, objMentorSpirit.Choice1BonusNode, blnConcatSelectedValue, intRating, strFriendlyName);
 						if (!blnSuccess)
 						{
 							Rollback();
@@ -2047,14 +1992,14 @@ namespace Chummer
 							return blnSuccess;
 						}
 						_strForcedValue = strForce;
-						_objCharacter.Improvements.Last().Notes = frmPickMentorSpirit.Choice1;
+						_objCharacter.Improvements.Last().Notes = objMentorSpirit.Choice1;
 					}
 
-					if (frmPickMentorSpirit.Choice2BonusNode != null)
+					if (objMentorSpirit.Choice2BonusNode != null)
 					{
 						string strForce = _strForcedValue;
-						_strForcedValue = frmPickMentorSpirit.Choice2;
-						blnSuccess = CreateImprovements(objImprovementSource, strSourceName, frmPickMentorSpirit.Choice2BonusNode, blnConcatSelectedValue, intRating, strFriendlyName);
+						_strForcedValue = objMentorSpirit.Choice2;
+						blnSuccess = CreateImprovements(objImprovementSource, strSourceName, objMentorSpirit.Choice2BonusNode, blnConcatSelectedValue, intRating, strFriendlyName);
 						if (!blnSuccess)
 						{
 							Rollback();
@@ -2063,7 +2008,7 @@ namespace Chummer
 							return blnSuccess;
 						}
 						_strForcedValue = strForce;
-						_objCharacter.Improvements.Last().Notes = frmPickMentorSpirit.Choice2;
+						_objCharacter.Improvements.Last().Notes = objMentorSpirit.Choice2;
 					}
 
 					_strSelectedValue = strHoldValue;
@@ -2132,15 +2077,10 @@ namespace Chummer
 				// Check for Select Side.
 				if (NodeExists(nodBonus, "selectside"))
 				{
-					frmSelectSide frmPickSide = new frmSelectSide();
-					frmPickSide.Description = LanguageManager.Instance.GetString("Label_SelectSide").Replace("{0}", strFriendlyName);
-					if (_strForcedValue != "")
-						frmPickSide.ForceValue(_strForcedValue);
-					else
-						frmPickSide.ShowDialog();
+					string strSide = _objDialogs.SelectSide(strFriendlyName, _strForcedValue);
 
 					// Make sure the dialogue window was not canceled.
-					if (frmPickSide.DialogResult == DialogResult.Cancel)
+					if (strSide == null)
 					{
 						Rollback();
 						blnSuccess = false;
@@ -2149,7 +2089,7 @@ namespace Chummer
 						return blnSuccess;
 					}
 
-					_strSelectedValue = frmPickSide.SelectedSide;
+					_strSelectedValue = strSide;
 				}
 
 				// Check for Free Spirit Power Points.
@@ -2343,11 +2283,9 @@ namespace Chummer
 						lstCritters.Add(objItem);
 					}
 
-					frmSelectItem frmPickItem = new frmSelectItem();
-					frmPickItem.GeneralItems = lstCritters;
-					frmPickItem.ShowDialog();
+					string strSprite = _objDialogs.SelectSprite(lstCritters);
 
-					if (frmPickItem.DialogResult == DialogResult.Cancel)
+					if (strSprite == null)
 					{
 						Rollback();
 						blnSuccess = false;
@@ -2356,9 +2294,9 @@ namespace Chummer
 						return blnSuccess;
 					}
 
-					_strSelectedValue = frmPickItem.SelectedItem;
+					_strSelectedValue = strSprite;
 
-					CreateImprovement(frmPickItem.SelectedItem, objImprovementSource, strSourceName, Improvement.ImprovementType.AddSprite, "");
+					CreateImprovement(strSprite, objImprovementSource, strSourceName, Improvement.ImprovementType.AddSprite, "");
 				}
 
 				// Check for Black Market Discount.
@@ -2379,19 +2317,10 @@ namespace Chummer
 					{
 						// If the character is null (this is a Vehicle), the user must enter their own string.
 						// Display the Select Item window and record the value that was entered.
-						frmSelectText frmPickText = new frmSelectText();
-						frmPickText.Description = LanguageManager.Instance.GetString("String_Improvement_SelectText").Replace("{0}", strFriendlyName);
-
-						if (_strLimitSelection != "")
-						{
-							frmPickText.SelectedValue = _strLimitSelection;
-							frmPickText.Opacity = 0;
-						}
-
-						frmPickText.ShowDialog();
+						string strText = _objDialogs.SelectText(strFriendlyName, _strLimitSelection);
 
 						// Make sure the dialogue window was not canceled.
-						if (frmPickText.DialogResult == DialogResult.Cancel)
+						if (strText == null)
 						{
 							Rollback();
 							blnSuccess = false;
@@ -2400,16 +2329,16 @@ namespace Chummer
 							return false;
 						}
 
-						_strSelectedValue = frmPickText.SelectedValue;
+						_strSelectedValue = strText;
 						if (blnConcatSelectedValue)
 							strSourceName += " (" + _strSelectedValue + ")";
 
-						strSelectedValue = frmPickText.SelectedValue;
+						strSelectedValue = strText;
 					}
 					else
 					{
 						List<ListItem> lstWeapons = new List<ListItem>();
-						foreach (Weapon objWeapon in _objCharacter.Weapons)
+						foreach (IImprovementWeapon objWeapon in _objCharacter.Weapons)
 						{
 							ListItem objItem = new ListItem();
 							objItem.Value = objWeapon.Name;
@@ -2417,20 +2346,10 @@ namespace Chummer
 							lstWeapons.Add(objItem);
 						}
 
-						frmSelectItem frmPickItem = new frmSelectItem();
-						frmPickItem.Description = LanguageManager.Instance.GetString("String_Improvement_SelectText").Replace("{0}", strFriendlyName);
-						frmPickItem.GeneralItems = lstWeapons;
-
-						if (_strLimitSelection != "")
-						{
-							frmPickItem.ForceItem = _strLimitSelection;
-							frmPickItem.Opacity = 0;
-						}
-
-						frmPickItem.ShowDialog();
+						string strWeapon = _objDialogs.SelectWeapon(strFriendlyName, lstWeapons, _strLimitSelection);
 
 						// Make sure the dialogue window was not canceled.
-						if (frmPickItem.DialogResult == DialogResult.Cancel)
+						if (strWeapon == null)
 						{
 							Rollback();
 							blnSuccess = false;
@@ -2439,11 +2358,11 @@ namespace Chummer
 							return false;
 						}
 
-						_strSelectedValue = frmPickItem.SelectedItem;
+						_strSelectedValue = strWeapon;
 						if (blnConcatSelectedValue)
 							strSourceName += " (" + _strSelectedValue + ")";
 
-						strSelectedValue = frmPickItem.SelectedItem;
+						strSelectedValue = strWeapon;
 					}
 
 					// Create the Improvement.
@@ -2720,22 +2639,7 @@ namespace Chummer
 				if (objImprovement.ImproveType == Improvement.ImprovementType.Adapsin)
 				{
 					if (!_objCharacter.AdapsinEnabled)
-					{
-						foreach (Cyberware objCyberware in _objCharacter.Cyberware)
-						{
-							if (objCyberware.Grade.Adapsin)
-							{
-								// Determine which GradeList to use for the Cyberware.
-								GradeList objGradeList;
-								if (objCyberware.SourceType == Improvement.ImprovementSource.Bioware)
-									objGradeList = GradeList.BiowareGrades;
-								else
-									objGradeList = GradeList.CyberwareGrades;
-
-								objCyberware.Grade = objGradeList.GetGrade(objCyberware.Grade.Name.Replace("(Adapsin)", string.Empty).Trim());
-							}
-						}
-					}
+						_objCharacter.ConvertAdapsinGrades();
 				}
 
 				// Decrease the character's Initiation Grade.
