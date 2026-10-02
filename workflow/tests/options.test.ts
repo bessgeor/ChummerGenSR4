@@ -19,7 +19,7 @@ test("capture, compare and workflow options are parsed", () => {
     "--threshold", "0.5", "--case-file", "f.json", "--no-ocr", "--tessdata", "t", "--only", "compare"]);
   deepStrictEqual(parsed, {
     cases: ["a", "b", "c"], captures: ["common"], settingsOverlay: "o", threshold: 0.5, caseFile: "f.json",
-    canonicalCache: null, liveCanonical: false, noOcr: true, tessdata: "t", only: "compare", recapture: false, noDiagnosis: false, noRepair: false, unattended: false,
+    canonicalCache: null, liveCanonical: false, noOcr: true, tessdata: "t", only: "compare", recapture: false, noDiagnosis: false, noRepair: false, noWidening: false, unattended: false,
   });
 });
 
@@ -64,6 +64,16 @@ test("--no-repair ends the run after diagnosis; the profile sets the repair dead
   equal(resolveRunOptions(start(["--no-repair"]), { repair: { deadlineMinutes: 5 } }, env, root).repair, null);
   deepStrictEqual(resolveRunOptions(start([]), {}, env, root).repair, { deadlineMinutes: 60 });
   deepStrictEqual(resolveRunOptions(start([]), { repair: { deadlineMinutes: 5 } }, env, root).repair, { deadlineMinutes: 5 });
+});
+
+test("--no-widening ends the run after repair, and --no-repair turns widening off too", () => {
+  const root = scratch();
+  const env = { LOCALAPPDATA: root };
+  equal(start(["--no-widening"]).noWidening, true);
+  equal(resolveRunOptions(start([]), {}, env, root).widening, true);
+  equal(resolveRunOptions(start(["--no-widening"]), {}, env, root).widening, false);
+  deepStrictEqual(resolveRunOptions(start(["--no-widening"]), {}, env, root).repair, { deadlineMinutes: 60 });
+  equal(resolveRunOptions(start(["--no-repair"]), {}, env, root).widening, false);
 });
 
 test("--resume takes a thread and nothing else", () => {

@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { InMemoryStore, MemorySaver } from "@langchain/langgraph";
 import { resolveAgentSettings } from "../src/agents/agent-settings.js";
 import type { PlannedCase } from "../src/cases/case-plan.js";
-import { buildWorkflowGraph, nodeMode, type DiagnosisSteps, type RepairSteps, type WorkflowSteps } from "../src/graph/workflow-graph.js";
+import { buildWorkflowGraph, nodeMode, type DiagnosisSteps, type RepairSteps, type WideningSteps, type WorkflowSteps } from "../src/graph/workflow-graph.js";
 import { exitStatus, runWorkflow, type RunDependencies } from "../src/graph/run-workflow.js";
 import { SetupError } from "../src/host/setup-error.js";
 import type { Arguments, NodeName } from "../src/options/arguments.js";
@@ -105,13 +105,25 @@ const noRepair: RepairSteps = {
   },
 };
 
+const noWidening: WideningSteps = {
+  prepare: () => {
+    throw new Error("widening is off");
+  },
+  widen: () => Promise.reject(new Error("widening is off")),
+  promote: () => Promise.reject(new Error("widening is off")),
+  rollBack: () => Promise.reject(new Error("widening is off")),
+  finish: () => {
+    throw new Error("widening is off");
+  },
+};
+
 const baseArguments: Arguments = {
   cases: [], captures: [], settingsOverlay: null, threshold: null, caseFile: null, canonicalCache: null,
-  liveCanonical: false, noOcr: false, tessdata: null, only: null, recapture: false, noDiagnosis: false, noRepair: false, unattended: false,
+  liveCanonical: false, noOcr: false, tessdata: null, only: null, recapture: false, noDiagnosis: false, noRepair: false, noWidening: false, unattended: false,
 };
 
 function harness(cases: string[], steps = new FakeSteps(), checkpointer = new MemorySaver(), signal?: AbortSignal) {
-  const graph = buildWorkflowGraph(steps, noDiagnosis, noRepair).compile({ checkpointer, store: new InMemoryStore() });
+  const graph = buildWorkflowGraph(steps, noDiagnosis, noRepair, noWidening).compile({ checkpointer, store: new InMemoryStore() });
   const lines: string[] = [];
   const readCalls: [string, boolean][] = [];
   const dependencies: RunDependencies = {
@@ -119,7 +131,7 @@ function harness(cases: string[], steps = new FakeSteps(), checkpointer = new Me
     resolveOptions: (command) => ({
       caseFile: "cases.json", cases: [], captures: [], settingsOverlay: null, threshold: null, canonicalCache: "cache",
       canonicalCacheSource: "default", noOcr: false, tessdata: null, only: command.arguments.only, recapture: false,
-      diagnosis: false, agents: resolveAgentSettings(undefined), unattended: false, certificates: "certificates", repair: null,
+      diagnosis: false, agents: resolveAgentSettings(undefined), unattended: false, certificates: "certificates", repair: null, widening: false,
     }),
     planCases: () => ({ cases: cases.map(plannedCase), excluded: [] }),
     certificateProblems: () => [],

@@ -19,6 +19,8 @@ export type Arguments = {
   readonly noDiagnosis: boolean;
   /** End the run after diagnosis: no repair attempt. */
   readonly noRepair: boolean;
+  /** End the run after repair: no widening of the passed attempts. */
+  readonly noWidening: boolean;
   /** Dispatch model jobs only under certificates for their configuration. */
   readonly unattended: boolean;
 };
@@ -47,6 +49,7 @@ export const usage = `Usage: npm start -- [options]
     --recapture                capture every planned case again, ignoring recorded capture steps (only with --only capture, or without --only)
     --no-diagnosis             end the run after triage: no model job and no check capture
     --no-repair                end the run after diagnosis: no repair attempt for the confirmed clusters
+    --no-widening              end the run after repair: no widening of the passed attempts and no accepted branch
     --unattended               start only when every job kind diagnosis dispatches has a certificate for its configuration
                                (repair has none, so it needs --no-repair)
     --resume <thread>          continue a thread that stopped, with the options it was started with
@@ -107,7 +110,7 @@ export function parseArguments(args: readonly string[]): Command {
   const captures: string[] = [];
   let parsed: Omit<Arguments, "cases" | "captures"> = {
     settingsOverlay: null, threshold: null, caseFile: null, canonicalCache: null,
-    liveCanonical: false, noOcr: false, tessdata: null, only: null, recapture: false, noDiagnosis: false, noRepair: false, unattended: false,
+    liveCanonical: false, noOcr: false, tessdata: null, only: null, recapture: false, noDiagnosis: false, noRepair: false, noWidening: false, unattended: false,
   };
   for (let index = 0; index < args.length; index++) {
     const option = args[index]!;
@@ -125,6 +128,7 @@ export function parseArguments(args: readonly string[]): Command {
       case "--recapture": parsed = { ...parsed, recapture: true }; break;
       case "--no-diagnosis": parsed = { ...parsed, noDiagnosis: true }; break;
       case "--no-repair": parsed = { ...parsed, noRepair: true }; break;
+      case "--no-widening": parsed = { ...parsed, noWidening: true }; break;
       case "--unattended": parsed = { ...parsed, unattended: true }; break;
       default:
         throw new SetupError(workflowOwned.has(option)
