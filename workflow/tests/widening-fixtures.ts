@@ -1,8 +1,73 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { crc32, deflateSync } from "node:zlib";
+import type { AttemptBuild, AttemptBuildRequest } from "../src/repair/attempt-host.js";
 import type { PatchFile } from "../src/repair/patch.js";
+import type { LevelCapture, LevelCaptureRequest } from "../src/widening/level-capture.js";
+
+const examples = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "contracts", "examples");
+
+/** What a fake level or baseline capture observes for a case and capture: a failing row with its candidate pixels, or nothing. */
+export type Observed = { readonly passed: false; readonly candidate?: readonly number[] | null } | "missing";
+
+export type WideningScript = {
+  /** The build's exit status for a request, or "hang" to run until its signal stops it. Default 0. */
+  readonly build?: (request: AttemptBuildRequest) => number | "hang";
+  /** What a capture observes; anything not named passes. `baseline` tells a capture of the accepted build. */
+  readonly observe?: (request: LevelCaptureRequest, caseName: string, capture: string, baseline: boolean) => Observed | undefined;
+  /** The exit status of a capture, or "hang" to run until its signal stops it; by default 1 with a failing row, else 0. */
+  readonly status?: (request: LevelCaptureRequest, baseline: boolean) => 0 | 1 | 2 | "hang" | undefined;
+};
+
+/** A fake host for widening: builds write an executable naming their source, and captures answer from a script with real PNGs. */
+export class FakeWideningHost {
+  readonly builds: AttemptBuildRequest[] = [];
+  /** What each build's `Chummer/frmCreate.cs` held when it started. */
+  readonly builtSources: string[] = [];
+  readonly captures: { readonly request: LevelCaptureRequest; readonly baseline: boolean; readonly runFolder: string }[] = [];
+
+  constructor(private readonly root: string, private readonly captureNames: (caseName: string) => readonly string[], public script: WideningScript = {}) {}
+
+  readonly build: AttemptBuild = async (request) => {
+    this.builds.push(request);
+    this.builtSources.push(readFileSync(join(request.source, "Chummer", "frmCreate.cs"), "utf8"));
+    const status = this.script.build?.(request) ?? 0;
+    if (status === "hang") return new Promise<number>((_resolve, reject) => request.signal.addEventListener("abort", () => reject(new Error(`${request.label}: stopped`)), { once: true }));
+    mkdirSync(join(request.output, "bin"), { recursive: true });
+    writeFileSync(join(request.output, "bin", "ChummerGenSR4.exe"), `built from ${request.source}`);
+    writeFileSync(request.log, `build of ${request.source}\n`);
+    return status;
+  };
+
+  readonly capture: LevelCapture = async (request) => {
+    // A baseline capture runs the accepted build, which is never the widened candidate of a cluster folder's build.
+    const baseline = request.label.endsWith(" baseline");
+    if (!existsSync(request.candidateExecutable)) throw new Error(`${request.label}: no executable ${request.candidateExecutable}`);
+    const status = this.script.status?.(request, baseline);
+    if (status === "hang") return new Promise((_resolve, reject) => request.signal?.addEventListener("abort", () => reject(new Error(`${request.label}: stopped`)), { once: true }));
+    const runFolder = join(this.root, "level-runs", String(this.captures.length + 1));
+    this.captures.push({ request, baseline, runFolder });
+    const rows: RowSpec[] = request.cases.flatMap((caseName) => (request.captures ?? this.captureNames(caseName)).flatMap((capture): RowSpec[] => {
+      const observed = this.script.observe?.(request, caseName, capture, baseline);
+      if (observed === "missing") return [];
+      return [observed === undefined ? { case: caseName, capture, passed: true } : { case: caseName, capture, passed: false, candidate: observed.candidate ?? [] }];
+    }));
+    writeRun(runFolder, rows, 0.05);
+    const coverage = JSON.parse(readFileSync(join(examples, "parity-execution-coverage.example.json"), "utf8")) as { valid: boolean; invalidReasons: string[] };
+    const exit = status ?? (rows.some((row) => !row.passed) ? 1 : 0);
+    coverage.valid = exit !== 2;
+    coverage.invalidReasons = exit === 2 ? ["failure:build-alpha/candidate"] : [];
+    writeFileSync(join(runFolder, "coverage.json"), JSON.stringify(coverage));
+    return { status: exit, runFolder };
+  };
+
+  /** The labels of the captures, in order. */
+  labels(): string[] {
+    return this.captures.map((item) => item.request.label);
+  }
+}
 
 export function sha256Of(text: string): string {
   return createHash("sha256").update(text).digest("hex");

@@ -52,6 +52,19 @@ test("a version-2 record stored without a repair label is read with it empty; se
   throws(() => readRecord({ ...record(), labels: { ...noLabels, repair: { ...repair, stage: "deploy" } } }));
 });
 
+test("a repair record stored without a widening label is read with it empty; setting it keeps the repair label", async () => {
+  const repair = { outcome: "passed" as const, stage: null, reason: null, labelledUtc: "t" };
+  const { widening: _widening, ...earlier } = { ...noLabels, repair };
+  const stored = { ...record(), jobKind: "repair" as const, labels: earlier };
+  deepStrictEqual(readRecord(stored).labels, { ...noLabels, repair });
+  const store = new InMemoryStore();
+  await store.put(recordNamespace("repair"), stored.recordId, stored);
+  const widening = { outcome: "rejected" as const, stage: "mode" as const, reason: "build-gamma/common introduced", commit: null, labelledUtc: "u" };
+  await setLabels(store, readRecord(stored), { widening });
+  deepStrictEqual((await getRecord(store, "repair", stored.recordId)).labels, { ...noLabels, repair, widening });
+  throws(() => readRecord({ ...stored, labels: { ...noLabels, widening: { ...widening, stage: "deploy" } } }));
+});
+
 test("records are listed across job kinds and pages", async () => {
   const store = new InMemoryStore();
   for (let index = 0; index < 205; index++) await putRecord(store, record({ recordId: `r${index}` }));

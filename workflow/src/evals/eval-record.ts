@@ -30,6 +30,15 @@ const RepairLabelSchema = z.strictObject({
   outcome: z.enum(["passed", "rejected"]), stage: z.enum(repairStages).nullable(), reason: z.string().nullable(), labelledUtc: z.string(),
 });
 
+/** Where a rejected widening stopped: the patch did not apply, the widened source did not build, or a level failed. */
+export const wideningStages = ["apply", "build", "narrow", "character", "mode", "suite"] as const;
+export type WideningLabelStage = (typeof wideningStages)[number];
+
+/** The outcome of a passed repair attempt's widening: automatic, never gold. */
+const WideningLabelSchema = z.strictObject({
+  outcome: z.enum(["promoted", "rejected"]), stage: z.enum(wideningStages).nullable(), reason: z.string().nullable(), commit: z.string().nullable(), labelledUtc: z.string(),
+});
+
 /** The labels of a record, each from its own source; only hindsight and review verdicts are gold. */
 const LabelsSchema = z.strictObject({
   check: z.enum(checkLabels).nullable(),
@@ -38,14 +47,17 @@ const LabelsSchema = z.strictObject({
   grader: GraderLabelSchema.nullable(),
   /** Set once a repair attempt is archived; empty for every other record, and a stored record without the key reads as empty. */
   repair: RepairLabelSchema.nullable().default(null),
+  /** Set once a passed repair attempt's widening ends; empty for every other record, and a stored record without the key reads as empty. */
+  widening: WideningLabelSchema.nullable().default(null),
 });
 export type Labels = z.infer<typeof LabelsSchema>;
 export type HindsightLabel = z.infer<typeof HindsightLabelSchema>;
 export type ReviewLabel = z.infer<typeof ReviewLabelSchema>;
 export type GraderLabel = z.infer<typeof GraderLabelSchema>;
 export type RepairLabel = z.infer<typeof RepairLabelSchema>;
+export type WideningLabel = z.infer<typeof WideningLabelSchema>;
 
-export const noLabels: Labels = { check: null, hindsight: null, review: null, grader: null, repair: null };
+export const noLabels: Labels = { check: null, hindsight: null, review: null, grader: null, repair: null, widening: null };
 
 const common = {
   recordId: z.string().min(1),
