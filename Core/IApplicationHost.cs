@@ -36,5 +36,11 @@ namespace Chummer
 		/// Close the application.
 		/// </summary>
 		void Exit();
+
+		/// <summary>
+		/// Translate the controls of a form or user control with the loaded language. Any other object is left alone.
+		/// </summary>
+		/// <param name="objObject">Object to translate.</param>
+		void TranslateControls(object objObject);
 	}
 }

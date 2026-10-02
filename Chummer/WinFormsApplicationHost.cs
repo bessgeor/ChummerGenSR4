@@ -7,6 +7,8 @@ namespace Chummer
 	/// </summary>
 	public sealed class WinFormsApplicationHost : IApplicationHost
 	{
+		private readonly ControlTranslator _objTranslator = new ControlTranslator();
+
 		public string StartupPath
 		{
 			get
@@ -33,6 +35,11 @@ namespace Chummer
 		public void Exit()
 		{
 			Application.Exit();
+		}
+
+		public void TranslateControls(object objObject)
+		{
+			_objTranslator.Translate(objObject);
 		}
 	}
 }
