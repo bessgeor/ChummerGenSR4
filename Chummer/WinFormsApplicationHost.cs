@@ -8,6 +8,7 @@ namespace Chummer
 	public sealed class WinFormsApplicationHost : IApplicationHost
 	{
 		private readonly ControlTranslator _objTranslator = new ControlTranslator();
+		private readonly WinFormsImprovementDialogs _objImprovementDialogs = new WinFormsImprovementDialogs();
 
 		public string StartupPath
 		{
@@ -40,6 +41,14 @@ namespace Chummer
 		public void TranslateControls(object objObject)
 		{
 			_objTranslator.Translate(objObject);
+		}
+
+		public IImprovementDialogs ImprovementDialogs
+		{
+			get
+			{
+				return _objImprovementDialogs;
+			}
 		}
 	}
 }

@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Windows.Forms;
 using System.Xml;
 using System.Xml.XPath;
 
@@ -840,7 +839,7 @@ namespace Chummer
 		/// </summary>
 		/// <param name="objCharacter">Character whose Improvements are managed, or null.</param>
 		public ImprovementManager(IImprovementCharacter objCharacter)
-			: this(objCharacter, new WinFormsImprovementDialogs())
+			: this(objCharacter, ApplicationHost.Current.ImprovementDialogs)
 		{
 			LanguageManager.Instance.Load(GlobalOptions.Instance.Language, null);
 		}

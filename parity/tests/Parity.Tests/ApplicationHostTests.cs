@@ -53,5 +53,14 @@ public sealed class ApplicationHostTests
         public void Exit() => Calls.Add(nameof(Exit));
 
         public void TranslateControls(object objObject) => Calls.Add(nameof(TranslateControls));
+
+        public IImprovementDialogs ImprovementDialogs
+        {
+            get
+            {
+                Calls.Add(nameof(ImprovementDialogs));
+                throw new InvalidOperationException("This test asks for no selection.");
+            }
+        }
     }
 }
