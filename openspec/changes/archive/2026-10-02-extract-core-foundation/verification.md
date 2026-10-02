@@ -83,6 +83,10 @@ Visual, per case (compare status 0, `clear`, 0 discrepancies in 0 groups for eve
 
 Triage found 0 discrepancies in 0 clusters and 0 other findings, so diagnosis, repair and widening had nothing to do (`Diagnosis: 0 clusters`, `Repair: 0 clusters`, `Widening: 0 attempts, 0 promoted, 0 rejected; no accepted branch`). The moves caused no regression in the captured windows, so no fix change was archived and no benchmark item was added.
 
+## Archive
+
+`npx openspec archive extract-core-foundation --yes` printed `Specs updated successfully.` and `Change 'extract-core-foundation' archived as '2026-10-02-extract-core-foundation'.`; the new `openspec/specs/core-library/spec.md` got its purpose, and `npm run openspec:validate` then printed `Totals: 13 passed, 0 failed (13 items)`.
+
 ## Unverified
 
 - The workflow's diagnosis, repair and widening did not run on a cluster in this change: the live run found no discrepancy, and no regression was provoked on purpose. Their handling of `Core/` (snapshot, compiled identity, guard, plans, widened source, accepted branch), the refusal of a source without `Core/` and the new prompt texts are covered by unit tests only; no model saw the new prompts, and the loop's outcome on a regression in the library is unproven.
