@@ -1,0 +1,14 @@
+# Tasks
+
+## 1. Library and moves
+
+- [ ] 1.1 Add `Core/Core.csproj` with `IApplicationHost`, `ApplicationHost` and `IMainForm`; reference it from the app and the solution; register `WinFormsApplicationHost` first in `Program.Main`; make `frmMain` implement `IMainForm`; keep the library's intermediate files below the candidate build's own. Evidence: `npm run build:candidate` builds with `ChummerGenSR4.Core.dll` beside the executable; a build from a source copy outside the repository writes nothing into the copy; the library references only `mscorlib`, `System`, `System.Core` and `System.Xml`; `npm run parity:test` passes a test that the library throws without a registered host and refuses a second one.
+- [ ] 1.2 Make the workflow's compiled source `Chummer/` and `Core/` (source identity, snapshot, patch guard, plan validation, widened source, accepted branch, prompts with new versions) and describe it in `AGENTS.md`. Evidence: `npm run workflow:typecheck` and `npm run workflow:test` pass, with tests for a change under `Core/` in each of these places and for a source without `Core/`.
+- [ ] 1.3 Move the Windows Forms sorters into `Chummer/Sorters.cs`, then move `clsListItems.cs` to `Core/ListItems.cs`. Evidence: the move commit's rename has at least 90% similarity; the candidate builds; the type listing shows `ListItem` and `SortListItem` only in the library and the sorters only in the executable.
+- [ ] 1.4 In place, route the Windows Forms calls of `LanguageManager`, `XmlManager` and the options through `IApplicationHost` and `IMainForm`, move the control translation into `ControlTranslator`, and move the grade lists from `GlobalOptions` onto `GradeList`. Evidence: the candidate builds after each step; no file among the three uses a Windows Forms type besides its `using` line, and none names `GradeList`.
+- [ ] 1.5 Move `clsLanguageManager.cs`, `clsXmlManager.cs` and `clsOptions.cs` to `Core/`. Evidence: each rename of the move commit has at least 90% similarity; the candidate builds; the type listing of the executable and the library equals the previous source's types plus the new ones, each once, with the moved types in the library.
+
+## 2. Verification and archive
+
+- [ ] 2.1 Run `npm start` live over the whole case suite on the final source with diagnosis, repair and widening, and a deliberate kill and resume. Record in `verification.md` the canonical SHA-256 before and after, each case's execution outcome (capture status, coverage, where the canonical side came from) apart from its visual result and the compare report's completeness, each discrepancy cluster with the loop's outcome, the thread's outcome, the fixture-tested checks of tasks 1.1 to 1.5 apart from the live evidence, and what remains unverified.
+- [ ] 2.2 Archive the change with `openspec archive extract-core-foundation`. Evidence: `npm run openspec:validate` passes after the archive, recorded in `verification.md`.
