@@ -12,4 +12,4 @@
 ## 2. Verification and archive
 
 - [x] 2.1 Run `npm start` live with seeded discrepancies on a reduced case file, with and without `--fix-changes` on the same seeds, one of them with a fix change of an earlier seed in the fixes archive and one with a kill and a resume, and compare the threads with `compare-threads`. Record in `verification.md` the canonical hash before and after each run, each case's execution outcome apart from its visual result, each thread's outcome and measures, the fix change written, the priors retrieved, the comparison with its intervals and whether it showed an improvement, fixture-tested scope apart from live evidence, and what remains unverified.
-- [ ] 2.2 Archive the change with `openspec archive adopt-openspec-fix-changes`. Evidence: `npm run openspec:validate` passes after the archive, recorded in `verification.md`.
+- [x] 2.2 Archive the change with `openspec archive adopt-openspec-fix-changes`. Evidence: `npm run openspec:validate` passes after the archive, recorded in `verification.md`.
