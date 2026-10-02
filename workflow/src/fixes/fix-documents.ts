@@ -34,12 +34,12 @@ export function renderProposal(record: FixRecord): string {
     "",
     inline(record.plan.summary),
     "",
-    ...record.patch.files.map((file) => `- ${code(file.path)} ${file.change}, ${file.added} lines added, ${file.removed} removed`),
+    ...record.patch.files.map((file) => `- ${code(file.path)} ${file.change}, ${file.added} ${file.added === 1 ? "line" : "lines"} added, ${file.removed} removed`),
     "",
     "## Discrepancy",
     "",
-    `- Cluster ${code(cluster.id)}, image hash ${code(cluster.imageHash)}, ${cluster.members} members in the cases ${cluster.cases.map(code).join(", ")} `
-      + `and the captures ${cluster.captures.map(code).join(", ")}.`,
+    `- Cluster ${code(cluster.id)}, image hash ${code(cluster.imageHash)}, ${cluster.members} ${cluster.members === 1 ? "member" : "members"} `
+      + `in ${cluster.cases.length === 1 ? "the case" : "the cases"} ${cluster.cases.map(code).join(", ")} and ${cluster.captures.length === 1 ? "the capture" : "the captures"} ${cluster.captures.map(code).join(", ")}.`,
     ...record.members.map((member) => `- ${code(`${member.case}/${member.capture}`)}: change core at (${member.core.x}, ${member.core.y}), `
       + `${member.core.width} x ${member.core.height}, ${member.differingPixels} differing pixels; OCR canonical ${inline(member.canonicalOcr)}, candidate ${inline(member.candidateOcr)}.`),
     "",

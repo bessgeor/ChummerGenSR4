@@ -21,6 +21,8 @@ test("the artifacts are rendered from the record", () => {
   ok(proposal.includes("`build-Diego/common`: change core at (640, 32), 12 x 14, 96 differing pixels; OCR canonical \"Source: 'Core'\""));
   ok(proposal.includes("- Challenge (record `wf-20261002T100000Z-1a2b3c4d/d-00000000000000aa/challenge/1`): no_alternative"));
   ok(proposal.includes("  - `build-rigger/common` differs"));
+  ok(proposal.includes("1 member in the case `build-Diego` and the capture `common`."));
+  ok(proposal.includes("- `Chummer/frmCreate.Designer.cs` modified, 1 line added, 1 removed"));
   equal(renderTasks(record).split("\n").filter((line) => line.startsWith("- [x] 1.1 \"Restore the label's location\". Files: `Chummer/frmCreate.Designer.cs`. Blocked by: none.")).length, 1);
   const verification = renderVerification(record);
   ok(verification.includes("- run `20261002T101000Z-0000bbbb`: execution status 0, coverage valid, 0 failures; visual 1 passed, 0 failed."));
