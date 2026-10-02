@@ -1,0 +1,34 @@
+<Project TreatAsLocalProperty="BaseIntermediateOutputPath">
+  <!-- An intermediate folder given on the command line reaches every project of the build; this one keeps its own below it. -->
+  <PropertyGroup Condition="'$(BaseIntermediateOutputPath)' != ''">
+    <BaseIntermediateOutputPath>$(BaseIntermediateOutputPath)Core\</BaseIntermediateOutputPath>
+  </PropertyGroup>
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net481</TargetFramework>
+    <RootNamespace>Chummer</RootNamespace>
+    <AssemblyName>ChummerGenSR4.Core</AssemblyName>
+    <WarningLevel>4</WarningLevel>
+    <!-- Only the assemblies listed below, so that no Windows Forms or drawing type can be used here. -->
+    <DisableImplicitFrameworkReferences>true</DisableImplicitFrameworkReferences>
+    <DefaultItemExcludes>$(DefaultItemExcludes);obj\**;bin\**</DefaultItemExcludes>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+    <DebugType>full</DebugType>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>pdbonly</DebugType>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- The net481 reference assemblies come from this package, so no Developer Pack is needed. -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="mscorlib" />
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Xml" />
+  </ItemGroup>
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
+</Project>
