@@ -2,10 +2,10 @@ schema: spec-driven
 
 context: |
   ChummerGenSR4 is a legacy character generator for Shadowrun 4th Edition:
-  a Windows Forms desktop app on .NET Framework (Chummer/). It stays on
-  .NET Framework; net481 is its target once its build is modernized. The app
-  builds into bin/, which also holds tracked game data, translations,
-  settings, print sheets and sample saves.
+  a Windows Forms desktop app on .NET Framework (Chummer/), built from an
+  SDK-style project that targets net481. The app builds into bin/, which
+  also holds tracked game data, translations, settings, print sheets and
+  sample saves.
 
   The tracked build bin/ChummerGenSR4.exe is the reference for correct
   behavior and is never modified. The code is modernized in small steps:
