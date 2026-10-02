@@ -11,4 +11,4 @@
 ## 2. Verification and archive
 
 - [x] 2.1 Run `npm start` live over the whole case suite on the final source with diagnosis, repair and widening, ended once on purpose and resumed; if the run cannot be ended, record that and why. Record in `verification.md` the canonical SHA-256 before and after, each case's execution outcome (capture status, coverage, where the canonical side came from) apart from its visual result and the compare report's completeness, each discrepancy cluster with the loop's outcome, the thread's outcome, the fixture-tested checks of tasks 1.1 to 1.5 apart from the live evidence, and what remains unverified.
-- [ ] 2.2 Archive the change with `openspec archive extract-core-improvements`. Evidence: `npm run openspec:validate` passes after the archive, recorded in `verification.md`.
+- [x] 2.2 Archive the change with `openspec archive extract-core-improvements`. Evidence: `npm run openspec:validate` passes after the archive, recorded in `verification.md`.

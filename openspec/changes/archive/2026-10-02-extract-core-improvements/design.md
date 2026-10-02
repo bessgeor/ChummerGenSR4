@@ -45,7 +45,7 @@ It also reads `LanguageManager`, `GlobalOptions` and `XmlManager`, which the lib
 - **A selection window configured differently.** A wrong description, a missing forced value or a different list order would change what the user picks from. Mitigation: each dialogs method is the former block with the manager's fields replaced by its parameters, in the same order; the in-place commit is reviewed as that one-to-one replacement before the move.
 - **No case opens a selection window.** The capture cases open saved characters, whose improvements are loaded from the file, so the live run does not create improvements through a selection. Mitigation: unit tests run the moved manager's selections with test dialogs (the forced and cancelled paths, the rollback, removal and the flags) and its value arithmetic; the windows themselves remain unverified live.
 - **A value read differently on a machine with a decimal comma.** Formatting the result of an expression in `en-US` changes the value of a fractional result on such machines (15 before, the rounded-down value now). Mitigation: a unit test runs a fractional value on a thread with a Russian culture; the capture machine uses `en-US`, so the live run does not show the change.
-- **The character interface grows with the manager.** It names exactly what the manager uses today; a new use would add a member. It names exactly what the manager uses today; a new use would add a member.
+- **The character interface grows with the manager.** It names exactly what the manager uses today; a new use would add a member.
 
 ## Verification
 

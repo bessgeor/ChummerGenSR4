@@ -20,11 +20,11 @@ The checks and the live evidence were collected on the final source: its `Chumme
 Every build went through `parity/scripts/build-candidate.mjs`, which printed `Canonical SHA-256 before` and `after` as `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56` each time.
 
 - Interfaces (task 1.1): after adding `IImprovementCharacter` with its three views, `IImprovementDialogs` with `MentorSpiritSelection`, `WinFormsImprovementDialogs`, the implementations on `Character`, `Attribute`, `Skill` and `Weapon` and `Character.ConvertAdapsinGrades`, `npm run build:candidate` printed `Core -> …\ChummerGenSR4.Core.dll` and `Chummer -> …\ChummerGenSR4.exe` with no error.
-- In place (task 1.2): the candidate built after the manager was routed through the interfaces. The search, on the in-place commit of `Chummer/clsImprovement.cs` (`3a21dd0`):
+- In place (task 1.2): the candidate built after the manager was routed through the interfaces. The search, on the in-place commit of `Chummer/clsImprovement.cs` (`8b71c3c`):
 
   ```powershell
-  git show 3a21dd0:Chummer/clsImprovement.cs | Select-String -Pattern 'frm[A-Za-z]+|DialogResult|Opacity|MessageBox|\bCharacter\b|\bSkill\b|\bWeapon\b|Cyberware|GradeList|System\.Windows'
-  git show 3a21dd0:Chummer/clsImprovement.cs | Select-String -Pattern 'WinForms'
+  git show 8b71c3c:Chummer/clsImprovement.cs | Select-String -Pattern 'frm[A-Za-z]+|DialogResult|Opacity|MessageBox|\bCharacter\b|\bSkill\b|\bWeapon\b|Cyberware|GradeList|System\.Windows'
+  git show 8b71c3c:Chummer/clsImprovement.cs | Select-String -Pattern 'WinForms'
   ```
 
   The first printed no form name, no `DialogResult`, `Opacity`, `MessageBox` or `GradeList`, and no `System.Windows` besides line 4, `using System.Windows.Forms;`; its other matches are enumeration members and strings (`Skill = 0`, `Cyberware = 3`, `"Exotic Melee Weapon"`, `ImprovementType.CyberwareEssCost`) and words in comments and documentation. The second printed only the constructor's `new WinFormsImprovementDialogs()`.
