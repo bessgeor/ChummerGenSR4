@@ -39,6 +39,109 @@ public sealed class AppAdaptersTests
     }
 
     [Fact]
+    public void A_tree_node_view_creates_nodes_in_no_tree_and_adds_them_as_its_last_children()
+    {
+        TreeNode node = new("Armor");
+        node.Nodes.Add(new TreeNode("Existing"));
+        TreeNodeView view = new(node);
+
+        TreeNodeView first = Assert.IsType<TreeNodeView>(view.NewNode());
+        TreeNodeView second = Assert.IsType<TreeNodeView>(view.NewNode());
+
+        Assert.Null(first.Node.Parent);
+        Assert.NotSame(first.Node, second.Node);
+        Assert.Equal("", first.Text);
+        Assert.Null(first.Tag);
+        Assert.Equal(Color.Empty, first.Node.ForeColor);
+        Assert.Single(node.Nodes);
+
+        first.Text = "Gel Packs";
+        view.Add(first);
+        view.Add(second);
+
+        Assert.Equal(["Existing", "Gel Packs", ""], node.Nodes.Cast<TreeNode>().Select(child => child.Text));
+        Assert.Same(node, first.Node.Parent);
+    }
+
+    [Fact]
+    public void A_tree_node_view_adds_only_tree_node_views()
+    {
+        TreeNodeView view = new(new TreeNode("Armor"));
+
+        Assert.Throws<InvalidCastException>(() => view.Add(new TestTreeNode()));
+        Assert.Empty(view.Node.Nodes);
+    }
+
+    [Fact]
+    public void A_tree_node_view_expands_its_node()
+    {
+        TreeNode node = new("Armor");
+        node.Nodes.Add(new TreeNode("Mod"));
+        ITreeNodeView view = new TreeNodeView(node);
+        Assert.False(node.IsExpanded);
+
+        view.Expand();
+
+        Assert.True(node.IsExpanded);
+    }
+
+    [Fact]
+    public void Granted_weapon_lists_add_the_node_and_then_the_weapon()
+    {
+        List<TestWeapon> weapons = [];
+        List<TreeNode> nodes = [];
+        Action<IEquipmentWeapon, ITreeNodeView> addWeapon = GrantedWeaponLists.Add(weapons, nodes);
+        TestWeapon spur = new("Spur");
+        TestWeapon blade = new("Hand Blade");
+        TreeNode spurNode = new("Spur");
+        TreeNode bladeNode = new("Hand Blade");
+
+        addWeapon(spur, new TreeNodeView(spurNode));
+        addWeapon(blade, new TreeNodeView(bladeNode));
+
+        Assert.Equal([spur, blade], weapons);
+        Assert.Equal([spurNode, bladeNode], nodes);
+    }
+
+    [Fact]
+    public void Granted_weapon_lists_that_are_missing_fail_when_a_weapon_is_added_as_before()
+    {
+        Action<IEquipmentWeapon, ITreeNodeView> addWeapon = GrantedWeaponLists.Add<TestWeapon>(null!, null!);
+
+        Assert.Throws<NullReferenceException>(() => addWeapon(new TestWeapon("Spur"), new TreeNodeView(new TreeNode())));
+    }
+
+    [Fact]
+    public void Granted_weapon_lists_take_only_tree_node_views_and_weapons_of_their_type()
+    {
+        List<TestWeapon> weapons = [];
+        List<TreeNode> nodes = [];
+        Action<IEquipmentWeapon, ITreeNodeView> addWeapon = GrantedWeaponLists.Add(weapons, nodes);
+
+        Assert.Throws<InvalidCastException>(() => addWeapon(new TestWeapon("Spur"), new TestTreeNode()));
+        Assert.Empty(nodes);
+        Assert.Throws<InvalidCastException>(() => addWeapon(new OtherWeapon(), new TreeNodeView(new TreeNode())));
+        Assert.Single(nodes);
+        Assert.Empty(weapons);
+    }
+
+    [Fact]
+    public void Included_armor_mods_get_a_new_node_with_the_context_menu_in_a_tree_node_view()
+    {
+        using ContextMenuStrip menu = new();
+        Func<ITreeNodeView> createNode = ArmorModNodes.Create(menu);
+
+        TreeNodeView first = Assert.IsType<TreeNodeView>(createNode());
+        TreeNodeView second = Assert.IsType<TreeNodeView>(createNode());
+
+        Assert.NotSame(first.Node, second.Node);
+        Assert.Same(menu, first.Node.ContextMenuStrip);
+        Assert.Same(menu, second.Node.ContextMenuStrip);
+        Assert.Null(first.Node.Parent);
+        Assert.Equal("", first.Text);
+    }
+
+    [Fact]
     public void A_contact_without_a_colour_gives_the_empty_colour()
     {
         Contact contact = new(new TestItemCharacter());

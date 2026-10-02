@@ -31,6 +31,9 @@
     <Compile Include="..\..\..\Chummer\TreeNodeView.cs" Link="App\TreeNodeView.cs" />
     <Compile Include="..\..\..\Chummer\ContactColour.cs" Link="App\ContactColour.cs" />
     <Compile Include="..\..\..\Chummer\WeaponNodeFunction.cs" Link="App\WeaponNodeFunction.cs" />
+    <Compile Include="..\..\..\Chummer\GrantedWeaponLists.cs" Link="App\GrantedWeaponLists.cs" />
+    <Compile Include="..\..\..\Chummer\ArmorModNodes.cs" Link="App\ArmorModNodes.cs" />
+    <Compile Include="..\..\..\Chummer\AppArguments.cs" Link="App\AppArguments.cs" />
   </ItemGroup>
 
   <ItemGroup>
