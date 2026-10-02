@@ -10,6 +10,7 @@ import { planCases } from "./cases/case-plan.js";
 import { hostCheckCapture } from "./diagnosis/check-capture.js";
 import { DiagnosisService } from "./diagnosis/diagnosis-service.js";
 import { unattendedProblems } from "./evals/certificate.js";
+import { fixesRootOf, openSpecArchiver, processOpenSpecCli } from "./fixes/fix-archiver.js";
 import { QuotaWaiter } from "./diagnosis/quota-waiter.js";
 import { processGit } from "./diagnosis/source-snapshot.js";
 import { buildWorkflowGraph } from "./graph/workflow-graph.js";
@@ -106,6 +107,7 @@ async function main(): Promise<number> {
   const widening = new WideningService({
     threadFolder: paths.threadFolder, build: hostAttemptBuild(paths, host), capture: hostLevelCapture(paths, host, createScratchFolder),
     allCases: (caseFile) => planCases(caseFile, [], []).cases, git: processBranchGit(repositoryRoot), now, log,
+    fixes: { root: fixesRootOf(repositoryRoot), archive: openSpecArchiver(processOpenSpecCli(repositoryRoot)) },
     inputs: {
       environment: (signal) => readEnvironmentFingerprint(paths, host, createScratchFolder, "environment widening", signal),
       // The levels run widened builds, so the thread's candidate folder is not an input of theirs.

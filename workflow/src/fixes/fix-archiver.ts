@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { SetupError } from "../host/setup-error.js";
 
 /** The repository's fixes root: the folder whose `openspec/` holds the `fix` schema and the archived fix changes. */
@@ -11,6 +11,12 @@ export function fixesRootOf(repositoryRoot: string): string {
 /** Where the archived fix changes of a fixes root are. */
 export function fixArchiveOf(fixesRoot: string): string {
   return join(fixesRoot, "openspec", "changes", "archive");
+}
+
+/** The archive's path inside the repository, with `/` separators: where a fix commit puts an archived fix change. */
+export function fixArchiveInRepository(): string {
+  const repositoryRoot = "repository";
+  return relative(repositoryRoot, fixArchiveOf(fixesRootOf(repositoryRoot))).replaceAll("\\", "/");
 }
 
 export type FixArchiveRequest = {
@@ -35,7 +41,8 @@ export function processOpenSpecCli(repositoryRoot: string): OpenSpecCli {
     if (!existsSync(script)) throw new SetupError(`The OpenSpec CLI is not installed at ${script}; run npm ci.`);
     try {
       return execFileSync(process.execPath, [script, ...args], {
-        cwd, encoding: "utf8", windowsHide: true, maxBuffer: 16 * 1024 * 1024,
+        // Its progress lines go to standard error, which is kept for the failure message only.
+        cwd, encoding: "utf8", windowsHide: true, maxBuffer: 16 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"],
         env: { ...process.env, OPENSPEC_TELEMETRY: "0", OPENSPEC_NO_COMPLETIONS: "1", NO_COLOR: "1" },
       });
     } catch (error) {

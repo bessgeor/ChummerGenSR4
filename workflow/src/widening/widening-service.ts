@@ -1,13 +1,17 @@
-import { rmSync } from "node:fs";
-import { join } from "node:path";
+import { cpSync, existsSync, rmSync } from "node:fs";
+import { basename, join } from "node:path";
 import type { BaseStore } from "@langchain/langgraph-checkpoint";
 import { z } from "zod";
 import type { PlannedCase } from "../cases/case-plan.js";
 import type { ClusterDiagnosis } from "../diagnosis/cluster-diagnosis.js";
 import { readSealedManifest } from "../diagnosis/diagnosis-service.js";
 import { setLabels } from "../evals/eval-record.js";
+import { fixArchiveInRepository, type FixChangeArchiver } from "../fixes/fix-archiver.js";
+import { fixChangeFiles } from "../fixes/fix-documents.js";
+import { fixLevel } from "../fixes/fix-draft.js";
+import { FixRecordSchema } from "../fixes/fix-record.js";
 import { SetupError } from "../host/setup-error.js";
-import type { RunOptions } from "../options/run-options.js";
+import { usesFixChanges, type RunOptions } from "../options/run-options.js";
 import { judgeNarrowCheck, type AttemptBuild } from "../repair/attempt-host.js";
 import type { CheckExecution, ClusterRepair } from "../repair/cluster-repair.js";
 import { requireCoveredCases } from "../steps/capture-step.js";
@@ -29,6 +33,8 @@ export type WideningDependencies = {
   /** Every case of a case file. */
   readonly allCases: (caseFile: string) => readonly PlannedCase[];
   readonly git: BranchGit;
+  /** The repository's fixes root and the archiver that turns a promoted attempt's fix record into an archived fix change. */
+  readonly fixes: { readonly root: string; readonly archive: FixChangeArchiver };
   readonly now: () => Date;
   readonly log: (line: string) => void;
   /** What the pixels of a level or baseline capture depend on besides the executable. */
@@ -70,6 +76,9 @@ export type WideningInput = {
 export type WideningStep = { readonly update: WideningUpdate; readonly accepted: AcceptedState | null };
 
 const executable = (build: string) => join(build, "bin", "ChummerGenSR4.exe");
+
+/** Where a fix commit holds its archived fix change, relative to the repository. */
+const fixArchiveFolder = fixArchiveInRepository();
 
 /** What widening reads from a repair archive's `attempt.json`. */
 const ArchivedAttemptSchema = z.object({
@@ -258,9 +267,12 @@ export class WideningService {
     if (widening.status !== "verified") throw new Error(`Widening ${widening.clusterId} is ${widening.status}, not verified.`);
     const attempt = readAttempt(widening.archive);
     const branch = new AcceptedBranch(this.dependencies.git, input.threadId, join(widening.folder, "promote.index"));
+    // A promotion committed before an interruption is taken as it is; nothing is archived again.
+    const alsoCommitted = usesFixChanges(input.options) && !branch.promotedRecord(widening.recordId) ? [this.archiveFixChange(widening)] : [];
     const commit = promote({
       branch, base: accepted.base, accepted: accepted.commit, snapshotFolder: join(this.dependencies.threadFolder(input.threadId), "diagnosis", "source"),
       widenedSource: join(widening.folder, "source"), trailers: { thread: input.threadId, cluster: widening.clusterId, record: widening.recordId }, summary: attempt.answer.summary,
+      alsoCommitted,
     });
     // The rollback step removes the folders, so a promotion interrupted before its checkpoint can be repeated.
     if (commit === null) return this.failed(widening, "promote", "the widened source stages the same tree as the accepted source, so there is nothing to commit", false);
@@ -269,6 +281,23 @@ export class WideningService {
       baselineRuns: widening.levels.flatMap((level) => (level.run === null ? [] : [level.run.runFolder])), promoted: [...accepted.promoted, widening.clusterId],
     };
     return this.end({ ...widening, status: "promoted", commit }, store, next);
+  }
+
+  /**
+   * Completes the fix change the attempt's repair drafted with the widening's levels, archives it through the OpenSpec
+   * CLI and copies the archived change into the widened source; returns its path there, which the fix commit holds.
+   */
+  private archiveFixChange(widening: ClusterWidening): string {
+    const draftPath = join(widening.archive, "fix", "fix.json");
+    if (!existsSync(draftPath)) throw new SetupError(`The passed attempt ${widening.archive} has no fix change draft (fix/fix.json), which a thread with fix changes needs to promote it.`);
+    const record = FixRecordSchema.parse({ ...readDocument(draftPath, FixRecordSchema), widening: widening.levels.map(fixLevel) });
+    const archived = this.dependencies.fixes.archive({ fixesRoot: this.dependencies.fixes.root, staging: join(widening.folder, "fix-change"), name: record.name, files: fixChangeFiles(record) });
+    const path = `${fixArchiveFolder}/${basename(archived)}`;
+    const target = join(widening.folder, "source", path);
+    rmSync(target, { recursive: true, force: true });
+    cpSync(archived, target, { recursive: true });
+    this.dependencies.log(`widen ${widening.clusterId}: fix change ${basename(archived)} archived for the fix commit.`);
+    return path;
   }
 
   /** Discards a failed widening's candidate; the accepted branch is not touched. */

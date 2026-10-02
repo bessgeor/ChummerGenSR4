@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { test } from "node:test";
 import { fixChangeFiles, renderProposal, renderTasks, renderVerification } from "../src/fixes/fix-documents.js";
-import { fixesRootOf, openSpecArchiver, processOpenSpecCli, type OpenSpecCli } from "../src/fixes/fix-archiver.js";
+import { fixArchiveInRepository, fixArchiveOf, fixesRootOf, openSpecArchiver, processOpenSpecCli, type OpenSpecCli } from "../src/fixes/fix-archiver.js";
 import { fixChangeName, FixRecordSchema } from "../src/fixes/fix-record.js";
 import { SetupError } from "../src/host/setup-error.js";
 import { scratch } from "./diagnosis-fixtures.js";
@@ -94,6 +94,12 @@ test("a CLI failure is a setup error with the CLI's output, and nothing is archi
   throws(() => openSpecArchiver(cli)({ fixesRoot: fixesRootOf(repositoryRoot), staging, name: record.name, files: fixChangeFiles(record) }), /proposal is invalid/);
   deepStrictEqual(calls, ["new", "validate"]);
   throws(() => real(["validate", "no-such-change", "--strict", "--no-interactive"], staging), (error: Error) => error instanceof SetupError && /exit 1/.test(error.message));
+});
+
+test("a fix commit puts an archived change where retrieval reads the archive", () => {
+  const root = "repository";
+  equal(fixArchiveInRepository(), "fixes/openspec/changes/archive");
+  equal(join(root, fixArchiveInRepository()), fixArchiveOf(fixesRootOf(root)));
 });
 
 test("a fixes root without the schema is a setup error", () => {

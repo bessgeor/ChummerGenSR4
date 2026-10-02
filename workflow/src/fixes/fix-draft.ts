@@ -6,7 +6,8 @@ import type { CheckExecution } from "../repair/cluster-repair.js";
 import type { Patch } from "../repair/patch.js";
 import type { PlannedWork } from "../repair/planned-attempt.js";
 import { renderProposal, renderTasks } from "./fix-documents.js";
-import { fixChangeName, FixRecordSchema, type FixRecord, type FixRun } from "./fix-record.js";
+import type { LevelResult } from "../widening/cluster-widening.js";
+import { fixChangeName, FixRecordSchema, type FixLevel, type FixRecord, type FixRun } from "./fix-record.js";
 
 /** A capture run's execution and visual counts, with the run folder by its name. */
 export function fixRun(execution: CheckExecution): FixRun {
@@ -70,6 +71,15 @@ export function draftFixRecord(input: DraftInput): FixRecord {
     narrowCheck: fixRun(input.narrowCheck),
     widening: null,
   });
+}
+
+/** A widening level as its fix change records it. */
+export function fixLevel(level: LevelResult): FixLevel {
+  return {
+    level: level.level, cases: [...level.cases], captures: level.captures === null ? null : [...level.captures],
+    run: level.run === null ? null : fixRun(level.run), baseline: level.baseline === null ? null : fixRun(level.baseline), outcome: level.outcome,
+    findings: level.findings.map((finding) => ({ case: finding.case, capture: finding.capture, attribution: finding.attribution, difference: finding.difference, detail: finding.detail })),
+  };
 }
 
 /** The draft's files in a passed attempt's archive, under `fix/`: the record and the two artifacts repair can write. */
