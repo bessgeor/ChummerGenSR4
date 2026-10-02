@@ -120,6 +120,10 @@ Every one of these runs had capture coverage valid with 0 failures. With only le
 
 Thread `wf-20261002T100613Z-219e15cf`, 24.5 min, exit 2: 9 cases clean; `career-Шпала - карьера` had one failed row (`character-info`, the selected tab's caption not painted; cluster `d-decdfb78d6068d99`, hypothesis a capture before the repaint, check `confirmed` for non-recurrence, both repair attempts `no_plan`, `Loop d-decdfb78d6068d99: repair_rejected after 2 attempts`); three cases had capture status 2 from outside the app (the pointer moved during a side twice, and a `BlueSoleil Warning` window took the foreground). The four affected cases passed when run again once to classify them (thread `wf-20261002T103258Z-63f3d186`, `verified_for_scope`). The caption was a repaint race of the capture that did not recur in this change's whole-suite run above.
 
+## Archive
+
+`npx openspec archive modernize-chummer-build --yes` printed `Specs updated successfully.` and `Change 'modernize-chummer-build' archived as '2026-10-02-modernize-chummer-build'.`; the new `openspec/specs/chummer-build/spec.md` got its purpose, and `npm run openspec:validate` then printed `Totals: 12 passed, 0 failed (12 items)`.
+
 ## Unverified
 
 - The regression of the SDK conversion was not resolved by the loop and has no archived fix change (see the deviation above); the hand-written fix is covered by the whole-suite run and the repeated facemage runs, and by the benchmark item.

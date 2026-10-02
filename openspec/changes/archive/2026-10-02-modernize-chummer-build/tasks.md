@@ -10,4 +10,4 @@
 ## 2. Verification and archive
 
 - [x] 2.1 Run `npm start` live over the whole case suite on the final source, with a deliberate kill and resume of the run, and the workflow's diagnosis, repair and widening applied to whatever it reports. Record in `verification.md` the canonical SHA-256 before and after, each case's execution outcome (capture status, coverage, where the canonical side came from) apart from its visual result and the compare report's completeness, each discrepancy cluster with the loop's outcome for it, the thread's outcome, the build and metadata checks of tasks 1.1 and 1.2 as fixture-tested scope apart from the live evidence, and what remains unverified.
-- [ ] 2.2 Archive the change with `openspec archive modernize-chummer-build`. Evidence: `npm run openspec:validate` passes after the archive, recorded in `verification.md`.
+- [x] 2.2 Archive the change with `openspec archive modernize-chummer-build`. Evidence: `npm run openspec:validate` passes after the archive, recorded in `verification.md`.
