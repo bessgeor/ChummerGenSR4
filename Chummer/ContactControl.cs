@@ -170,7 +170,7 @@ namespace Chummer
 			frmPickContactConnection.MagicalResources = _objContact.MagicalResources;
 			frmPickContactConnection.MatrixResources = _objContact.MatrixResources;
 			frmPickContactConnection.GroupName = _objContact.GroupName;
-			frmPickContactConnection.Colour = _objContact.Colour;
+			frmPickContactConnection.Colour = _objContact.GetColour();
 			frmPickContactConnection.Free = _objContact.Free;
 			frmPickContactConnection.ShowDialog(this);
 
@@ -183,12 +183,12 @@ namespace Chummer
 			_objContact.MagicalResources = frmPickContactConnection.MagicalResources;
 			_objContact.MatrixResources = frmPickContactConnection.MatrixResources;
 			_objContact.GroupName = frmPickContactConnection.GroupName;
-			_objContact.Colour = frmPickContactConnection.Colour;
+			_objContact.SetColour(frmPickContactConnection.Colour);
 			_objContact.Free = frmPickContactConnection.Free;
 			lblGroup.Text = (_objContact.Membership + _objContact.AreaOfInfluence + _objContact.MagicalResources + _objContact.MatrixResources).ToString();
 
-			if (_objContact.Colour.Name != "White" && _objContact.Colour.Name != "Black")
-				this.BackColor = _objContact.Colour;
+			if (_objContact.GetColour().Name != "White" && _objContact.GetColour().Name != "Black")
+				this.BackColor = _objContact.GetColour();
 			else
 				this.BackColor = SystemColors.Control;
 
