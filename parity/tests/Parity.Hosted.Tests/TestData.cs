@@ -5,6 +5,28 @@ namespace Parity.Hosted.Tests;
 /// </summary>
 internal static class TestData
 {
+    public const string Language = """
+        <chummer>
+          <strings>
+            <string><key>Message_IncorrectGameVersion_SR5</key><text>Test incorrect game version</text></string>
+            <string><key>MessageTitle_IncorrectGameVersion</key><text>Test incorrect game version caption</text></string>
+          </strings>
+        </chummer>
+        """;
+
+    // No skills: a character without them saves, loads and prints.
+    public const string Skills = "<chummer><skillgroups /><skills /></chummer>";
+
+    public const string Metatypes = "<chummer><metatypes><metatype><name>Human</name><category>Metahuman</category><movement>10/25</movement></metatype></metatypes></chummer>";
+
+    public const string Qualities = """
+        <chummer>
+          <qualities>
+            <quality><name>Test Claws Quality</name><bp>5</bp><category>Positive</category><source>SR4</source><page>8</page><addweapon>Test Claws</addweapon></quality>
+          </qualities>
+        </chummer>
+        """;
+
     public const string Weapons = """
         <chummer>
           <accessories>
@@ -28,6 +50,10 @@ internal static class TestData
               <underbarrel>Test Launcher</underbarrel>
               <accessories><accessory>Test Scope</accessory></accessories>
               <mods><mod>Test Stock</mod></mods>
+            </weapon>
+            <weapon>
+              <name>Test Claws</name><category>Quality Weapons</category><type>Melee</type><reach>0</reach><damage>(STR/2+1)P</damage><ap>0</ap>
+              <mode>0</mode><rc>0</rc><ammo>0</ammo><avail>0</avail><cost>0</cost><source>SR4</source><page>8</page>
             </weapon>
             <weapon>
               <name>Test Grenade</name><category>Gear</category><type>Ranged</type><reach>0</reach><damage>10P</damage><ap>-1</ap>
