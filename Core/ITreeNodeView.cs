@@ -28,7 +28,7 @@ namespace Chummer
 		ITreeNodeView NewNode();
 
 		/// <summary>
-		/// Add a node as the last child of this one. The node must come from NewNode of a node of the same kind.
+		/// Add a node as the last child of this one. The node must be of the same kind: from NewNode, or from a function that the item was given to create its child nodes.
 		/// </summary>
 		/// <param name="objChild">Node to add.</param>
 		void Add(ITreeNodeView objChild);
