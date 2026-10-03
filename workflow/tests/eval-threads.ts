@@ -52,7 +52,7 @@ export async function twoThreads(options: { priors?: boolean } = {}) {
   return { root, store, input, lines, threads: [first.threadId(), second.threadId()] };
 }
 
-/** A run folder with the given settings and `repeat` samples per value (the value of both metrics; null: no gold). */
+/** A run folder with the given settings and `repeat` samples per value (the value of both metrics of its job kind; null: no gold). */
 export function writeRun(folder: string, settings: Partial<RunSettings>, values: readonly (boolean | null)[], repeat = 1): void {
   mkdirSync(runFolders(folder).samples, { recursive: true });
   const repetitions = Array.from({ length: repeat }, (_, index) => index + 1);
@@ -68,7 +68,10 @@ export function writeRun(folder: string, settings: Partial<RunSettings>, values:
       const key = `i${index}-${repetition}`;
       const sample: Sample = {
         key, itemId: `i${index}`, clusterId: "d", repetition, recordId: "r", status: "succeeded", message: null, output: null,
-        prediction: value ?? false, rootCause: value, durationMs: 1000 * (index + 1), costUsd: index === 0 ? null : 0.1,
+        ...(full.jobKind === "rank" || full.jobKind === "scenario"
+          ? { prediction: null, rootCause: null, valid: value ?? false, reached: value }
+          : { prediction: value ?? false, rootCause: value, valid: null, reached: null }),
+        durationMs: 1000 * (index + 1), costUsd: index === 0 ? null : 0.1,
       };
       writeFileSync(runFolders(folder).sample(key), JSON.stringify(sample));
     }

@@ -1,72 +1,38 @@
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { BaseStore } from "@langchain/langgraph-checkpoint";
 import { z } from "zod";
-import { efforts, jobKinds, providers, wasNotStarted, type AgentChoice, type AgentResult, type AgentRunner, type JobKind } from "../agents/agent-job.js";
+import { jobKinds, type AgentChoice, type JobKind } from "../agents/agent-job.js";
 import type { AgentSettings } from "../agents/agent-settings.js";
-import { compiledFoldersIn } from "../compiled-source.js";
 import type { ContextManifest } from "../diagnosis/context.js";
-import {
-  ChallengeOutputSchema, challengePromptVersion, HypothesisOutputSchema, hypothesisPromptVersion, type ChallengeOutput, type HypothesisOutput,
-} from "../diagnosis/job-schemas.js";
-import { stageJobFolder } from "../diagnosis/job-folder.js";
-import { rankPromptVersion, scenarioPromptVersion } from "../discovery/job-schemas.js";
+import { ChallengeOutputSchema, HypothesisOutputSchema, type ChallengeOutput, type HypothesisOutput } from "../diagnosis/job-schemas.js";
 import { challengePrompt, hypothesisPrompt, withoutPriors } from "../diagnosis/prompts.js";
-import type { QuotaWaiter } from "../diagnosis/quota-waiter.js";
 import { validateChallenge, validateHypothesis } from "../diagnosis/validation.js";
-import { removalFailure, type ScratchFolder } from "../host/scratch-folder.js";
 import { SetupError } from "../host/setup-error.js";
 import { readDocument } from "../steps/read-document.js";
-import { datasetFolders, loadDataset, type Dataset, type DatasetItem } from "./dataset.js";
-import { noLabels, putRecord, recordNamespace } from "./eval-record.js";
+import { datasetFolders, loadDataset, type DatasetItem, type Partition } from "./dataset.js";
+import { loadDiscoveryDataset } from "./discovery-dataset.js";
+import { runDiscoverySample } from "./discovery-eval-run.js";
+import { runEvalSample, verdictText, type EvalJob, type SampleScores } from "./eval-job.js";
+import {
+  evaluatedJobKinds, promptVersions, RunSettingsSchema, SampleSchema, type EvalRunDependencies, type RunPartition, type RunSettings, type Sample, type SampleContext,
+} from "./eval-sample.js";
+import { metrics, metricsOfJobKind, type Metric } from "./metrics.js";
 import { failedScores, scoreChallenge, scoreHypothesis, type Scores } from "./scoring.js";
 import { wilsonInterval } from "./statistics.js";
 
-export const runPartitions = ["test", "development", "all"] as const;
-export type RunPartition = (typeof runPartitions)[number];
-
-/** The job kinds evaluation runs, scores and certifies, with the prompt version the code has for each. */
-export const promptVersions = { hypothesis: hypothesisPromptVersion, challenge: challengePromptVersion, rank: rankPromptVersion, scenario: scenarioPromptVersion } as const;
-export const evaluatedJobKinds = ["hypothesis", "challenge", "rank", "scenario"] as const;
-export type EvaluatedJobKind = (typeof evaluatedJobKinds)[number];
-
-const ChoiceSchema = z.strictObject({ provider: z.enum(providers), model: z.string().nullable(), effort: z.enum(efforts), timeoutMinutes: z.number().positive() });
-
-/** What an eval run was started with; a resumed run keeps it. */
-export const RunSettingsSchema = z.strictObject({
-  schemaVersion: z.literal(1),
-  runId: z.string().min(1),
-  name: z.string().nullable(),
-  dataset: z.strictObject({ folder: z.string(), name: z.string(), version: z.number().int(), hash: z.string() }),
-  jobKind: z.enum(["hypothesis", "challenge"]),
-  partition: z.enum(runPartitions),
-  repeat: z.number().int().positive(),
-  choice: ChoiceSchema,
-  promptVersion: z.string(),
-  modelPool: z.number().int().positive(),
-  executables: z.strictObject({ claude: z.string(), codex: z.string().nullable() }),
-  /** Every sample the run has to finish: `<item>-<repetition>`. */
-  samples: z.array(z.string()).min(1),
-  startedUtc: z.string(),
-});
-export type RunSettings = z.infer<typeof RunSettingsSchema>;
-
-export const SampleSchema = z.strictObject({
-  key: z.string(), itemId: z.string(), clusterId: z.string(), repetition: z.number().int().positive(), recordId: z.string(),
-  status: z.enum(["succeeded", "invalid_output", "refused"]), message: z.string().nullable(), output: z.unknown().nullable(),
-  prediction: z.boolean(), rootCause: z.boolean().nullable(),
-  durationMs: z.number().int().nonnegative(),
-  costUsd: z.number().nonnegative().nullable(),
-});
-export type Sample = z.infer<typeof SampleSchema>;
+export {
+  evaluatedJobKinds, promptVersions, runPartitions, RunSettingsSchema, SampleSchema, type EvaluatedJobKind, type EvalRunDependencies, type RunPartition, type RunSettings, type Sample,
+} from "./eval-sample.js";
 
 /** A metric over the items of a run: `count` items have a value, `passes` is the sum of their pass shares over their repetitions. */
 export type MetricSummary = { readonly passes: number; readonly count: number; readonly rate: number | null; readonly interval: { low: number; high: number } | null };
 
 export type RunSummary = {
   readonly runId: string;
+  readonly jobKind: RunSettings["jobKind"];
   readonly samples: number;
-  readonly metrics: { readonly prediction: MetricSummary; readonly rootCause: MetricSummary };
+  /** Every metric; those the job kind does not score have no items. */
+  readonly metrics: Readonly<Record<Metric, MetricSummary>>;
   readonly failures: { readonly invalid_output: number; readonly refused: number };
   readonly modelMs: number;
   readonly costUsd: number;
@@ -94,10 +60,10 @@ function metric(samples: readonly Sample[], value: (sample: Sample) => boolean |
   return { passes, count: shares.length, rate: shares.length === 0 ? null : passes / shares.length, interval: wilsonInterval(passes, shares.length) };
 }
 
-export function summarize(runId: string, samples: readonly Sample[], finished: Date): RunSummary {
+export function summarize(runId: string, jobKind: RunSettings["jobKind"], samples: readonly Sample[], finished: Date): RunSummary {
   return {
-    runId, samples: samples.length,
-    metrics: { prediction: metric(samples, (sample) => sample.prediction), rootCause: metric(samples, (sample) => sample.rootCause) },
+    runId, jobKind, samples: samples.length,
+    metrics: Object.fromEntries(metrics.map((name) => [name, metric(samples, (sample) => sample[name])])) as Record<Metric, MetricSummary>,
     failures: { invalid_output: samples.filter((sample) => sample.status === "invalid_output").length, refused: samples.filter((sample) => sample.status === "refused").length },
     modelMs: samples.reduce((sum, sample) => sum + sample.durationMs, 0),
     costUsd: samples.reduce((sum, sample) => sum + (sample.costUsd ?? 0), 0),
@@ -116,29 +82,72 @@ export function readRun(folder: string): { settings: RunSettings; samples: Sampl
   return { settings, samples };
 }
 
-export type EvalRunDependencies = {
-  readonly store: BaseStore;
-  readonly agents: (settings: AgentSettings) => AgentRunner;
-  readonly quota: QuotaWaiter;
-  readonly runsFolder: string;
-  readonly createScratchFolder: (prefix: string) => ScratchFolder;
-  readonly now: () => Date;
-  readonly log: (line: string) => void;
-  readonly newRunId: () => string;
-  readonly signal?: AbortSignal;
+/** A loaded dataset of any evaluated job kind: its identity, its items, and how one of its samples runs. */
+type RunnableDataset = {
+  readonly jobKind: RunSettings["jobKind"];
+  readonly name: string;
+  readonly version: number;
+  readonly hash: string;
+  readonly items: readonly { readonly itemId: string; readonly partition: Partition }[];
+  readonly run: (context: SampleContext, itemId: string, repetition: number) => Promise<Sample>;
 };
+
+function diagnosisScores(value: Scores): SampleScores {
+  return { prediction: value.prediction, rootCause: value.rootCause, valid: null, reached: null };
+}
+
+function diagnosisSample(context: SampleContext, item: DatasetItem, manifest: ContextManifest, repetition: number): Promise<Sample> {
+  const copies = datasetFolders(context.settings.dataset.folder);
+  const sourceCopy = copies.source(item.sourceIdentity);
+  const common = {
+    itemId: item.itemId, partitionKey: item.clusterId, contextHash: item.contextHash, contextCopy: copies.context(item.contextHash), sourceCopy, contextName: item.clusterId,
+    // Runs measure the prompt versions of `promptVersions`, which have no priors section: a context frozen from a thread with fix changes is shown without its priors.
+    withoutPriors: true, subject: { kind: "discrepancy-cluster" as const, id: item.clusterId },
+    images: (staged: string) => manifest.members.flatMap((member) => [join(staged, member.canonicalCrop), join(staged, member.candidateCrop)]),
+    failed: diagnosisScores(failedScores(item)), describe: (value: SampleScores) => `prediction ${verdictText(value.prediction)}, root cause ${verdictText(value.rootCause)}`,
+  };
+  if (context.settings.jobKind === "hypothesis") {
+    const job: EvalJob<HypothesisOutput> = {
+      ...common, prompt: (paths) => hypothesisPrompt(withoutPriors(manifest), paths), schema: HypothesisOutputSchema,
+      validate: (output) => validateHypothesis(output, manifest, sourceCopy), score: (output) => diagnosisScores(scoreHypothesis(output, item)),
+    };
+    return runEvalSample(context, job, repetition);
+  }
+  const job: EvalJob<ChallengeOutput> = {
+    ...common, prompt: (paths) => challengePrompt(manifest, item.hypothesis!, paths), schema: ChallengeOutputSchema,
+    validate: (output) => validateChallenge(output, item.hypothesis!, manifest, sourceCopy), score: (output) => diagnosisScores(scoreChallenge(output, item)),
+  };
+  return runEvalSample(context, job, repetition);
+}
+
+/** Loads a dataset of any job kind, verifying its hash and copies. */
+async function loadRunnable(folder: string): Promise<RunnableDataset> {
+  const { jobKind } = readDocument(join(folder, "dataset.json"), z.looseObject({ jobKind: z.enum(evaluatedJobKinds) }));
+  if (jobKind === "rank" || jobKind === "scenario") {
+    const { dataset, contexts } = await loadDiscoveryDataset(folder);
+    return {
+      jobKind: dataset.jobKind, name: dataset.name, version: dataset.version, hash: dataset.datasetHash, items: dataset.items,
+      run: (context, itemId, repetition) => runDiscoverySample(context, dataset.items.find((item) => item.itemId === itemId)!, contexts.get(itemId)!, repetition),
+    };
+  }
+  const { dataset, manifests } = await loadDataset(folder);
+  return {
+    jobKind: dataset.jobKind, name: dataset.name, version: dataset.version, hash: dataset.datasetHash, items: dataset.items,
+    run: (context, itemId, repetition) => diagnosisSample(context, dataset.items.find((item) => item.itemId === itemId)!, manifests.get(itemId)!, repetition),
+  };
+}
 
 export type StartRun = { readonly datasetFolder: string; readonly partition: RunPartition; readonly repeat: number; readonly name: string | null; readonly settings: AgentSettings };
 
 /** Starts an eval run of the dataset's job kind with the given agent settings, and runs every sample. */
 export async function startEvalRun(dependencies: EvalRunDependencies, start: StartRun): Promise<{ folder: string; summary: RunSummary }> {
-  const { dataset, manifests } = await loadDataset(start.datasetFolder);
+  const dataset = await loadRunnable(start.datasetFolder);
   const items = dataset.items.filter((item) => start.partition === "all" || item.partition === start.partition);
   if (items.length === 0) throw new SetupError(`The dataset ${start.datasetFolder} has no item in the ${start.partition} partition.`);
   const runId = dependencies.newRunId();
   const folder = join(dependencies.runsFolder, runId);
   const settings = RunSettingsSchema.parse({
-    schemaVersion: 1, runId, name: start.name, dataset: { folder: start.datasetFolder, name: dataset.name, version: dataset.version, hash: dataset.datasetHash },
+    schemaVersion: 1, runId, name: start.name, dataset: { folder: start.datasetFolder, name: dataset.name, version: dataset.version, hash: dataset.hash },
     jobKind: dataset.jobKind, partition: start.partition, repeat: start.repeat, choice: start.settings.jobs[dataset.jobKind],
     promptVersion: promptVersions[dataset.jobKind], modelPool: start.settings.modelPool, executables: start.settings.executables,
     samples: items.flatMap((item) => Array.from({ length: start.repeat }, (_, index) => `${item.itemId}-${index + 1}`)),
@@ -146,7 +155,7 @@ export async function startEvalRun(dependencies: EvalRunDependencies, start: Sta
   });
   mkdirSync(runFolders(folder).samples, { recursive: true });
   writeFileSync(runFolders(folder).settings, `${JSON.stringify(settings, null, 2)}\n`);
-  return { folder, summary: await runSamples(dependencies, folder, settings, dataset, manifests) };
+  return { folder, summary: await runSamples(dependencies, folder, settings, dataset) };
 }
 
 /** Continues a run with its stored settings: only the samples without a file run. */
@@ -157,12 +166,12 @@ export async function resumeEvalRun(dependencies: EvalRunDependencies, runId: st
   if (settings.promptVersion !== promptVersions[settings.jobKind]) {
     throw new SetupError(`Eval run ${runId} used prompt ${settings.promptVersion}; the code now has ${promptVersions[settings.jobKind]}. Start a new run.`);
   }
-  const { dataset, manifests } = await loadDataset(settings.dataset.folder);
-  if (dataset.datasetHash !== settings.dataset.hash) throw new SetupError(`The dataset ${settings.dataset.folder} is not the one eval run ${runId} started with.`);
-  return { folder, summary: await runSamples(dependencies, folder, settings, dataset, manifests) };
+  const dataset = await loadRunnable(settings.dataset.folder);
+  if (dataset.hash !== settings.dataset.hash) throw new SetupError(`The dataset ${settings.dataset.folder} is not the one eval run ${runId} started with.`);
+  return { folder, summary: await runSamples(dependencies, folder, settings, dataset) };
 }
 
-async function runSamples(dependencies: EvalRunDependencies, folder: string, settings: RunSettings, dataset: Dataset, manifests: ReadonlyMap<string, ContextManifest>): Promise<RunSummary> {
+async function runSamples(dependencies: EvalRunDependencies, folder: string, settings: RunSettings, dataset: RunnableDataset): Promise<RunSummary> {
   const paths = runFolders(folder);
   const missing = settings.samples.filter((key) => !existsSync(paths.sample(key)));
   dependencies.log(`Eval run ${settings.runId}: ${settings.jobKind} on ${dataset.name} v${dataset.version} (${settings.partition}), ${settings.choice.provider} `
@@ -178,12 +187,13 @@ async function runSamples(dependencies: EvalRunDependencies, folder: string, set
   let firstError: unknown = undefined;
   dependencies.signal?.addEventListener("abort", stopOnSignal, { once: true });
   if (dependencies.signal?.aborted === true) throw new SetupError(`Eval run ${settings.runId} was stopped before its jobs started.`);
+  const context: SampleContext = { dependencies, runner, settings, signal: stop.signal };
   const outcomes = await Promise.allSettled(missing.map(async (key) => {
     try {
       const separator = key.lastIndexOf("-");
-      const item = dataset.items.find((entry) => entry.itemId === key.slice(0, separator));
-      if (item === undefined) throw new SetupError(`Eval run ${settings.runId} names sample ${key}, whose item the dataset does not have.`);
-      const sample = await runSample(dependencies, runner, settings, item, manifests.get(item.itemId)!, Number(key.slice(separator + 1)), stop.signal);
+      const itemId = key.slice(0, separator);
+      if (!dataset.items.some((entry) => entry.itemId === itemId)) throw new SetupError(`Eval run ${settings.runId} names sample ${key}, whose item the dataset does not have.`);
+      const sample = await dataset.run(context, itemId, Number(key.slice(separator + 1)));
       writeFileSync(paths.sample(key), `${JSON.stringify(sample, null, 2)}\n`);
     } catch (error) {
       firstError ??= error;
@@ -194,102 +204,20 @@ async function runSamples(dependencies: EvalRunDependencies, folder: string, set
   dependencies.signal?.removeEventListener("abort", stopOnSignal);
   if (outcomes.some((outcome) => outcome.status === "rejected")) throw firstError;
   const { samples } = readRun(folder);
-  const summary = summarize(settings.runId, samples, dependencies.now());
+  const summary = summarize(settings.runId, settings.jobKind, samples, dependencies.now());
   writeFileSync(paths.summary, `${JSON.stringify(summary, null, 2)}\n`);
   return summary;
 }
 
-/** The first attempt of a sample without a stored record: attempts stored by an earlier invocation of the run are never replaced. */
-async function nextAttempt(store: BaseStore, settings: RunSettings, itemId: string, repetition: number): Promise<{ recordId: string; attempt: number }> {
-  for (let attempt = 1; ; attempt++) {
-    const recordId = `${settings.runId}/${itemId}/${repetition}/${attempt}`;
-    if ((await store.get(recordNamespace(settings.jobKind), recordId)) === null) return { recordId, attempt };
-  }
-}
+const metricNames: Readonly<Record<Metric, string>> = { prediction: "prediction", rootCause: "root cause", valid: "valid", reached: "reached" };
 
-async function runSample(
-  dependencies: EvalRunDependencies, runner: AgentRunner, settings: RunSettings, item: DatasetItem, manifest: ContextManifest, repetition: number, signal: AbortSignal,
-): Promise<Sample> {
-  const copies = datasetFolders(settings.dataset.folder);
-  const sourceCopy = copies.source(item.sourceIdentity);
-  const label = `${settings.jobKind} ${item.itemId}#${repetition}`;
-  for (;;) {
-    // Every attempt keeps its record: a resumed run, or a retry after a usage limit, continues after the stored ones.
-    const { recordId, attempt } = await nextAttempt(dependencies.store, settings, item.itemId, repetition);
-    const scratch = dependencies.createScratchFolder("workflow-eval-");
-    const staged = { context: join(scratch.path, item.clusterId), source: join(scratch.path, "source") };
-    let started = dependencies.now();
-    let result: AgentResult<HypothesisOutput | ChallengeOutput> | { started: false };
-    try {
-      const common = {
-        kind: settings.jobKind, label, choice: settings.choice,
-        images: manifest.members.flatMap((member) => [join(staged.context, member.canonicalCrop), join(staged.context, member.candidateCrop)]),
-        workspace: { folder: staged.context, readOnly: [staged.source] },
-        logFile: join(dependencies.runsFolder, settings.runId, "logs", `${item.itemId}-${repetition}-${attempt}.jsonl`),
-        mayStart: () => {
-          // Runs measure the prompt versions of `promptVersions`, which have no priors section: a context frozen from a
-          // thread with fix changes is shown without its priors.
-          stageJobFolder(staged, copies.context(item.contextHash), sourceCopy, true);
-          started = dependencies.now();
-          return true;
-        },
-        signal,
-      };
-      const paths = { contextFolder: staged.context, snapshotFolder: staged.source, compiledFolders: compiledFoldersIn(sourceCopy) };
-      result = settings.jobKind === "hypothesis"
-        ? await runner.run<HypothesisOutput>({ ...common, prompt: hypothesisPrompt(withoutPriors(manifest), paths), schema: HypothesisOutputSchema,
-          validate: (output) => validateHypothesis(output, manifest, sourceCopy) })
-        : await runner.run<ChallengeOutput>({ ...common, prompt: challengePrompt(manifest, item.hypothesis!, paths), schema: ChallengeOutputSchema,
-          validate: (output) => validateChallenge(output, item.hypothesis!, manifest, sourceCopy) });
-    } catch (error) {
-      const leftover = removalFailure(scratch);
-      if (leftover !== null) dependencies.log(`${label}: ${leftover.message}`);
-      throw error;
-    }
-    // The job's result is stored first; a copy that stays then fails the sample.
-    const leftover = removalFailure(scratch);
-    if (wasNotStarted(result)) throw leftover ?? new Error(`${label} was not started.`);
-    if (!Number.isFinite(result.durationMs) || result.durationMs < 0) throw new SetupError(`${label}: the agent runner reported the duration ${result.durationMs} ms.`);
-    const durationMs = Math.round(result.durationMs);
-    await putRecord(dependencies.store, {
-      schemaVersion: 2, recordId, jobKind: settings.jobKind, origin: "eval-run", threadId: settings.runId, subject: { kind: "discrepancy-cluster", id: item.clusterId },
-      contextHash: item.contextHash, promptVersion: settings.promptVersion,
-      agent: { provider: settings.choice.provider, model: settings.choice.model, effort: settings.choice.effort },
-      startedUtc: started.toISOString(), finishedUtc: dependencies.now().toISOString(), durationMs, usage: result.usage,
-      result: result.ok ? { status: "succeeded", message: null } : { status: result.failure.kind, message: result.failure.message },
-      output: result.ok ? result.output : null, challenged: null, labels: noLabels,
-    });
-    if (leftover !== null) throw leftover;
-    const common = { key: `${item.itemId}-${repetition}`, itemId: item.itemId, clusterId: item.clusterId, repetition, recordId, durationMs, costUsd: result.usage?.costUsd ?? null };
-    if (result.ok) {
-      dependencies.quota.reset();
-      const scores: Scores = settings.jobKind === "hypothesis"
-        ? scoreHypothesis(result.output as HypothesisOutput, item)
-        : scoreChallenge(result.output as ChallengeOutput, item);
-      dependencies.log(`${label}: prediction ${scores.prediction ? "pass" : "fail"}, root cause ${scores.rootCause === null ? "no gold" : scores.rootCause ? "pass" : "fail"}.`);
-      return { ...common, status: "succeeded", message: null, output: result.output, ...scores };
-    }
-    const failure = result.failure;
-    dependencies.log(`${label}: ${failure.kind}: ${failure.message}`);
-    if (failure.kind === "quota_exhausted") {
-      await dependencies.quota.wait([dependencies.quota.processId], signal);
-      continue;
-    }
-    if (failure.kind === "infra" || failure.kind === "timeout") {
-      throw new SetupError(`${label} failed: ${failure.message} (record ${recordId}); resume the run with --resume ${settings.runId}.`);
-    }
-    return { ...common, status: failure.kind, message: failure.message, output: null, ...failedScores(item) };
-  }
-}
-
-/** Summary lines of a finished run. */
+/** Summary lines of a finished run: the metrics its job kind scores. */
 export function summaryLines(summary: RunSummary): string[] {
   const line = (name: string, value: MetricSummary) => `  ${name}: ${Number.isInteger(value.passes) ? value.passes : value.passes.toFixed(2)}/${value.count} items`
     + (value.rate === null ? " (no samples)" : ` = ${value.rate.toFixed(3)}, 95% Wilson [${value.interval!.low.toFixed(3)}, ${value.interval!.high.toFixed(3)}]`);
   return [
     `Eval run ${summary.runId}: ${summary.samples} samples.`,
-    line("prediction", summary.metrics.prediction),
-    line("root cause", summary.metrics.rootCause),
+    ...metricsOfJobKind[summary.jobKind].map((name) => line(metricNames[name], summary.metrics[name])),
     `  failures: invalid_output ${summary.failures.invalid_output}, refused ${summary.failures.refused}; model time ${(summary.modelMs / 1000).toFixed(1)} s; `
       + `cost ${summary.costUsd.toFixed(4)} USD (${summary.unknownCosts} samples without a reported cost)`,
   ];

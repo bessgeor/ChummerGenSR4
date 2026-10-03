@@ -73,6 +73,9 @@ export type ScenarioContext = z.infer<typeof ScenarioContextSchema>;
 
 export type DiscoveryContext = RankContext | ScenarioContext;
 
+/** A sealed context of either job kind. */
+export const DiscoveryContextSchema = z.discriminatedUnion("kind", [RankContextSchema, ScenarioContextSchema]);
+
 export function discoveryContextHash(context: DiscoveryContext): string {
   return sha256Text(canonicalJson(context));
 }

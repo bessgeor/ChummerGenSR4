@@ -4,7 +4,7 @@ import { z } from "zod";
 import { efforts, providers, type JobKind } from "../agents/agent-job.js";
 import type { AgentSettings } from "../agents/agent-settings.js";
 import type { RunOptions } from "../options/run-options.js";
-import { metrics, type Metric } from "./comparison.js";
+import { metrics, requireMetric, type Metric } from "./metrics.js";
 import { evaluatedJobKinds, promptVersions, readRun, summarize, type EvaluatedJobKind } from "./eval-run.js";
 
 /** A job kind's configuration, certified by an eval run on a test partition for unattended runs. */
@@ -37,7 +37,8 @@ export function certificatePath(folder: string, jobKind: JobKind): string {
 /** Issues a certificate from a complete test-partition run that meets the thresholds, or returns every reason it does not. */
 export function certify(runFolder: string, thresholds: Thresholds, certificatesFolder: string, now: Date): { certificate: Certificate } | { refused: string[] } {
   const { settings, samples } = readRun(runFolder);
-  const summary = summarize(settings.runId, samples, now);
+  requireMetric(settings.jobKind, thresholds.metric);
+  const summary = summarize(settings.runId, settings.jobKind, samples, now);
   const reasons: string[] = [];
   const missing = settings.samples.filter((key) => !samples.some((sample) => sample.key === key)).length;
   if (missing > 0) reasons.push(`the run is not complete: ${missing} samples are missing`);
