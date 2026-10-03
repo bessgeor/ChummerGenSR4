@@ -46,13 +46,6 @@ The app SHALL define `CharacterViewModel`, which takes a character, exposes it a
 - **WHEN** the main window opens a saved or a new character
 - **THEN** it creates the character's window from a new view model of that character, and the window shows that character
 
-#### Scenario: Printing twice
-- **WHEN** a character window prints its character while the view model's preview window is open
-- **THEN** that window is activated and refreshed, and no second preview window opens
-
-#### Scenario: Closing the preview
-- **WHEN** the preview window of a view model closes
-- **THEN** the view model's `PrintWindow` is cleared, and the next print opens a new preview window
 
 ## MODIFIED Requirements
 ### Requirement: The library reaches the application only through registered interfaces
