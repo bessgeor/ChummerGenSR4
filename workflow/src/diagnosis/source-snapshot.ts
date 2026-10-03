@@ -51,10 +51,15 @@ function sourcePaths(repositoryRoot: string, git: Git): string[] {
   return paths;
 }
 
+/** The files of the compiled folders that the snapshot and the compiled-source identity cover, sorted. */
+export function compiledSourcePaths(repositoryRoot: string, git: Git): string[] {
+  return sourcePaths(repositoryRoot, git).filter((item) => isCompiledPath(item));
+}
+
 /** The identity of the compiled source of the working tree now, without copying anything; equals `compiledIdentity` of a snapshot taken now. */
 export async function compiledSourceIdentity(repositoryRoot: string, git: Git): Promise<string> {
   const lines: string[] = [];
-  for (const path of sourcePaths(repositoryRoot, git).filter((item) => isCompiledPath(item))) {
+  for (const path of compiledSourcePaths(repositoryRoot, git)) {
     lines.push(`${path}\t${await sha256File(join(repositoryRoot, path))}`);
   }
   return sha256Lines(lines);
