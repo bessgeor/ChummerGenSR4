@@ -114,6 +114,15 @@ namespace Parity.Contracts.CaptureSummary
         [JsonRequired]
         [JsonPropertyName("totals")]
         public RunTotals Totals { get; set; }
+
+        /// <summary>
+        /// Folder of the candidate side's UI trees relative to the run folder, holding
+        /// &lt;case&gt;/&lt;capture&gt;.json for every performed capture; absent when the run records no trees.
+        /// </summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        [JsonPropertyName("uiTrees")]
+        [JsonConverter(typeof(MinMaxLengthCheckConverter))]
+        public string? UiTrees { get; set; }
     }
 
     public partial class CandidateExecutable

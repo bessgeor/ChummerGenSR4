@@ -6,6 +6,7 @@ using CaptureTimingContract = Parity.Contracts.CaptureTiming.CaptureTiming;
 using CompareReportContract = Parity.Contracts.CompareReport.CompareReport;
 using ExecutionCoverageContract = Parity.Contracts.ExecutionCoverage.ExecutionCoverage;
 using ParityCasesContract = Parity.Contracts.ParityCases.ParityCases;
+using UiTreeContract = Parity.Contracts.UiTree.UiTree;
 
 namespace Parity.Cases;
 
@@ -21,6 +22,7 @@ public static class ContractJson
     private static readonly JsonSerializerOptions ReportOptions = Strict(Parity.Contracts.CompareReport.Converter.Settings);
     private static readonly JsonSerializerOptions CoverageOptions = Strict(Parity.Contracts.ExecutionCoverage.Converter.Settings);
     private static readonly JsonSerializerOptions TimingOptions = Strict(Parity.Contracts.CaptureTiming.Converter.Settings);
+    private static readonly JsonSerializerOptions UiTreeOptions = Strict(Parity.Contracts.UiTree.Converter.Settings);
 
     public static ParityCasesContract ReadCases(string json) => Read<ParityCasesContract>(json, CasesOptions);
 
@@ -34,6 +36,8 @@ public static class ContractJson
 
     public static CaptureTimingContract ReadTiming(string json) => Read<CaptureTimingContract>(json, TimingOptions);
 
+    public static UiTreeContract ReadUiTree(string json) => Read<UiTreeContract>(json, UiTreeOptions);
+
     public static string Write(ParityCasesContract document) => JsonSerializer.Serialize(document, CasesOptions);
 
     public static string Write(CaptureSummaryContract document) => JsonSerializer.Serialize(document, SummaryOptions);
@@ -45,6 +49,8 @@ public static class ContractJson
     public static string Write(ExecutionCoverageContract document) => JsonSerializer.Serialize(document, CoverageOptions);
 
     public static string Write(CaptureTimingContract document) => JsonSerializer.Serialize(document, TimingOptions);
+
+    public static string Write(UiTreeContract document) => JsonSerializer.Serialize(document, UiTreeOptions);
 
     /// <summary>A report status spelled as the contract writes it in <c>report.json</c>.</summary>
     public static string Name(Parity.Contracts.CompareReport.ReportStatus status) =>

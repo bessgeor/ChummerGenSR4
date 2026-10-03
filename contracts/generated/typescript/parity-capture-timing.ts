@@ -7,6 +7,7 @@ export const OperationSchema = z.enum([
     "close",
     "launch",
     "selectTab",
+    "uiTree",
     "wait",
     "waitForLabel",
 ]);

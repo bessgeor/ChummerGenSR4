@@ -148,7 +148,7 @@ namespace Parity.Contracts.CaptureTiming
         public string? Target { get; set; }
     }
 
-    public enum Operation { Activate, Capture, Close, Launch, SelectTab, Wait, WaitForLabel };
+    public enum Operation { Activate, Capture, Close, Launch, SelectTab, UiTree, Wait, WaitForLabel };
 
     public enum Side { Candidate, Canonical };
 
@@ -223,6 +223,8 @@ namespace Parity.Contracts.CaptureTiming
                     return Operation.Launch;
                 case "selectTab":
                     return Operation.SelectTab;
+                case "uiTree":
+                    return Operation.UiTree;
                 case "wait":
                     return Operation.Wait;
                 case "waitForLabel":
@@ -249,6 +251,9 @@ namespace Parity.Contracts.CaptureTiming
                     return;
                 case Operation.SelectTab:
                     JsonSerializer.Serialize(writer, "selectTab", options);
+                    return;
+                case Operation.UiTree:
+                    JsonSerializer.Serialize(writer, "uiTree", options);
                     return;
                 case Operation.Wait:
                     JsonSerializer.Serialize(writer, "wait", options);

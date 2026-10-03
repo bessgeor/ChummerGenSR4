@@ -175,5 +175,6 @@ export const CaptureSummarySchema = z.object({
     "threshold": z.number(),
     "timing": z.string().optional(),
     "totals": RunTotalsSchema,
+    "uiTrees": z.string().optional(),
 });
 export type CaptureSummary = z.infer<typeof CaptureSummarySchema>;
