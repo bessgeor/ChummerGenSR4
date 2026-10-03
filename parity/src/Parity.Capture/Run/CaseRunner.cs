@@ -9,7 +9,8 @@ using Parity.Contracts.CaptureResults;
 namespace Parity.Capture.Run;
 
 /// <summary>
-/// Runs a case on the canonical side, then the candidate side, then compares their captures. With a
+/// Runs a case on the canonical side, then the candidate side, then compares their captures; with UI trees, the
+/// candidate side records one after each capture. With a
 /// cache, the canonical side is restored when its key is stored; one that completed live is queued for
 /// the run to store once the canonical executable is verified again.
 /// </summary>
@@ -27,13 +28,15 @@ internal sealed class CaseRunner(
         UiTiming timing,
         IReadOnlySet<string>? captureFilter,
         double threshold,
-        CacheSession? cacheSession)
+        CacheSession? cacheSession,
+        bool uiTrees)
     {
         string character = staged.CharacterCopies[parityCase.Name];
         SideRun canonical = cacheSession is null
             ? RunSide(RunLayout.CanonicalSide, staged.CanonicalExecutable, parityCase, character, layout, timing, captureFilter)
             : RunCanonicalWithCache(cacheSession, parityCase, character, layout, staged, timing, captureFilter);
-        SideRun candidate = RunSide(RunLayout.CandidateSide, staged.CandidateExecutable, parityCase, character, layout, timing, captureFilter);
+        SideRun candidate = RunSide(RunLayout.CandidateSide, staged.CandidateExecutable, parityCase, character, layout, timing, captureFilter,
+            uiTrees ? new UiTreeRecorder(layout, parityCase.Name) : null);
         IReadOnlyList<CaptureResult> rows = results.Build(parityCase, canonical, candidate, threshold, layout.Relative);
         return new CaseRun(parityCase, canonical, candidate, rows);
     }
@@ -78,7 +81,8 @@ internal sealed class CaseRunner(
         string character,
         RunLayout layout,
         UiTiming timing,
-        IReadOnlySet<string>? captureFilter)
+        IReadOnlySet<string>? captureFilter,
+        UiTreeRecorder? trees = null)
     {
         Console.WriteLine($"  {side}: {executable}");
         SideRun run;
@@ -91,7 +95,8 @@ internal sealed class CaseRunner(
                 character,
                 timing,
                 captureFilter,
-                captureName => layout.CapturePath(parityCase.Name, side, captureName));
+                captureName => layout.CapturePath(parityCase.Name, side, captureName),
+                trees);
         }
 
         Console.WriteLine(run.Failed

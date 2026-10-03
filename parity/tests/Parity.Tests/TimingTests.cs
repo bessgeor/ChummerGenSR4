@@ -118,6 +118,18 @@ public sealed class TimingTests : IDisposable
         Assert.Equal(1, timing.Operations[2].Failures);
     }
 
+    [Fact]
+    public void An_operation_without_a_report_order_fails_the_summary()
+    {
+        TimingRecorder recorder = new();
+        using (recorder.BeginSide("build-test", "candidate"))
+        {
+            recorder.Record((Operation)99, null, TimeSpan.FromMilliseconds(1), null);
+        }
+
+        Assert.Contains("no report order", Assert.Throws<InvalidOperationException>(() => recorder.Build("test-run")).Message);
+    }
+
     [Theory]
     [InlineData(0.5, 3)]
     [InlineData(0.8, 4)]

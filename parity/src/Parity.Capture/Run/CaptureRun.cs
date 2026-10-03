@@ -109,6 +109,7 @@ internal sealed class CaptureRun(
             CanonicalSourceSha256Before = sourceHashBefore,
             CandidateSource = options.Resolve(options.CandidateExecutable),
             SettingsOverlay = options.SettingsOverlay is null ? null : Path.GetFullPath(options.SettingsOverlay, options.RepositoryRoot),
+            UiTrees = options.UiTree,
             Screens = [],
             Cases = [],
         };
@@ -133,7 +134,7 @@ internal sealed class CaptureRun(
             foreach (ParityCase parityCase in cases)
             {
                 Console.WriteLine($"Case {parityCase.Name} ({parityCase.Actions.Count} actions)");
-                runs.Add(caseRunner.Run(parityCase, layout, staged, timing, captureFilter, options.Threshold, report.Cache));
+                runs.Add(caseRunner.Run(parityCase, layout, staged, timing, captureFilter, options.Threshold, report.Cache, options.UiTree));
             }
 
             report = report with { Cases = runs };
@@ -158,7 +159,7 @@ internal sealed class CaptureRun(
             }
 
             writer.Write(layout.SummaryPath, writer.BuildSummary(report, path => DisplayPath(options.RepositoryRoot, path)));
-            PrintOutcome(runs, coverage, report.Cache, report.Status, layout);
+            PrintOutcome(runs, coverage, report.Cache, report.Status, layout, report.UiTrees);
             return ExitCode(report.Status);
         }
         catch (Exception error)
@@ -240,7 +241,7 @@ internal sealed class CaptureRun(
             : throw new ArgumentException($"--capture matches no capture of the selected cases: {string.Join(", ", unknown)}.");
     }
 
-    private static void PrintOutcome(IReadOnlyList<CaseRun> runs, ExecutionCoverage coverage, CacheSession? cache, RunStatus status, RunLayout layout)
+    private static void PrintOutcome(IReadOnlyList<CaseRun> runs, ExecutionCoverage coverage, CacheSession? cache, RunStatus status, RunLayout layout, bool uiTrees)
     {
         Console.WriteLine("Execution:");
         foreach (CaseRun run in runs)
@@ -280,6 +281,10 @@ internal sealed class CaptureRun(
         Console.WriteLine($"Results: {layout.ResultsPath}");
         Console.WriteLine($"Coverage: {layout.CoveragePath}");
         Console.WriteLine($"Timing: {layout.TimingPath}");
+        if (uiTrees)
+        {
+            Console.WriteLine($"UI trees: {layout.UiTrees}");
+        }
     }
 
     private static string Reason(ResultRow row) => row.Reason switch

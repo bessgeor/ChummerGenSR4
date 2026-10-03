@@ -37,6 +37,9 @@ internal sealed record RunReport
 
     public CacheSession? Cache { get; init; }
 
+    /// <summary>Whether the candidate side records a UI tree after each capture.</summary>
+    public required bool UiTrees { get; init; }
+
     public required IReadOnlyList<ScreenInfo> Screens { get; init; }
 
     public required IReadOnlyList<CaseRun> Cases { get; init; }

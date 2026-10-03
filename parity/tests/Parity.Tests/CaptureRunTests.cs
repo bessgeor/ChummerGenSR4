@@ -36,6 +36,8 @@ public sealed class CaptureRunTests
         Assert.Equal(["common", "skills"], options.Captures);
         Assert.Equal(0.5, options.Threshold);
         Assert.Equal("out/overlay", options.SettingsOverlay);
+        Assert.False(options.UiTree);
+        Assert.True(new CaptureOptionsParser().Parse(["--ui-tree"]).UiTree);
     }
 
     [Theory]
@@ -154,6 +156,7 @@ public sealed class CaptureRunTests
             CanonicalSourceSha256After = CanonicalExecutableGuard.PinnedSha256,
             CanonicalStagedSha256After = CanonicalExecutableGuard.PinnedSha256,
             CandidateSource = "out/candidate/bin/ChummerGenSR4.exe",
+            UiTrees = true,
             Screens = [],
             Cases = [Run(canonicalFailure: "action 1: boom", passed: true)],
         };
@@ -173,6 +176,9 @@ public sealed class CaptureRunTests
         Assert.Equal(ActionOutcome.Failed, canonical.Actions[1].Outcome);
         Assert.True(canonical.Actions[1].Optional);
         Assert.Equal("results.json", readBack.Results);
+        Assert.Equal("ui-trees", readBack.UiTrees);
+        Assert.Null(ContractJson.ReadSummary(ContractJson.Write(writer.BuildSummary(report with { UiTrees = false }, path => path))).UiTrees);
+        Assert.Null(ContractJson.ReadSummary(ContractJson.Write(writer.BuildSummary(report with { Finished = null }, path => path))).UiTrees);
         Assert.Equal("1970-01-01T00:01:00.000Z", readBack.FinishedUtc);
     }
 

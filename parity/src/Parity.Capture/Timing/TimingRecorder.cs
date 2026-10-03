@@ -10,7 +10,7 @@ internal sealed class TimingRecorder
 {
     /// <summary>Operations in the order a side performs them, which is also the report order.</summary>
     private static readonly Operation[] OperationOrder =
-        [Operation.Launch, Operation.Activate, Operation.SelectTab, Operation.WaitForLabel, Operation.Wait, Operation.Capture, Operation.Close];
+        [Operation.Launch, Operation.Activate, Operation.SelectTab, Operation.WaitForLabel, Operation.Wait, Operation.Capture, Operation.UiTree, Operation.Close];
 
     private readonly List<SideTiming> _sides = [];
     private SideTiming? _current;
@@ -49,6 +49,12 @@ internal sealed class TimingRecorder
         }
 
         List<TimingSample> samples = _sides.SelectMany(side => side.Samples).ToList();
+        TimingSample? unordered = samples.FirstOrDefault(sample => !OperationOrder.Contains(sample.Operation));
+        if (unordered is not null)
+        {
+            throw new InvalidOperationException($"The timing has no report order for the operation {unordered.Operation}.");
+        }
+
         return new CaptureTiming
         {
             RunId = runId,

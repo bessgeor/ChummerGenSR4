@@ -77,6 +77,7 @@ internal sealed class ReportWriter
             Results = report.Finished is null ? null : report.Layout.Relative(report.Layout.ResultsPath),
             Coverage = report.Finished is null ? null : report.Layout.Relative(report.Layout.CoveragePath),
             Timing = report.Finished is null ? null : report.Layout.Relative(report.Layout.TimingPath),
+            UiTrees = report.UiTrees && report.Finished is not null ? report.Layout.Relative(report.Layout.UiTrees) : null,
         };
     }
 

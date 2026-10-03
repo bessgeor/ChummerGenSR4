@@ -258,6 +258,7 @@ public sealed class CanonicalCaptureCacheTests : IDisposable
             CanonicalSource = "bin/ChummerGenSR4.exe",
             CanonicalSourceSha256Before = Pinned,
             CandidateSource = "out/candidate/bin/ChummerGenSR4.exe",
+            UiTrees = false,
             Cache = _session,
             Screens = [],
             Cases = [second],
@@ -292,7 +293,7 @@ public sealed class CanonicalCaptureCacheTests : IDisposable
             new TimingRecorder(),
             new CacheKeyBuilder(_hasher),
             new CanonicalCaptureCache(_hasher));
-        CaseRun run = runner.Run(_case, layout, staged, Timing, null, 0.00004, _session);
+        CaseRun run = runner.Run(_case, layout, staged, Timing, null, 0.00004, _session, uiTrees: false);
         if (commit)
         {
             new CanonicalCaptureCache(_hasher).StorePending(_session);
