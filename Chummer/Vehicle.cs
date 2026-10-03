@@ -1,9 +1,7 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Drawing;
 using System.Linq;
-using System.Windows.Forms;
 using System.Xml;
 using System.Xml.XPath;
 
@@ -50,10 +48,10 @@ namespace Chummer
 		private int _intAccelRunning = 0;
 		private int _intAccelWalking = 0;
 
-		private readonly Character _objCharacter;
+		private readonly ICharacter _objCharacter;
 
 		#region Constructor, Create, Save, Load, and Print Methods
-		public VehicleMod(Character objCharacter)
+		public VehicleMod(ICharacter objCharacter)
 		{
 			// Create the GUID for the new VehicleMod.
 			_guiID = Guid.NewGuid();
@@ -64,7 +62,7 @@ namespace Chummer
 		/// <param name="objXmlMod">XmlNode to create the object from.</param>
 		/// <param name="objNode">TreeNode to populate a TreeView.</param>
 		/// <param name="intRating">Selected Rating for the Gear.</param>
-		public void Create(XmlNode objXmlMod, TreeNode objNode, int intRating)
+		public void Create(XmlNode objXmlMod, ITreeNodeView objNode, int intRating)
 		{
 			_strName = objXmlMod["name"].InnerText;
 			_strCategory = objXmlMod["category"].InnerText;
@@ -151,15 +149,9 @@ namespace Chummer
 
 					if (intMin != 0 || intMax != 0)
 					{
-						frmSelectNumber frmPickNumber = new frmSelectNumber();
 						if (intMax == 0)
 							intMax = 1000000;
-						frmPickNumber.Minimum = intMin;
-						frmPickNumber.Maximum = intMax;
-						frmPickNumber.Description = LanguageManager.Instance.GetString("String_SelectVariableCost").Replace("{0}", DisplayNameShort);
-						frmPickNumber.AllowCancel = false;
-						frmPickNumber.ShowDialog();
-						_strCost = frmPickNumber.SelectedValue.ToString();
+						_strCost = ApplicationHost.Current.Equipment.SelectNumber(intMin, intMax, LanguageManager.Instance.GetString("String_SelectVariableCost").Replace("{0}", DisplayNameShort)).ToString();
 					}
 				}
 				else
@@ -1112,13 +1104,13 @@ namespace Chummer
 		private List<string> _lstLocations = new List<string>();
 		private bool _blnDiscountCost = false;
 
-		private readonly Character _objCharacter;
+		private readonly ICharacter _objCharacter;
 
 		// Condition Monitor Progress.
 		private int _intPhysicalCMFilled = 0;
 
 		#region Constructor, Create, Save, Load, and Print Methods
-		public Vehicle(Character objCharacter)
+		public Vehicle(ICharacter objCharacter)
 		{
 			// Create the GUID for the new Vehicle.
 			_guiID = Guid.NewGuid();
@@ -1128,13 +1120,13 @@ namespace Chummer
 		/// Create a Vehicle from an XmlNode and return the TreeNodes for it.
 		/// <param name="objXmlVehicle">XmlNode of the Vehicle to create.</param>
 		/// <param name="objNode">TreeNode to add to a TreeView.</param>
-		/// <param name="cmsVehicle">ContextMenuStrip to attach to Weapon Mounts.</param>
-		/// <param name="cmsVehicleGear">ContextMenuStrip to attach to Gear.</param>
-		/// <param name="cmsVehicleWeapon">ContextMenuStrip to attach to Vehicle Weapons.</param>
-		/// <param name="cmsVehicleWeaponAccessory">ContextMenuStrip to attach to Weapon Accessories.</param>
-		/// <param name="cmsVehicleWeaponMod">ContextMenuStrip to attachk to Weapon Mods.</param>
+		/// <param name="funcNewModNode">Function that creates the TreeNode of a Vehicle Mod, such as a Weapon Mount.</param>
+		/// <param name="funcNewGearNode">Function that creates the TreeNode of a piece of Gear.</param>
+		/// <param name="funcNewWeaponNode">Function that creates the TreeNode of a Vehicle Weapon.</param>
+		/// <param name="funcNewWeaponAccessoryNode">Function that creates the TreeNode of a Weapon Accessory.</param>
+		/// <param name="funcNewWeaponModNode">Function that creates the TreeNode of a Weapon Mod.</param>
 		/// <param name="blnCreateChildren">Whether or not child items should be created.</param>
-		public void Create(XmlNode objXmlVehicle, TreeNode objNode, ContextMenuStrip cmsVehicle, ContextMenuStrip cmsVehicleGear, ContextMenuStrip cmsVehicleWeapon, ContextMenuStrip cmsVehicleWeaponAccessory, ContextMenuStrip cmsVehicleWeaponMod, bool blnCreateChildren = true)
+		public void Create(XmlNode objXmlVehicle, ITreeNodeView objNode, Func<ITreeNodeView> funcNewModNode, Func<ITreeNodeView> funcNewGearNode, Func<ITreeNodeView> funcNewWeaponNode, Func<ITreeNodeView> funcNewWeaponAccessoryNode, Func<ITreeNodeView> funcNewWeaponModNode, bool blnCreateChildren = true)
 		{
 			_strName = objXmlVehicle["name"].InnerText;
 			_strCategory = objXmlVehicle["category"].InnerText;
@@ -1190,7 +1182,7 @@ namespace Chummer
 				foreach (XmlNode objXmlVehicleMod in objXmlModList)
 				{
 					XmlNode objXmlMod = objXmlDocument.SelectSingleNode("/chummer/mods/mod[name = \"" + objXmlVehicleMod.InnerText + "\"]");
-					TreeNode objModNode = new TreeNode();
+					ITreeNodeView objModNode = funcNewModNode();
 					VehicleMod objMod = new VehicleMod(_objCharacter);
 					int intRating = 0;
 
@@ -1204,10 +1196,9 @@ namespace Chummer
 					objMod.IncludedInVehicle = true;
 
 					_lstVehicleMods.Add(objMod);
-					objModNode.ForeColor = SystemColors.GrayText;
-					objModNode.ContextMenuStrip = cmsVehicle;
+					objModNode.ShowAsGrayText();
 
-					objNode.Nodes.Add(objModNode);
+					objNode.Add(objModNode);
 					objNode.Expand();
 				}
 				if (objXmlVehicle.SelectSingleNode("mods/addslots") != null)
@@ -1223,7 +1214,7 @@ namespace Chummer
 				foreach (XmlNode objXmlVehicleGear in objXmlGearList)
 				{
 					XmlNode objXmlGaer = objXmlDocument.SelectSingleNode("/chummer/gears/gear[name = \"" + objXmlVehicleGear.InnerText + "\"]");
-					TreeNode objGearNode = new TreeNode();
+					ITreeNodeView objGearNode = funcNewGearNode();
 					Gear objGear = new Gear(_objCharacter);
 					int intRating = 0;
 					int intQty = 1;
@@ -1240,21 +1231,19 @@ namespace Chummer
 					else
 						strForceValue = "";
 
-					List<Weapon> objWeapons = new List<Weapon>();
-					List<TreeNode> objWeaponNodes = new List<TreeNode>();
-					objGear.Create(objXmlGaer, _objCharacter, objGearNode, intRating, objWeapons, objWeaponNodes, strForceValue);
+					List<IEquipmentWeapon> objWeapons = new List<IEquipmentWeapon>();
+					objGear.Create(objXmlGaer, _objCharacter, objGearNode, intRating, (objWeapon, objWeaponNode) => objWeapons.Add(objWeapon), strForceValue);
 					objGear.Cost = "0";
 					objGear.Quantity = intQty;
 					objGear.MaxRating = objGear.Rating;
 					objGearNode.Text = objGear.DisplayName;
-					objGearNode.ContextMenuStrip = cmsVehicleGear;
 
-					foreach (Weapon objWeapon in objWeapons)
+					foreach (IEquipmentWeapon objWeapon in objWeapons)
 						objWeapon.VehicleMounted = true;
 
 					_lstGear.Add(objGear);
 
-					objNode.Nodes.Add(objGearNode);
+					objNode.Add(objGearNode);
 					objNode.Expand();
 				}
 			}
@@ -1267,11 +1256,11 @@ namespace Chummer
 				foreach (XmlNode objXmlWeapon in objXmlVehicle.SelectNodes("weapons/weapon"))
 				{
 					bool blnAttached = false;
-					TreeNode objWeaponNode = new TreeNode();
+					ITreeNodeView objWeaponNode = funcNewWeaponNode();
 					Weapon objWeapon = new Weapon(_objCharacter);
 
 					XmlNode objXmlWeaponNode = objXmlWeaponDocument.SelectSingleNode("/chummer/weapons/weapon[name = \"" + objXmlWeapon["name"].InnerText + "\"]");
-					objWeapon.Create(objXmlWeaponNode, _objCharacter, objWeaponNode, cmsVehicleWeapon, cmsVehicleWeaponAccessory, cmsVehicleWeaponMod);
+					objWeapon.Create(objXmlWeaponNode, _objCharacter, objWeaponNode, funcNewWeaponNode, funcNewWeaponAccessoryNode, funcNewWeaponModNode);
 					objWeapon.Cost = 0;
 					objWeapon.VehicleMounted = true;
 
@@ -1281,12 +1270,11 @@ namespace Chummer
 						if (objMod.Name.StartsWith("Weapon Mount") && objMod.Weapons.Count == 0)
 						{
 							objMod.Weapons.Add(objWeapon);
-							foreach (TreeNode objModNode in objNode.Nodes)
+							foreach (ITreeNodeView objModNode in objNode.Children)
 							{
 								if (objModNode.Tag.ToString() == objMod.InternalId)
 								{
-									objWeaponNode.ContextMenuStrip = cmsVehicleWeapon;
-									objModNode.Nodes.Add(objWeaponNode);
+									objModNode.Add(objWeaponNode);
 									objModNode.Expand();
 									blnAttached = true;
 									break;
@@ -1304,12 +1292,11 @@ namespace Chummer
 							if (objMod.Name.StartsWith("Weapon Mount"))
 							{
 								objMod.Weapons.Add(objWeapon);
-								foreach (TreeNode objModNode in objNode.Nodes)
+								foreach (ITreeNodeView objModNode in objNode.Children)
 								{
 									if (objModNode.Tag.ToString() == objMod.InternalId)
 									{
-										objWeaponNode.ContextMenuStrip = cmsVehicleWeapon;
-										objModNode.Nodes.Add(objWeaponNode);
+										objModNode.Add(objWeaponNode);
 										objModNode.Expand();
 										blnAttached = true;
 										break;
@@ -1327,17 +1314,16 @@ namespace Chummer
 						{
 							XmlNode objXmlAccessoryNode = objXmlWeaponDocument.SelectSingleNode("/chummer/accessories/accessory[name = \"" + objXmlAccessory["name"].InnerText + "\"]");
 							WeaponAccessory objMod = new WeaponAccessory(_objCharacter);
-							TreeNode objModNode = new TreeNode();
+							ITreeNodeView objModNode = funcNewWeaponAccessoryNode();
 							string strMount = "";
 							if (objXmlAccessory["mount"] != null)
 								strMount = objXmlAccessory["mount"].InnerText;
 							objMod.Create(objXmlAccessoryNode, objModNode, strMount);
 							objMod.Cost = "0";
-							objModNode.ContextMenuStrip = cmsVehicleWeaponAccessory;
 
 							objWeapon.WeaponAccessories.Add(objMod);
 
-							objWeaponNode.Nodes.Add(objModNode);
+							objWeaponNode.Add(objModNode);
 							objWeaponNode.Expand();
 						}
 					}
@@ -1349,14 +1335,13 @@ namespace Chummer
 						{
 							XmlNode objXmlModNode = objXmlWeaponDocument.SelectSingleNode("/chummer/mods/mod[name = \"" + objXmlMod["name"].InnerText + "\"]");
 							WeaponMod objMod = new WeaponMod(_objCharacter);
-							TreeNode objModNode = new TreeNode();
+							ITreeNodeView objModNode = funcNewWeaponModNode();
 							objMod.Create(objXmlModNode, objModNode);
 							objMod.Cost = "0";
-							objModNode.ContextMenuStrip = cmsVehicleWeaponMod;
 
 							objWeapon.WeaponMods.Add(objMod);
 
-							objWeaponNode.Nodes.Add(objModNode);
+							objWeaponNode.Add(objModNode);
 							objWeaponNode.Expand();
 						}
 					}

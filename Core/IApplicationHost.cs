@@ -49,7 +49,7 @@ namespace Chummer
 		IImprovementDialogs ImprovementDialogs { get; }
 
 		/// <summary>
-		/// The choices and Weapons of armor, cyberware and gear.
+		/// The choices of the equipment and the Weapons that armor, cyberware and gear grant.
 		/// </summary>
 		IEquipmentHost Equipment { get; }
 	}

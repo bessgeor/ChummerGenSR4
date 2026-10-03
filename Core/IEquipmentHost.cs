@@ -3,7 +3,7 @@ using System.Xml;
 namespace Chummer
 {
 	/// <summary>
-	/// What armor, cyberware and gear need from the application: the choices they ask the user for and the Weapons they grant.
+	/// What the equipment needs from the application: the choices that armor, cyberware, gear and vehicle mods ask the user for and the Weapons that armor, cyberware and gear grant.
 	/// </summary>
 	public interface IEquipmentHost
 	{

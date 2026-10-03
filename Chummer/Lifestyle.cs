@@ -1,9 +1,7 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Drawing;
 using System.Linq;
-using System.Windows.Forms;
 using System.Xml;
 using System.Xml.XPath;
 
@@ -46,7 +44,7 @@ namespace Chummer
 		private List<string> _lstQualities = new List<string>();
 		private string _strNotes = "";
 
-		private readonly Character _objCharacter;
+		private readonly ICharacter _objCharacter;
 
 		#region Helper Methods
 		/// <summary>
@@ -70,7 +68,7 @@ namespace Chummer
 		#endregion
 
 		#region Constructor, Create, Save, Load, and Print Methods
-		public Lifestyle(Character objCharacter)
+		public Lifestyle(ICharacter objCharacter)
 		{
 			// Create the GUID for the new Lifestyle.
 			_guiID = Guid.NewGuid();
@@ -80,7 +78,7 @@ namespace Chummer
 		/// Create a Lifestyle from an XmlNode and return the TreeNodes for it.
 		/// <param name="objXmlLifestyle">XmlNode to create the object from.</param>
 		/// <param name="objNode">TreeNode to populate a TreeView.</param>
-		public void Create(XmlNode objXmlLifestyle, TreeNode objNode)
+		public void Create(XmlNode objXmlLifestyle, ITreeNodeView objNode)
 		{
 			_strName = objXmlLifestyle["name"].InnerText;
 			_intCost = Convert.ToInt32(objXmlLifestyle["cost"].InnerText);

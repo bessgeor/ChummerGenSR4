@@ -1,9 +1,7 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Drawing;
 using System.Linq;
-using System.Windows.Forms;
 using System.Xml;
 using System.Xml.XPath;
 
@@ -62,10 +60,10 @@ namespace Chummer
 		private bool _blnDiscountCost = false;
 		private bool _blnRequireAmmo = true;
 
-		private readonly Character _objCharacter;
+		private readonly ICharacter _objCharacter;
 
 		#region Constructor, Create, Save, Load, and Print Methods
-		public Weapon(Character objCharacter)
+		public Weapon(ICharacter objCharacter)
 		{
 			// Create the GUID for the new Weapon.
 			_guiID = Guid.NewGuid();
@@ -76,11 +74,11 @@ namespace Chummer
 		/// <param name="objXmlWeapon">XmlNode to create the object from.</param>
 		/// <param name="objCharacter">Character that the Weapon is being added to.</param>
 		/// <param name="objNode">TreeNode to populate a TreeView.</param>
-		/// <param name="cmsWeapon">ContextMenuStrip to use for Weapons.</param>
-		/// <param name="cmsWeaponAccessory">ContextMenuStrip to use for Accessories.</param>
-		/// <param name="cmsWeaponMod">ContextMenuStrip to use for Weapon Mods.</param>
+		/// <param name="funcNewWeaponNode">Function that creates the TreeNode of an Underbarrel Weapon.</param>
+		/// <param name="funcNewAccessoryNode">Function that creates the TreeNode of an Accessory.</param>
+		/// <param name="funcNewModNode">Function that creates the TreeNode of a Weapon Mod.</param>
 		/// <param name="blnCreateChildren">Whether or not child items should be created.</param>
-		public void Create(XmlNode objXmlWeapon, Character objCharacter, TreeNode objNode, ContextMenuStrip cmsWeapon, ContextMenuStrip cmsWeaponAccessory, ContextMenuStrip cmsWeaponMod, bool blnCreateChildren = true)
+		public void Create(XmlNode objXmlWeapon, ICharacter objCharacter, ITreeNodeView objNode, Func<ITreeNodeView> funcNewWeaponNode, Func<ITreeNodeView> funcNewAccessoryNode, Func<ITreeNodeView> funcNewModNode, bool blnCreateChildren = true)
 		{
 			_strName = objXmlWeapon["name"].InnerText;
 			_strCategory = objXmlWeapon["category"].InnerText;
@@ -174,14 +172,13 @@ namespace Chummer
 			{
 				XmlNode objXmlUnderbarrel = objXmlWeapon.SelectSingleNode("underbarrel");
 				Weapon objUnderbarrelWeapon = new Weapon(_objCharacter);
-				TreeNode objUnderbarrelNode = new TreeNode();
+				ITreeNodeView objUnderbarrelNode = funcNewWeaponNode();
 				XmlNode objXmlWeaponNode = objXmlDocument.SelectSingleNode("/chummer/weapons/weapon[name = \"" + objXmlUnderbarrel.InnerText + "\"]");
-				objUnderbarrelWeapon.Create(objXmlWeaponNode, _objCharacter, objUnderbarrelNode, cmsWeapon, cmsWeaponAccessory, cmsWeaponMod);
+				objUnderbarrelWeapon.Create(objXmlWeaponNode, _objCharacter, objUnderbarrelNode, funcNewWeaponNode, funcNewAccessoryNode, funcNewModNode);
 				objUnderbarrelWeapon.IncludedInWeapon = true;
 				objUnderbarrelWeapon.IsUnderbarrelWeapon = true;
 				_lstUnderbarrel.Add(objUnderbarrelWeapon);
-				objUnderbarrelNode.ContextMenuStrip = cmsWeapon;
-				objNode.Nodes.Add(objUnderbarrelNode);
+				objNode.Add(objUnderbarrelNode);
 			}
 
 			// If there are any Accessories that come with the Weapon, add them.
@@ -191,15 +188,14 @@ namespace Chummer
 				foreach (XmlNode objXmlWeaponAccessory in objXmlAccessoryList)
 				{
 					XmlNode objXmlAccessory = objXmlDocument.SelectSingleNode("/chummer/accessories/accessory[name = \"" + objXmlWeaponAccessory.InnerText + "\"]");
-					TreeNode objAccessoryNode = new TreeNode();
+					ITreeNodeView objAccessoryNode = funcNewAccessoryNode();
 					WeaponAccessory objAccessory = new WeaponAccessory(_objCharacter);
 					objAccessory.Create(objXmlAccessory, objAccessoryNode, objXmlAccessory["mount"].InnerText);
 					objAccessory.IncludedInWeapon = true;
 					objAccessory.Parent = this;
-					objAccessoryNode.ContextMenuStrip = cmsWeaponAccessory;
 					_lstAccessories.Add(objAccessory);
 
-					objNode.Nodes.Add(objAccessoryNode);
+					objNode.Add(objAccessoryNode);
 					objNode.Expand();
 				}
 			}
@@ -210,13 +206,12 @@ namespace Chummer
 				XmlNodeList objXmlModList = objXmlWeapon.SelectNodes("mods/mod");
 				foreach (XmlNode objXmlWeaponMod in objXmlModList)
 				{
-					TreeNode objModNode = new TreeNode();
+					ITreeNodeView objModNode = funcNewModNode();
 					XmlNode objXmlMod = objXmlDocument.SelectSingleNode("/chummer/mods/mod[name = \"" + objXmlWeaponMod.InnerText + "\"]");
 					WeaponMod objMod = new WeaponMod(_objCharacter);
 					objMod.Create(objXmlMod, objModNode);
 					objMod.IncludedInWeapon = true;
 					objMod.Parent = this;
-					objModNode.ContextMenuStrip = cmsWeaponMod;
 					_lstWeaponMods.Add(objMod);
 
 					if (objXmlWeaponMod.Attributes["rating"] != null)
@@ -224,7 +219,7 @@ namespace Chummer
 
 					objModNode.Text = objMod.DisplayName;
 
-					objNode.Nodes.Add(objModNode);
+					objNode.Add(objModNode);
 					objNode.Expand();
 				}
 			}
@@ -572,8 +567,7 @@ namespace Chummer
 		public void Print(XmlTextWriter objWriter)
 		{
 			// Find the piece of Gear that created this item if applicable.
-			CommonFunctions objFunctions = new CommonFunctions(_objCharacter);
-			Gear objGear = objFunctions.FindGearByWeaponID(_guiID.ToString(), _objCharacter.Gear);
+			Gear objGear = _objCharacter.FindGearByWeaponID(_guiID.ToString());
 
 			objWriter.WriteStartElement("weapon");
 			objWriter.WriteElementString("name", DisplayNameShort);
@@ -676,12 +670,10 @@ namespace Chummer
 				return "";
 			else
 			{
-				CommonFunctions objFunctions = new CommonFunctions(_objCharacter);
-				Gear objAmmo = objFunctions.FindGear(guiAmmo.ToString(), _objCharacter.Gear);
+				Gear objAmmo = _objCharacter.FindGear(guiAmmo.ToString());
 				if (objAmmo == null)
 				{
-					Vehicle objVehicle = new Vehicle(_objCharacter);
-					objAmmo = objFunctions.FindVehicleGear(guiAmmo.ToString(), _objCharacter.Vehicles, out objVehicle);
+					objAmmo = _objCharacter.FindVehicleGear(guiAmmo.ToString());
 				}
 
 				if (objAmmo != null)
@@ -1573,7 +1565,6 @@ namespace Chummer
 
 			try
 			{
-				CommonFunctions objFunctions = new CommonFunctions(_objCharacter);
 				CharacterOptions objOptions = _objCharacter.Options;
 				int intBonus = 0;
 				if (objOptions.MoreLethalGameplay)
@@ -1584,11 +1575,10 @@ namespace Chummer
 				if (AmmoLoaded != "")
 				{
 					// Look for Ammo on the character.
-					Gear objGear = objFunctions.FindGear(AmmoLoaded, _objCharacter.Gear);
+					Gear objGear = _objCharacter.FindGear(AmmoLoaded);
 					if (objGear == null)
 					{
-						Vehicle objFoundVehicle;
-						objGear = objFunctions.FindVehicleGear(AmmoLoaded, _objCharacter.Vehicles, out objFoundVehicle);
+						objGear = _objCharacter.FindVehicleGear(AmmoLoaded);
 					}
 					if (objGear != null)
 					{
@@ -2017,17 +2007,15 @@ namespace Chummer
 				}
 
 				bool blnAPReplaced = false;
-				CommonFunctions objFunctions = new CommonFunctions(_objCharacter);
 
 				// Check if the Weapon has Ammunition loaded and look for any Damage bonus/replacement.
 				if (AmmoLoaded != "")
 				{
 					// Look for Ammo on the character.
-					Gear objGear = objFunctions.FindGear(AmmoLoaded, _objCharacter.Gear);
+					Gear objGear = _objCharacter.FindGear(AmmoLoaded);
 					if (objGear == null)
 					{
-						Vehicle objFoundVehicle;
-						objGear = objFunctions.FindVehicleGear(AmmoLoaded, _objCharacter.Vehicles, out objFoundVehicle);
+						objGear = _objCharacter.FindVehicleGear(AmmoLoaded);
 					}
 					if (objGear != null)
 					{
@@ -2152,16 +2140,14 @@ namespace Chummer
 					intRCBase = 0;
 				}
 
-				CommonFunctions objFunctions = new CommonFunctions(_objCharacter);
 
 				// Check if the Weapon has Ammunition loaded and look for any Recoil bonus.
 				if (AmmoLoaded != "")
 				{
-					Gear objGear = objFunctions.FindGear(AmmoLoaded, _objCharacter.Gear);
+					Gear objGear = _objCharacter.FindGear(AmmoLoaded);
 					if (objGear == null)
 					{
-						Vehicle objFoundVehicle;
-						objGear = objFunctions.FindVehicleGear(AmmoLoaded, _objCharacter.Vehicles, out objFoundVehicle);
+						objGear = _objCharacter.FindVehicleGear(AmmoLoaded);
 					}
 
 					if (objGear != null)
@@ -2470,13 +2456,11 @@ namespace Chummer
 				// Check if the Weapon has Ammunition loaded and look for any Range bonus.
 				if (AmmoLoaded != "")
 				{
-					CommonFunctions objFunctions = new CommonFunctions(_objCharacter);
 
-					Gear objGear = objFunctions.FindGear(AmmoLoaded, _objCharacter.Gear);
+					Gear objGear = _objCharacter.FindGear(AmmoLoaded);
 					if (objGear == null)
 					{
-						Vehicle objFoundVehicle;
-						objGear = objFunctions.FindVehicleGear(AmmoLoaded, _objCharacter.Vehicles, out objFoundVehicle);
+						objGear = _objCharacter.FindVehicleGear(AmmoLoaded);
 					}
 
 					if (objGear != null)
@@ -3070,7 +3054,7 @@ namespace Chummer
 		private string _strSource = "";
 		private string _strPage = "";
 		private string _strNotes = "";
-		private readonly Character _objCharacter;
+		private readonly ICharacter _objCharacter;
 		private string _strAltName = "";
 		private string _strAltPage = "";
 		private XmlNode _nodAllowGear;
@@ -3080,7 +3064,7 @@ namespace Chummer
 		private string _strDicePool = "";
 
 		#region Constructor, Create, Save, Load, and Print Methods
-		public WeaponAccessory(Character objCharacter)
+		public WeaponAccessory(ICharacter objCharacter)
 		{
 			// Create the GUID for the new Weapon.
 			_guiID = Guid.NewGuid();
@@ -3091,7 +3075,7 @@ namespace Chummer
 		/// <param name="objXmlAccessory">XmlNode to create the object from.</param>
 		/// <param name="objNode">TreeNode to populate a TreeView.</param>
 		/// <param name="strMount">Mount slot that the Weapon Accessory will consume.</param>
-		public void Create(XmlNode objXmlAccessory, TreeNode objNode, string strMount)
+		public void Create(XmlNode objXmlAccessory, ITreeNodeView objNode, string strMount)
 		{
 			_strName = objXmlAccessory["name"].InnerText;
 			_strMount = strMount;
@@ -3754,7 +3738,7 @@ namespace Chummer
 		private bool _blnIncludedInWeapon = false;
 		private bool _blnInstalled = true;
 		private string _strNotes = "";
-		private readonly Character _objCharacter;
+		private readonly ICharacter _objCharacter;
 		private string _strAltName = "";
 		private string _strAltPage = "";
 		private string _strExtra = "";
@@ -3762,7 +3746,7 @@ namespace Chummer
 		private Weapon _objParent;
 
 		#region Constructor, Create, Save, Load, and Print Methods
-		public WeaponMod(Character objCharacter)
+		public WeaponMod(ICharacter objCharacter)
 		{
 			// Create the GUID for the new Mod.
 			_guiID = Guid.NewGuid();
@@ -3772,7 +3756,7 @@ namespace Chummer
 		/// Create a Weapon Modification from an XmlNode and return the TreeNodes for it.
 		/// <param name="objXmlMod">XmlNode to create the object from.</param>
 		/// <param name="objNode">TreeNode to populate a TreeView.</param>
-		public void Create(XmlNode objXmlMod, TreeNode objNode)
+		public void Create(XmlNode objXmlMod, ITreeNodeView objNode)
 		{
 			_strName = objXmlMod["name"].InnerText;
 			_intSlots = Convert.ToInt32(objXmlMod["slots"].InnerText);

@@ -129,7 +129,7 @@ public sealed class AppAdaptersTests
     public void Included_armor_mods_get_a_new_node_with_the_context_menu_in_a_tree_node_view()
     {
         using ContextMenuStrip menu = new();
-        Func<ITreeNodeView> createNode = ArmorModNodes.Create(menu);
+        Func<ITreeNodeView> createNode = ContextMenuNodes.Create(menu);
 
         TreeNodeView first = Assert.IsType<TreeNodeView>(createNode());
         TreeNodeView second = Assert.IsType<TreeNodeView>(createNode());
