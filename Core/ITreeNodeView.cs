@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace Chummer
 {
 	/// <summary>
@@ -30,6 +32,11 @@ namespace Chummer
 		/// </summary>
 		/// <param name="objChild">Node to add.</param>
 		void Add(ITreeNodeView objChild);
+
+		/// <summary>
+		/// The node's children, in order.
+		/// </summary>
+		IEnumerable<ITreeNodeView> Children { get; }
 
 		/// <summary>
 		/// Expand the node so that its children show.

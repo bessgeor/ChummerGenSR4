@@ -21,6 +21,11 @@ namespace Chummer
 		string DisplayName { get; }
 
 		/// <summary>
+		/// Whether or not the Weapon is mounted on a Vehicle.
+		/// </summary>
+		bool VehicleMounted { get; set; }
+
+		/// <summary>
 		/// Permanently alter the Weapon's Range category.
 		/// </summary>
 		/// <param name="strRange">Name of the new Range category to use.</param>

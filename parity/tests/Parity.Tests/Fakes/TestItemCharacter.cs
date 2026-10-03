@@ -22,6 +22,9 @@ internal sealed class TestItemCharacter : ICharacter
     public string Metatype => throw Unused();
     public bool OverrideSpecialAttributeEssenceLoss => throw Unused();
     public int EssencePenalty => throw Unused();
+    public bool IgnoreRules => throw Unused();
+    public Attribute BOD => throw Unused();
+    public Attribute STR => throw Unused();
     public Attribute CHA => throw Unused();
     public Attribute INT => throw Unused();
     public Attribute LOG => throw Unused();
@@ -55,6 +58,9 @@ internal sealed class TestItemCharacter : ICharacter
     public Attribute GetAttribute(string strAttribute) => throw Unused();
     IImprovementAttribute IImprovementCharacter.GetAttribute(string strAttribute) => throw Unused();
     public string GetObjectName(Improvement objImprovement) => throw Unused();
+    public Gear FindGear(string strGuid) => throw Unused();
+    public Gear FindGearByWeaponID(string strGuid) => throw Unused();
+    public Gear FindVehicleGear(string strGuid) => throw Unused();
     public void ConvertAdapsinGrades() => throw Unused();
 
     private static NotSupportedException Unused() => new("The test character does not provide this member.");
