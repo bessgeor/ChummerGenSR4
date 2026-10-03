@@ -38,6 +38,9 @@ export type RegistryEntry = z.infer<typeof RegistryEntrySchema>;
 /** `parity/discovery/registry.json`: every admitted scenario, by case name. */
 export const RegistrySchema = z.strictObject({
   schemaVersion: z.literal(1),
+  /** The timings its case file renders with. */
+  startupDelaySeconds: z.number().int().min(0),
+  settleMilliseconds: z.number().int().min(0),
   entries: z.array(RegistryEntrySchema),
 });
 export type Registry = z.infer<typeof RegistrySchema>;
