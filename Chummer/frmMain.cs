@@ -213,7 +213,7 @@ namespace Chummer
 			{
 			}
 
-			frmCreate frmNewCharacter = new frmCreate(objCharacter);
+			frmCreate frmNewCharacter = new frmCreate(new CharacterViewModel(objCharacter));
 			frmNewCharacter.MdiParent = this;
 			frmNewCharacter.WindowState = FormWindowState.Maximized;
 			frmNewCharacter.Show();
@@ -482,7 +482,7 @@ namespace Chummer
 			{
 			}
 
-			frmCreate frmNewCharacter = new frmCreate(objCharacter);
+			frmCreate frmNewCharacter = new frmCreate(new CharacterViewModel(objCharacter));
 			frmNewCharacter.MdiParent = this;
 			frmNewCharacter.WindowState = FormWindowState.Maximized;
 			frmNewCharacter.Show();
@@ -537,7 +537,7 @@ namespace Chummer
 				// Show the character form.
 				if (!objCharacter.Created)
 				{
-					frmCreate frmCharacter = new frmCreate(objCharacter);
+					frmCreate frmCharacter = new frmCreate(new CharacterViewModel(objCharacter));
 					frmCharacter.MdiParent = this;
 					frmCharacter.WindowState = FormWindowState.Maximized;
 					frmCharacter.Loading = true;
@@ -545,7 +545,7 @@ namespace Chummer
 				}
 				else
 				{
-					frmCareer frmCharacter = new frmCareer(objCharacter);
+					frmCareer frmCharacter = new frmCareer(new CharacterViewModel(objCharacter));
 					frmCharacter.MdiParent = this;
 					frmCharacter.WindowState = FormWindowState.Maximized;
 					frmCharacter.Loading = true;

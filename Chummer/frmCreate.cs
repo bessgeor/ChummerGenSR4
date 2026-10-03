@@ -13,6 +13,7 @@ namespace Chummer
 	public partial class frmCreate : Form
 	{
 		// Set the default culture to en-US so we work with decimals correctly.
+		private CharacterViewModel _objViewModel;
 		private Character _objCharacter;
 		private MainController _objController;
 
@@ -33,9 +34,10 @@ namespace Chummer
 		private ImprovementManager _objImprovementManager;
 
 		#region Form Events
-		public frmCreate(Character objCharacter)
+		public frmCreate(CharacterViewModel objViewModel)
 		{
-			_objCharacter = objCharacter;
+			_objViewModel = objViewModel;
+			_objCharacter = objViewModel.Character;
 			_objOptions = _objCharacter.Options;
 			_objFunctions = new CommonFunctions(_objCharacter);
 			_objImprovementManager = new ImprovementManager(_objCharacter);
@@ -1333,6 +1335,7 @@ namespace Chummer
 
 				// Trash the global variables and dispose of the Form.
 				_objOptions = null;
+				_objViewModel = null;
 				_objCharacter = null;
 				_objImprovementManager = null;
 				this.Dispose(true);
@@ -1879,12 +1882,12 @@ namespace Chummer
 
 		private void tsbPrint_Click(object sender, EventArgs e)
 		{
-			_objCharacter.Print(false);
+			_objViewModel.Print(false);
 		}
 
 		private void mnuFilePrint_Click(object sender, EventArgs e)
 		{
-			_objCharacter.Print(false);
+			_objViewModel.Print(false);
 		}
 
 		private void mnuFileClose_Click(object sender, EventArgs e)
@@ -16810,8 +16813,8 @@ namespace Chummer
 				_objImprovementManager.Commit();
 
 				// If the Viewer window is open for this character, call its RefreshView method which updates it asynchronously
-				if (_objCharacter.PrintWindow != null)
-					_objCharacter.PrintWindow.RefreshView();
+				if (_objViewModel.PrintWindow != null)
+					_objViewModel.PrintWindow.RefreshView();
 			}
 			RefreshImprovements();
 			UpdateReputation();

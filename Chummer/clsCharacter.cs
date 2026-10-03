@@ -190,8 +190,6 @@ namespace Chummer
 		public event CharacterNameChangedHandler CharacterNameChanged;
 		public event BlackMarketEnabledChangedHandler BlackMarketEnabledChanged;
 
-		private frmViewer _frmPrintView;
-		
 		#region Initialization, Save, Load, Print, and Reset Methods
 		/// <summary>
 		/// Character.
@@ -2156,66 +2154,6 @@ namespace Chummer
 
 			// </character>
 			objWriter.WriteEndElement();
-		}
-
-		/// <summary>
-		/// Print this character and open the View Character window.
-		/// </summary>
-		/// <param name="blnDialog">Whether or not the window should be shown as a dialogue window.</param>
-		public void Print(bool blnDialog = true)
-		{
-			// Write the Character information to a MemoryStream so we don't need to create any files.
-			MemoryStream objStream = new MemoryStream();
-			XmlTextWriter objWriter = new XmlTextWriter(objStream, Encoding.UTF8);
-
-			// Being the document.
-			objWriter.WriteStartDocument();
-
-			// </characters>
-			objWriter.WriteStartElement("characters");
-
-			PrintToStream(objStream, objWriter);
-
-			// </characters>
-			objWriter.WriteEndElement();
-
-			// Finish the document and flush the Writer and Stream.
-			objWriter.WriteEndDocument();
-			objWriter.Flush();
-			objStream.Flush();
-
-			// Read the stream.
-			StreamReader objReader = new StreamReader(objStream);
-			objStream.Position = 0;
-			XmlDocument objCharacterXML = new XmlDocument();
-
-			// Put the stream into an XmlDocument and send it off to the Viewer.
-			string strXML = objReader.ReadToEnd();
-			objCharacterXML.LoadXml(strXML);
-
-			objWriter.Close();
-			objStream.Close();
-
-			// If a reference to the Viewer window does not yet exist for this character, open a new Viewer window and set the reference to it.
-			// If a Viewer window already exists for this character, use it instead.
-			if (_frmPrintView == null)
-			{
-				List<Character> lstCharacters = new List<Character>();
-				lstCharacters.Add(this);
-				frmViewer frmViewCharacter = new frmViewer();
-				frmViewCharacter.Characters = lstCharacters;
-				frmViewCharacter.CharacterXML = objCharacterXML;
-				_frmPrintView = frmViewCharacter;
-				if (blnDialog)
-					frmViewCharacter.ShowDialog();
-				else
-					frmViewCharacter.Show();
-			}
-			else
-			{
-				_frmPrintView.Activate();
-				_frmPrintView.RefreshView();
-			}
 		}
 
 		/// <summary>
@@ -5831,23 +5769,6 @@ namespace Chummer
 			}
 
 			return false;
-		}
-		#endregion
-
-		#region Application Properties
-		/// <summary>
-		/// The frmViewer window being used by the character.
-		/// </summary>
-		public frmViewer PrintWindow
-		{
-			get
-			{
-				return _frmPrintView;
-			}
-			set
-			{
-				_frmPrintView = value;
-			}
 		}
 		#endregion
 
