@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const rankPromptVersion = "rank-v1";
+export const rankPromptVersion = "rank-v2";
 export const scenarioPromptVersion = "scenario-v1";
 
 export const feasibilities = ["feasible", "uncertain", "infeasible"] as const;

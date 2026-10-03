@@ -111,7 +111,8 @@ test("the rank context is sealed with its priors, and its hash covers what it ho
   strictEqual(without.context.priors, undefined);
   strictEqual(existsSync(join(folder, "priors")), false);
   notStrictEqual(without.hash, hash);
-  match(rankPrompt(context, paths), /^PROMPT_VERSION=rank-v1\n/);
+  match(rankPrompt(context, paths), /^PROMPT_VERSION=rank-v2\n/);
+  match(rankPrompt(context, paths), new RegExp(`in the order of targets\\[\\]: ${targets.length} entries`));
   match(rankPrompt(context, paths), /PRIOR FIXES/);
   strictEqual(rankPrompt(without.context, paths).includes("PRIOR FIXES"), false);
   await rejects(sealRankContext({ ...base, priors: [{ ...prior, folder: join(archive, "missing") }] }, folder), SetupError);

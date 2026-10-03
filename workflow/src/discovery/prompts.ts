@@ -50,6 +50,7 @@ export function rankPrompt(value: RankContext, paths: PromptPaths): string {
     ...situation(paths, ""),
     "",
     "Rank every target in targets[] exactly once by how likely a scenario of these actions, on one of the fixture cases, shows it.",
+    `Answer rankings in the order of targets[]: ${value.targets.length} entries, the k-th for the k-th target; never repeat a targetId.`,
     "For each target answer targetId, score (0 to 1), feasibility (feasible: tab selection on some fixture shows it; uncertain: it depends on",
     "something you could not settle; infeasible: it needs an action the scenarios do not have, or no fixture has what it needs), case (the",
     "fixture case you would use, or null) and reason (what in the source and the fixtures supports your score).",

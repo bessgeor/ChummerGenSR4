@@ -55,7 +55,7 @@ test("a proven scenario is admitted with its proofs, its records are labelled an
   deepStrictEqual((await getRecord(harness.store, "rank", document.rank.record!)).labels.discovery?.outcome, "proven");
   ok(harness.lines.some((line) => line.startsWith(`Scenario ${skills}: proven; case build-Alpha@`)), harness.lines.join("\n"));
   ok(harness.lines.some((line) => line.startsWith("Discovery: 2 targets, 1 selected, rank done; 1 proven; capture run")), harness.lines.join("\n"));
-  match(harness.agents.calls[0]!.prompt, /^PROMPT_VERSION=rank-v1/);
+  match(harness.agents.calls[0]!.prompt, /^PROMPT_VERSION=rank-v2/);
   match(harness.agents.calls[1]!.prompt, /^PROMPT_VERSION=scenario-v1/);
 });
 
