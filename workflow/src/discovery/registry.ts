@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { canonicalJson } from "../diagnosis/context.js";
@@ -49,13 +49,22 @@ export function readRegistry(paths: RegistryPaths): Registry | null {
   return registry;
 }
 
-/** Writes the registry and its rendered case file together. */
+/** Writes the registry and its rendered case file together; a registry without entries has no case file to render. */
 export function writeRegistry(paths: RegistryPaths, registry: Registry): void {
   const checked = RegistrySchema.parse(registry);
+  if (checked.entries.length === 0) throw new Error("A registry without entries is never written: its case file would hold no character.");
   mkdirSync(dirname(paths.registry), { recursive: true });
   mkdirSync(dirname(paths.caseFile), { recursive: true });
-  writeFileSync(paths.registry, `${JSON.stringify(checked, null, 2)}\n`);
-  writeFileSync(paths.caseFile, `${JSON.stringify(renderCaseFile(checked), null, 2)}\n`);
+  // Both files are complete before either name changes, so an interruption cannot leave a half-written file behind.
+  const staged = [[paths.registry, checked], [paths.caseFile, renderCaseFile(checked)]] as const;
+  for (const [path, document] of staged) writeFileSync(`${path}.tmp`, `${JSON.stringify(document, null, 2)}\n`);
+  for (const [path] of staged) renameSync(`${path}.tmp`, path);
+}
+
+/** Removes the registry and its case file together. */
+export function removeRegistry(paths: RegistryPaths): void {
+  rmSync(paths.registry, { force: true });
+  rmSync(paths.caseFile, { force: true });
 }
 
 /** The control and binding IDs the registry's entries proved for a source; entries of another source count for nothing. */

@@ -13,17 +13,20 @@ function hasGold(item: DiscoveryDatasetItem): boolean {
   return item.gold.kind === "scenario" || item.gold.proven.length + item.gold.notProven.length > 0;
 }
 
-/** A rank answer that passed validation is valid; it reaches when the target selection would take first was proven, and fails when that target ran without proof. */
+/**
+ * A rank answer that passed validation is valid; it reaches when the target selection would take first was proven, and fails when that target ran
+ * without proof or, on an item whose gold can decide it, when it leaves no target to take.
+ */
 export function scoreRank(output: RankOutput, item: DiscoveryDatasetItem): DiscoveryScores {
   const best = selectableRankings(output)[0];
   const gold = item.gold?.kind === "rank" ? item.gold : null;
-  const reached = gold === null || best === undefined ? null : gold.proven.includes(best.targetId) ? true : gold.notProven.includes(best.targetId) ? false : null;
+  const reached = gold === null ? null : best === undefined ? hasGold(item) ? false : null : gold.proven.includes(best.targetId) ? true : gold.notProven.includes(best.targetId) ? false : null;
   return { valid: true, reached };
 }
 
 /**
  * A scenario plan is valid when it passes the plan validator; an abstention has no validity. An answer reaches when its plan is
- * valid and selects every tab of the proven plan; an abstention on an item with a proven plan does not.
+ * valid, uses the proven plan's fixture case and selects every tab it selected; an abstention on an item with a proven plan does not.
  */
 export function scoreScenario(output: ScenarioOutput, item: DiscoveryDatasetItem, context: ScenarioContext, labels: readonly string[]): DiscoveryScores {
   const plan = output.plan;
@@ -31,7 +34,7 @@ export function scoreScenario(output: ScenarioOutput, item: DiscoveryDatasetItem
   const gold = item.gold?.kind === "scenario" ? item.gold : null;
   if (gold === null) return { valid, reached: null };
   const selected = new Set(plan === null ? [] : selectedTabNames(plan.actions));
-  return { valid, reached: valid === true && gold.selectedTabs.every((tab) => selected.has(tab)) };
+  return { valid, reached: valid === true && plan!.case === gold.case && gold.selectedTabs.every((tab) => selected.has(tab)) };
 }
 
 /** A failed job fails both metrics where the item can decide them. */

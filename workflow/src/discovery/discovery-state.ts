@@ -40,6 +40,8 @@ export function pendingJob<T>(): JobState<T> {
 /** What `prepare` found and wrote: the baseline, the guards' identities, the targets and the rank context. */
 export type Prepared = {
   readonly baselineFolder: string;
+  /** The SHA-256 of the baseline's source inventory and coverage manifest, which later nodes must find unchanged. */
+  readonly baselineDigest: { readonly inventory: string; readonly manifest: string };
   readonly sourceSha256: string;
   readonly candidateSha256: string;
   readonly candidateSource: string;

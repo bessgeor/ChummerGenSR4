@@ -159,7 +159,7 @@ export class FakeCapture {
   constructor(
     private readonly out: string,
     private readonly treeFor: (caseName: string, capture: string) => UiNode[],
-    private readonly options: { failed?: string; differing?: readonly string[]; status?: 0 | 1 | 2; /** Thrown by the first call only. */ error?: Error } = {},
+    private readonly options: { failed?: string; differing?: readonly string[]; status?: 0 | 1 | 2; /** Thrown by the first call only. */ error?: Error; /** The candidate SHA-256 the run's summary records. */ candidateSha256?: string } = {},
   ) {}
 
   async run(caseFile: string, cases: readonly string[]): Promise<{ status: 0 | 1 | 2; runFolder: string }> {
@@ -192,6 +192,11 @@ export class FakeCapture {
       })),
     };
     writeFileSync(join(folder, "results.json"), JSON.stringify(results));
+    if (this.options.candidateSha256 !== undefined) {
+      const summary = JSON.parse(readFileSync(join(folder, "summary.json"), "utf8")) as { candidate: { sha256: string } };
+      summary.candidate.sha256 = this.options.candidateSha256;
+      writeFileSync(join(folder, "summary.json"), JSON.stringify(summary));
+    }
     return { status: this.options.status ?? (this.options.failed !== undefined ? 2 : this.options.differing !== undefined ? 1 : 0), runFolder: folder };
   }
 }
@@ -218,7 +223,7 @@ export type Harness = {
 /** A discovery graph on the synthetic repository with fake agents, a fake capture and the real service. */
 export async function discoveryHarness(
   reply: (job: AgentJob<unknown>, attempt: number) => Reply, treeFor: (caseName: string, capture: string) => UiNode[] = (_, capture) => formTree(capture === "common" ? "Common" : "Skills"),
-  options: { capture?: ConstructorParameters<typeof FakeCapture>[2]; budgetMinutes?: number; repository?: Awaited<ReturnType<typeof discoveryRepository>> } = {},
+  options: { capture?: ConstructorParameters<typeof FakeCapture>[2]; budgetMinutes?: number; repository?: Awaited<ReturnType<typeof discoveryRepository>>; environment?: string } = {},
 ): Promise<Harness> {
   const { root, paths, out } = options.repository ?? await discoveryRepository();
   const agents = new FakeAgents(reply);
@@ -234,6 +239,7 @@ export async function discoveryHarness(
   const service = new DiscoveryService({ repositoryRoot: root, paths, folders, registry, git: processGit(root), jobs, buildTools: async () => fingerprints, now, log });
   const scenarioRun = new ScenarioRun({
     repositoryRoot: root, folders, registry, now, log, capture: (runOptions, cases) => capture.run(runOptions.caseFile, cases), changedInputs: async () => [],
+    environment: async () => options.environment ?? fingerprints.environment,
   });
   const steps: DiscoverySteps = {
     prepare: (threadId, discovery, signal) => service.prepare(threadId, discovery, signal), rank: (state, store, signal) => service.rank(state, store, signal),
@@ -245,7 +251,7 @@ export async function discoveryHarness(
   const graph = buildDiscoveryGraph(steps).compile({ checkpointer: new MemorySaver(), store });
   const settings = resolveAgentSettings({ runBudgetMinutes: options.budgetMinutes ?? 120 });
   const resolveOptions = (args: DiscoverArguments): DiscoveryOptions => ({
-    from: args.from, caseFile: join(root, "parity", "cases", "characters.json"), settingsOverlay: null, threshold: null, canonicalCache: null, canonicalCacheSource: "off",
+    from: args.from, caseFile: args.caseFile ?? join(root, "parity", "cases", "characters.json"), settingsOverlay: null, threshold: null, canonicalCache: null, canonicalCacheSource: "off",
     targets: args.targets, unattended: false, agents: settings, certificates: join(out, "certificates"),
   });
   const dependencies = { graph, resolveOptions, certificateProblems: () => [], log, now };

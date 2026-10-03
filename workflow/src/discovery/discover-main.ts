@@ -19,7 +19,7 @@ import { createScratchFolder } from "../host/scratch-folder.js";
 import { SetupError } from "../host/setup-error.js";
 import { loadProfile, localDataFolder } from "../options/profile.js";
 import { workflowPaths } from "../paths.js";
-import { CaptureStep, runCaptureRunner } from "../steps/capture-step.js";
+import { CaptureStep, readEnvironmentFingerprint, runCaptureRunner } from "../steps/capture-step.js";
 import { CompareStep } from "../steps/compare-step.js";
 import { captureInputs, changedInputs } from "../steps/input-fingerprints.js";
 import { StepStore } from "../steps/step-store.js";
@@ -78,6 +78,7 @@ async function main(): Promise<number> {
       paths, host, createScratchFolder, options, selection: { cases, captures: null }, subject: "discovery capture", uiTrees: true, ...(signal === undefined ? {} : { signal }),
     }),
     changedInputs: (options, fingerprints) => changedInputs(paths, options, fingerprints, captureInputs),
+    environment: (signal) => readEnvironmentFingerprint(paths, host, createScratchFolder, "environment discovery", signal),
   });
   const steps: DiscoverySteps = {
     prepare: (threadId, options, signal) => service.prepare(threadId, options, signal),

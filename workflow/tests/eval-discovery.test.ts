@@ -11,7 +11,7 @@ import type { ScenarioContext } from "../src/discovery/discovery-context.js";
 import { certificatePath, certificateProblems, certify } from "../src/evals/certificate.js";
 import { compareRuns } from "../src/evals/comparison.js";
 import { runEvalCommand } from "../src/evals/eval-commands.js";
-import { freezeDiscoveryDataset, loadDiscoveryDataset, type DiscoveryDatasetItem } from "../src/evals/discovery-dataset.js";
+import { freezeDiscoveryDataset, loadDiscoveryDataset, mergeGold, type DiscoveryDatasetItem } from "../src/evals/discovery-dataset.js";
 import { failedDiscoveryScores, scoreRank, scoreScenario } from "../src/evals/discovery-scoring.js";
 import { listRecords } from "../src/evals/eval-record.js";
 import { startEvalRun, summaryLines } from "../src/evals/eval-run.js";
@@ -87,12 +87,20 @@ test("only labelled, succeeded workflow records are frozen, and nothing to freez
 
 const item = (gold: DiscoveryDatasetItem["gold"]): DiscoveryDatasetItem => ({ itemId: "i", key: "k", contextHash: "0".repeat(64), sourceIdentity: "0".repeat(64), records: ["r"], gold, partition: "test" });
 
+test("a rank item shared by threads takes every proven target, and unproven ones only where no thread proved them", () => {
+  deepStrictEqual(mergeGold([{ kind: "rank", proven: [], notProven: ["a"] }, { kind: "rank", proven: ["a", "b"], notProven: ["c"] }]), { kind: "rank", proven: ["a", "b"], notProven: ["c"] });
+  deepStrictEqual(mergeGold([null, { kind: "scenario", case: "x", selectedTabs: [] }]), { kind: "scenario", case: "x", selectedTabs: [] });
+  deepStrictEqual(mergeGold([null]), null);
+});
+
 test("rank answers reach when their best feasible target was proven and fail when it ran without proof", () => {
   const proven = item({ kind: "rank", proven: ["a"], notProven: ["b"] });
   const ranking = (targetId: string, score: number, feasibility = "feasible") => ({ targetId, score, feasibility: feasibility as "feasible", case: null, reason: "r" });
   deepStrictEqual(scoreRank({ rankings: [ranking("b", 0.4), ranking("a", 0.9)] }, proven), { valid: true, reached: true });
   deepStrictEqual(scoreRank({ rankings: [ranking("a", 0.9, "infeasible"), ranking("b", 0.4)] }, proven), { valid: true, reached: false });
   deepStrictEqual(scoreRank({ rankings: [ranking("c", 0.9), ranking("a", 0.4)] }, proven), { valid: true, reached: null });
+  deepStrictEqual(scoreRank({ rankings: [ranking("a", 0.9, "infeasible")] }, proven), { valid: true, reached: false });
+  deepStrictEqual(scoreRank({ rankings: [ranking("a", 0.9, "infeasible")] }, item({ kind: "rank", proven: [], notProven: [] })), { valid: true, reached: null });
   deepStrictEqual(scoreRank({ rankings: [ranking("a", 0.9)] }, item(null)), { valid: true, reached: null });
   deepStrictEqual([failedDiscoveryScores(proven), failedDiscoveryScores(item({ kind: "rank", proven: [], notProven: [] }))], [{ valid: false, reached: false }, { valid: false, reached: null }]);
 });
@@ -105,6 +113,7 @@ test("scenario answers are valid when the plan passes the validator and reach wh
   const answer = (tab: string) => ({ outcome: "plan" as const, reason: "r", plan: plan(tab) as never });
   deepStrictEqual(scoreScenario(answer("Skills"), gold, context, ["Karma"]), { valid: true, reached: true });
   deepStrictEqual(scoreScenario(answer("Common"), gold, context, ["Karma"]), { valid: true, reached: false });
+  deepStrictEqual(scoreScenario(answer("Skills"), item({ kind: "scenario", case: "career-Other", selectedTabs: [] }), context, ["Karma"]), { valid: true, reached: false });
   deepStrictEqual(scoreScenario(answer("Skills"), gold, context, []), { valid: false, reached: false });
   deepStrictEqual(scoreScenario({ outcome: "abstain", reason: "r", plan: null }, item(null), context, []), { valid: null, reached: null });
   deepStrictEqual(scoreScenario({ outcome: "abstain", reason: "r", plan: null }, gold, context, []), { valid: null, reached: false });

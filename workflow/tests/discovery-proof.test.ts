@@ -10,6 +10,8 @@ import type { RegistryEntry } from "../src/discovery/registry-document.js";
 import { admit, emptyRegistry, provedFor, readRegistry, registryPaths, renderCaseFile, writeRegistry } from "../src/discovery/registry.js";
 import { actionsSha256, scenarioName, writeScenarioCaseFile } from "../src/discovery/scenario-cases.js";
 import { planCases } from "../src/cases/case-plan.js";
+import { canonicalJson } from "../src/diagnosis/context.js";
+import { sha256Text } from "../src/steps/fingerprint.js";
 import { SetupError } from "../src/host/setup-error.js";
 import { formTree, scratch, writeRun, type CaseSpec } from "./inventory-fixtures.js";
 import { inventory, manifestWith, scope } from "./discovery-fixtures.js";
@@ -117,7 +119,8 @@ function entry(name: string, overrides: Partial<RegistryEntry> = {}): RegistryEn
 
 test("scenario names are the target slug and the actions' hash, and a scenario case file loads with its case names", () => {
   const name = scenarioName("frmCreate/tabStreetGear/tabArmor", "build-Alpha", actions);
-  strictEqual(name, `frmcreate-tabstreetgear-tabarmor-${actionsSha256("build-Alpha", actions).slice(0, 8)}`);
+  strictEqual(name, `frmcreate-tabstreetgear-tabarmor-${sha256Text(canonicalJson({ target: "frmCreate/tabStreetGear/tabArmor", case: "build-Alpha", actions })).slice(0, 8)}`);
+  strictEqual(scenarioName("frmCreate/tabStreetGear/tabArmor-other", "build-Alpha", actions) === name, false);
   strictEqual(scenarioName("frmCreate.tabStreetGearTabs#selection", "build-Alpha", actions).startsWith("frmcreate-tabstreetgeartabs-selection-"), true);
   strictEqual(scenarioName("x".repeat(80), "build-Alpha", actions).length, 48 + 9);
   const root = mkdtempSync(join(tmpdir(), "discovery-cases-"));

@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { BaseStore } from "@langchain/langgraph-checkpoint";
 import type { z } from "zod";
 import { caseName, planCases, type PlannedCase } from "../cases/case-plan.js";
@@ -15,7 +15,7 @@ import { SourceInventorySchema, type SourceInventory } from "../inventory/source
 import { buildSourceInventory, designerPaths } from "../inventory/source-inventory.js";
 import type { RunOptions } from "../options/run-options.js";
 import type { WorkflowPaths } from "../paths.js";
-import { sha256Text } from "../steps/fingerprint.js";
+import { sha256FileSync, sha256Text } from "../steps/fingerprint.js";
 import { readDocument } from "../steps/read-document.js";
 import type { InputFingerprints } from "../steps/input-fingerprints.js";
 import {
@@ -61,15 +61,28 @@ export function captureOptions(options: DiscoveryOptions, caseFile = options.cas
 /** The baseline's documents as `prepare` checked them. */
 export type Baseline = { readonly inventory: SourceInventory; readonly manifest: CoverageManifest; readonly scope: Scope };
 
-export function readBaseline(folder: string, repositoryRoot: string): Baseline {
+/** The SHA-256 of the baseline's two documents, which every later read must find unchanged. */
+export type BaselineDigest = { readonly inventory: string; readonly manifest: string };
+
+/**
+ * Reads the baseline's documents and the scope. With a digest, documents that changed since `prepare` checked them, or a scope that
+ * differs from the manifest's, are a setup error: targets, contexts and proofs must all be measured against the same baseline.
+ */
+export function readBaseline(folder: string, repositoryRoot: string, digest?: BaselineDigest): Baseline & { readonly digest: BaselineDigest } {
   for (const file of ["source-inventory.json", "coverage-manifest.json"]) {
     if (!existsSync(join(folder, file))) throw new SetupError(`The baseline has no ${file}: ${join(folder, file)} is missing; run npm start, whose inventory writes it.`);
   }
-  return {
+  const found = { inventory: sha256FileSync(join(folder, "source-inventory.json")), manifest: sha256FileSync(join(folder, "coverage-manifest.json")) };
+  if (digest !== undefined && (found.inventory !== digest.inventory || found.manifest !== digest.manifest)) {
+    throw new SetupError(`The baseline documents in ${folder} changed since the thread started; start a new thread.`);
+  }
+  const baseline = {
     inventory: readDocument(join(folder, "source-inventory.json"), SourceInventorySchema),
     manifest: readDocument(join(folder, "coverage-manifest.json"), CoverageManifestSchema),
     scope: readScope(join(repositoryRoot, defaultScopeFile)),
   };
+  if (digest !== undefined && baseline.scope.sha256 !== baseline.manifest.scope.sha256) throw new SetupError(`${defaultScopeFile} changed since the baseline; start a new thread.`);
+  return { ...baseline, digest: found };
 }
 
 function coverageOf(manifest: CoverageManifest): Coverage {
@@ -97,6 +110,9 @@ export class DiscoveryService {
   /** Checks the baseline against the working tree and the candidate, builds the tools, writes the targets and seals the rank context. */
   async prepare(threadId: string, options: DiscoveryOptions, signal?: AbortSignal): Promise<Prepared> {
     const { repositoryRoot: root, git, paths, log } = this.dependencies;
+    if (resolve(options.caseFile).toLowerCase() === resolve(this.dependencies.registry.caseFile).toLowerCase()) {
+      throw new SetupError(`${options.caseFile} is the registry's own case file, which discovery rewrites; name the fixture case file with --case-file.`);
+    }
     const folders = this.dependencies.folders.thread(threadId);
     mkdirSync(folders.root, { recursive: true });
     const baselineFolder = join(paths.threadFolder(options.from), "inventory");
@@ -120,13 +136,17 @@ export class DiscoveryService {
     const caseFileSha256 = sha256Text(readFileSync(options.caseFile, "utf8"));
     const cases = fixtureCases(options.caseFile, caseFileSha256);
     const registry = readRegistry(this.dependencies.registry);
+    const timings = cases[0]!;
+    if (registry !== null && (registry.startupDelaySeconds !== timings.startupDelaySeconds || registry.settleMilliseconds !== timings.settleMilliseconds)) {
+      throw new SetupError(`The registry renders its cases with a startup delay of ${registry.startupDelaySeconds} s and a settle time of ${registry.settleMilliseconds} ms, but ${options.caseFile} has ${timings.startupDelaySeconds} s and ${timings.settleMilliseconds} ms: a scenario would be replayed under timings it was not proven with.`);
+    }
     const fingerprints = await this.dependencies.buildTools(captureOptions(options), signal);
     const proved = provedFor(registry, manifest.sourceSha256);
     const targets = computeTargets({ baselineThread: options.from, inventory: baseline.inventory, manifest, provedControls: proved.controls, provedInteractions: proved.interactions });
     writeFileSync(folders.targets, `${JSON.stringify(targets, null, 2)}\n`);
     log(`Discovery: ${targets.targets.length} targets from thread ${options.from}; ${targets.outOfReach.reduce((sum, item) => sum + item.count, 0)} bindings out of the actions' reach.`);
     const prepared = {
-      baselineFolder, sourceSha256: manifest.sourceSha256, candidateSha256, candidateSource, caseFileSha256, fingerprints, targetsPath: folders.targets, targets: targets.targets.length,
+      baselineFolder, baselineDigest: baseline.digest, sourceSha256: manifest.sourceSha256, candidateSha256, candidateSource, caseFileSha256, fingerprints, targetsPath: folders.targets, targets: targets.targets.length,
       registryEntries: registry?.entries.length ?? 0, coverageBefore: coverageOf(manifest),
     };
     if (targets.targets.length === 0) return { ...prepared, snapshot: null, rankContext: null };
@@ -175,7 +195,7 @@ export class DiscoveryService {
     if (output === undefined) throw new Error("Selection ran without a rank answer.");
     const chosen = selectableRankings(output).slice(0, state.options.targets);
     const targets = readDocument(prepared.targetsPath, TargetsDocumentSchema) as TargetsDocument;
-    const baseline = readBaseline(prepared.baselineFolder, this.dependencies.repositoryRoot);
+    const baseline = readBaseline(prepared.baselineFolder, this.dependencies.repositoryRoot, prepared.baselineDigest);
     const cases = fixtureCases(state.options.caseFile, prepared.caseFileSha256);
     const labels = knownLabels(baseline.inventory, baseline.manifest, readLanguageStrings(prepared.snapshot.folder));
     const texts = tabTexts(cases, baseline, prepared.snapshot.folder);

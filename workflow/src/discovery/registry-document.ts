@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { scenarioPattern } from "../cases/case-plan.js";
 
 const sha256 = z.string().regex(/^[0-9a-f]{64}$/);
 
@@ -18,7 +19,7 @@ export const RegistryEntrySchema = z.strictObject({
   /** The suite case whose fixture and mode it uses. */
   fixtureCase: z.string().min(1),
   mode: z.enum(["build", "career"]),
-  scenario: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
+  scenario: z.string().regex(scenarioPattern),
   /** The fixture path relative to `parity/cases/`. */
   fixture: z.string().min(1),
   actions: z.array(ScenarioActionSchema).min(1),

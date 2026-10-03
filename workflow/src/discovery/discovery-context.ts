@@ -1,12 +1,11 @@
-import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { extname, join } from "node:path";
 import { z } from "zod";
 import { captureNames, type PlannedCase } from "../cases/case-plan.js";
 import { canonicalJson } from "../diagnosis/context.js";
 import type { SourceSnapshot } from "../diagnosis/source-snapshot.js";
 import { SetupError } from "../host/setup-error.js";
-import { sha256File, sha256Text } from "../steps/fingerprint.js";
+import { sha256File, sha256FileSync, sha256Text } from "../steps/fingerprint.js";
 import { feasibilities } from "./job-schemas.js";
 import { selectedTabNames } from "./plan-validator.js";
 import type { RankedPrior } from "./priors.js";
@@ -87,18 +86,17 @@ export function discoveryContextHash(context: DiscoveryContext): string {
 export function readLabels(folder: string, context: Pick<ScenarioContext, "labels">): string[] {
   const path = join(folder, context.labels.path);
   if (!existsSync(path)) throw new SetupError(`The labels file ${path} of a sealed context is missing.`);
-  const bytes = readFileSync(path);
-  if (createHash("sha256").update(bytes).digest("hex") !== context.labels.sha256) throw new SetupError(`The labels file ${path} changed after its context was sealed.`);
-  return z.array(z.string()).parse(JSON.parse(bytes.toString("utf8")));
+  if (sha256FileSync(path) !== context.labels.sha256) throw new SetupError(`The labels file ${path} changed after its context was sealed.`);
+  return z.array(z.string()).parse(JSON.parse(readFileSync(path, "utf8")));
 }
 
-/** The fixture cases as a context shows them, each character file copied into `fixtures/`; with `actions` their expanded actions too. */
+/** The fixture cases as a context shows them, each character file copied into `fixtures/` under its case name; with `actions` their expanded actions too. */
 async function sealFixtures(cases: readonly PlannedCase[], withActions: boolean, folder: string): Promise<ContextFixture[]> {
   mkdirSync(join(folder, "fixtures"), { recursive: true });
   const fixtures: ContextFixture[] = [];
   for (const item of cases) {
-    const path = `fixtures/${item.characterFile}`;
-    if (!existsSync(join(folder, path))) copyFileSync(item.fixturePath, join(folder, path));
+    const path = `fixtures/${item.name}${extname(item.characterFile)}`;
+    copyFileSync(item.fixturePath, join(folder, path));
     fixtures.push({
       case: item.name, mode: item.mode, form: formOfMode[item.mode], file: item.characterFile, selectedTabs: selectedTabNames(item.actions), captures: captureNames(item),
       copy: { path, sha256: await sha256File(join(folder, path)) }, ...(withActions ? { actions: item.actions.map((entry) => ({ ...entry })) } : {}),
@@ -112,10 +110,6 @@ export function formOfCase(item: Pick<PlannedCase, "mode">): string {
   return formOfMode[item.mode];
 }
 
-function fileSha256(path: string): string {
-  return createHash("sha256").update(readFileSync(path)).digest("hex");
-}
-
 /** Fails unless every file a sealed context lists (fixture copies, prior artifacts, the labels file) has the SHA-256 it records. */
 export function verifyContextFiles(folder: string, context: DiscoveryContext): void {
   const files = [
@@ -123,7 +117,7 @@ export function verifyContextFiles(folder: string, context: DiscoveryContext): v
   ];
   for (const file of files) {
     const path = join(folder, file.path);
-    if (!existsSync(path) || fileSha256(path) !== file.sha256) throw new SetupError(`The file ${path} of a sealed context is missing or changed after it was sealed.`);
+    if (!existsSync(path) || sha256FileSync(path) !== file.sha256) throw new SetupError(`The file ${path} of a sealed context is missing or changed after it was sealed.`);
   }
 }
 

@@ -7,6 +7,7 @@ import { planCases, readCaseFile } from "../cases/case-plan.js";
 import { setLabels, type DiscoveryOutcome } from "../evals/eval-record.js";
 import { SetupError } from "../host/setup-error.js";
 import type { RunOptions } from "../options/run-options.js";
+import { readRunObservation } from "../inventory/run-observations.js";
 import { requireCoveredCases } from "../steps/capture-step.js";
 import type { InputFingerprints } from "../steps/input-fingerprints.js";
 import { readDocument } from "../steps/read-document.js";
@@ -16,7 +17,7 @@ import type { DiscoveryStateValue, Execution, Registered, ScenarioJob } from "./
 import { scenarioActions } from "./plan-validator.js";
 import { isProven, proveScenarios, type ScenarioProof } from "./proof.js";
 import type { RegistryEntry } from "./registry-document.js";
-import { admit, emptyRegistry, provedFor, readRegistry, writeRegistry, type RegistryPaths } from "./registry.js";
+import { admit, emptyRegistry, provedFor, readRegistry, removeRegistry, writeRegistry, type RegistryPaths } from "./registry.js";
 import { actionsSha256, fixtureReference, writeScenarioCaseFile } from "./scenario-cases.js";
 
 export type ScenarioRunDependencies = {
@@ -26,6 +27,8 @@ export type ScenarioRunDependencies = {
   readonly registry: RegistryPaths;
   /** Runs the capture runner on the desktop lane for the named cases of the options' case file, with UI trees. */
   readonly capture: (options: RunOptions, cases: readonly string[], signal?: AbortSignal) => Promise<{ readonly status: 0 | 1 | 2; readonly runFolder: string }>;
+  /** The capture runner's fingerprint of the machine and app environment now. */
+  readonly environment: (signal?: AbortSignal) => Promise<string>;
   /** The capture inputs that changed since the thread's fingerprints were taken. */
   readonly changedInputs: (options: RunOptions, fingerprints: InputFingerprints) => Promise<readonly string[]>;
   readonly now: () => Date;
@@ -68,9 +71,17 @@ export class ScenarioRun {
     if (planned.join("\n") !== names.join("\n")) throw new SetupError(`The generated case file ${folders.cases} plans ${planned.join(", ")}, not ${names.join(", ")}.`);
     const changed = await this.dependencies.changedInputs(captureOptions(state.options), prepared.fingerprints);
     if (changed.length > 0) throw new SetupError(`Inputs changed since the thread started (${changed.join(", ")}); start a new thread.`);
+    // The pixels depend on the screens, scale and Windows settings: a run under another environment would compare other things.
+    if (await this.dependencies.environment(signal) !== prepared.fingerprints.environment) {
+      throw new SetupError("The capture environment (screens, scale, Windows colour or text settings, the app's options) changed since the thread started; start a new thread.");
+    }
     this.dependencies.log(`Discovery capture: ${names.length} scenarios in one run.`);
     const { status, runFolder } = await this.dependencies.capture(captureOptions(state.options, folders.cases), names, signal);
     requireCoveredCases("discovery capture", runFolder, names);
+    const captured = readRunObservation(runFolder).candidateSha256;
+    if (captured !== prepared.candidateSha256) {
+      throw new SetupError(`The discovery capture run ${runFolder} captured the candidate ${captured.slice(0, 12)}, not the built one (${prepared.candidateSha256.slice(0, 12)}); run npm start again.`);
+    }
     const coverage = readDocument(join(runFolder, "coverage.json"), ExecutionCoverageSchema);
     const results = readDocument(join(runFolder, "results.json"), CaptureResultsSchema);
     return {
@@ -94,7 +105,7 @@ export class ScenarioRun {
     const fixtures = fixtureCases(state.options.caseFile, prepared.caseFileSha256);
     const fixtureOf = (job: ScenarioJob) => fixtures.find((item) => item.name === job.answer!.output.plan!.case)!;
     if (state.execution !== null) {
-      const baseline = readBaseline(prepared.baselineFolder, root);
+      const baseline = readBaseline(prepared.baselineFolder, root, prepared.baselineDigest);
       const proved = provedFor(registry, prepared.sourceSha256);
       const proven = proveScenarios({
         runFolder: state.execution.runFolder, inventory: baseline.inventory, scope: baseline.scope, baseline: baseline.manifest,
@@ -122,7 +133,10 @@ export class ScenarioRun {
       }];
     });
     const admission = admit(registry, candidates);
-    if (admission.admitted.length > 0 || admission.registry.entries.length !== stored.entries.length) writeRegistry(paths, admission.registry);
+    if (admission.registry.entries.length === 0 && stored.entries.length > 0) {
+      // Only this thread's own earlier admissions were stored, and this pass admits none of them again: a case file needs a character.
+      removeRegistry(paths);
+    } else if (admission.admitted.length > 0 || admission.registry.entries.length !== stored.entries.length) writeRegistry(paths, admission.registry);
     await this.label(state, store, proofs, admittedUtc);
     return { proofs, admitted: admission.admitted, duplicates: admission.duplicates, manifestPath, registryEntries: admission.registry.entries.length };
   }

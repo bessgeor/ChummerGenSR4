@@ -1,3 +1,4 @@
+import { scenarioPattern } from "../cases/case-plan.js";
 import type { ContextFixture } from "./discovery-context.js";
 import type { Plan, PlanAction } from "./job-schemas.js";
 import type { ScenarioAction } from "./registry-document.js";
@@ -5,7 +6,8 @@ import type { ScenarioAction } from "./registry-document.js";
 export const maximumActions = 24;
 export const maximumCaptures = 4;
 export const maximumWaitMilliseconds = 10_000;
-const captureName = /^[a-z0-9][a-z0-9-]*$/;
+/** Capture names follow the rule of scenario names: lower-case letters, digits and dashes. */
+const captureName = scenarioPattern;
 
 /** What a plan may name: the fixture cases, the tab texts by form class and the `waitFor` labels. */
 export type PlanVocabulary = {

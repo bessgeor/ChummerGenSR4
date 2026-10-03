@@ -1,13 +1,13 @@
 import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { AgentJob } from "../src/agents/agent-job.js";
 import { recordCandidateSha256 } from "../src/diagnosis/candidate-source.js";
 import { parseDiscoverArguments } from "../src/discovery/discover-arguments.js";
 import type { DiscoveryDocument } from "../src/discovery/discovery-document.js";
 import type { Plan } from "../src/discovery/job-schemas.js";
-import { emptyRegistry, readRegistry, registryPaths, writeRegistry } from "../src/discovery/registry.js";
+import { emptyRegistry, readRegistry, registryPaths, removeRegistry, writeRegistry } from "../src/discovery/registry.js";
 import { getRecord } from "../src/evals/eval-record.js";
 import { SetupError } from "../src/host/setup-error.js";
 import { baselineThread, discoveryHarness, discoveryRepository, fixtureCase, threadOf, type Reply } from "./discovery-harness.js";
@@ -150,6 +150,13 @@ test("a thread stopped by a setup error resumes without running its finished job
   ok(harness.lines.some((line) => line.includes("already finished")));
 });
 
+test("a capture run of another candidate than the built one is a setup error before any proof", async () => {
+  const harness = await discoveryHarness(replies(), undefined, { capture: { candidateSha256: "e".repeat(64) } });
+  strictEqual(await harness.run({ targets: 1 }), 3);
+  ok(harness.lines.some((line) => line.includes("captured the candidate eeeeeeeeeeee, not the built one")), harness.lines.join("\n"));
+  deepStrictEqual(existsSync(registryPaths(harness.root).registry), false);
+});
+
 test("a register step that runs again finds its own admissions and decides the same", async () => {
   const harness = await discoveryHarness(replies());
   strictEqual(await harness.run({ targets: 1 }), 0);
@@ -168,6 +175,30 @@ test("a fixture case file that changed since the thread started stops it before 
   strictEqual(await harness.resume(threadOf(harness.lines)), 3);
   ok(harness.lines.some((line) => line.includes("changed since the thread started")), harness.lines.join("\n"));
   strictEqual(harness.capture.calls.length, 1);
+});
+
+test("baseline documents or a capture environment that changed since the thread started stop it", async () => {
+  const repository = await discoveryRepository();
+  const harness = await discoveryHarness(replies(), undefined, { repository, capture: { error: new SetupError("stopped") } });
+  strictEqual(await harness.run({ targets: 1 }), 3);
+  const manifest = join(repository.paths.threadFolder(baselineThread), "inventory", "coverage-manifest.json");
+  writeFileSync(manifest, `${readFileSync(manifest, "utf8")}\n`);
+  strictEqual(await harness.resume(threadOf(harness.lines)), 3);
+  ok(harness.lines.some((line) => line.includes("baseline documents") && line.includes("changed since the thread started")), harness.lines.join("\n"));
+
+  const moved = await discoveryHarness(replies(), undefined, { environment: "another screen" });
+  strictEqual(await moved.run({ targets: 1 }), 3);
+  ok(moved.lines.some((line) => line.includes("capture environment")), moved.lines.join("\n"));
+  strictEqual(moved.capture.calls.length, 0);
+});
+
+test("a registry without entries is never written, and removing it removes both files", async () => {
+  const root = (await discoveryRepository()).root;
+  throws(() => writeRegistry(registryPaths(root), emptyRegistry({ startupDelaySeconds: 3, settleMilliseconds: 300 })), /never written/);
+  const probe = await discoveryHarness(replies());
+  await probe.run({ targets: 1 });
+  removeRegistry(registryPaths(probe.root));
+  deepStrictEqual([existsSync(registryPaths(probe.root).registry), existsSync(registryPaths(probe.root).caseFile)], [false, false]);
 });
 
 test("targets the registry proved for this source are covered, and a thread without targets runs no job", async () => {
@@ -199,12 +230,32 @@ test("the baseline guards: changed designer files, another candidate and a hand-
   ok(second.lines.some((line) => line.includes("not the built one")), second.lines.join("\n"));
 
   const edited = await discoveryRepository();
-  writeRegistry(registryPaths(edited.root), emptyRegistry({ startupDelaySeconds: 3, settleMilliseconds: 300 }));
+  mkdirSync(dirname(registryPaths(edited.root).registry), { recursive: true });
+  writeFileSync(registryPaths(edited.root).registry, JSON.stringify(emptyRegistry({ startupDelaySeconds: 3, settleMilliseconds: 300 })));
   writeFileSync(registryPaths(edited.root).caseFile, "{}");
   const third = await discoveryHarness(replies(), undefined, { repository: edited });
   strictEqual(await third.run(), 3);
   ok(third.lines.some((line) => line.includes("differs from the rendering")), third.lines.join("\n"));
   deepStrictEqual([first.agents.calls.length, second.agents.calls.length, third.agents.calls.length], [0, 0, 0]);
+});
+
+test("the registry's own case file as the fixture case file, and a registry rendered with other timings, are setup errors", async () => {
+  const probe = await discoveryHarness(replies());
+  await probe.run({ targets: 1 });
+  const entry = readRegistry(registryPaths(probe.root))!.entries[0]!;
+
+  const own = await discoveryRepository();
+  writeRegistry(registryPaths(own.root), { ...emptyRegistry({ startupDelaySeconds: 3, settleMilliseconds: 300 }), entries: [entry] });
+  const first = await discoveryHarness(replies(), undefined, { repository: own });
+  strictEqual(await first.run({ caseFile: registryPaths(own.root).caseFile }), 3);
+  ok(first.lines.some((line) => line.includes("registry's own case file")), first.lines.join("\n"));
+
+  const slow = await discoveryRepository();
+  writeRegistry(registryPaths(slow.root), { ...emptyRegistry({ startupDelaySeconds: 3, settleMilliseconds: 200 }), entries: [entry] });
+  const second = await discoveryHarness(replies(), undefined, { repository: slow });
+  strictEqual(await second.run({ targets: 1 }), 3);
+  ok(second.lines.some((line) => line.includes("replayed under timings it was not proven with")), second.lines.join("\n"));
+  deepStrictEqual([first.agents.calls.length, second.agents.calls.length], [0, 0]);
 });
 
 test("the command line is parsed strictly", () => {

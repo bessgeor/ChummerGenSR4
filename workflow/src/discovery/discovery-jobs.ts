@@ -5,7 +5,7 @@ import { wasNotStarted, type AgentResult, type NotStarted } from "../agents/agen
 import type { AgentRunners } from "../agents/agent-runners.js";
 import { compiledFoldersIn } from "../compiled-source.js";
 import type { QuotaWaitMark } from "../diagnosis/cluster-diagnosis.js";
-import { measuredDuration } from "../diagnosis/diagnosis-service.js";
+import { chargedMilliseconds, measuredDuration } from "../diagnosis/diagnosis-service.js";
 import { stageJobFolder } from "../diagnosis/job-folder.js";
 import type { PromptPaths } from "../diagnosis/prompts.js";
 import type { QuotaWaiter } from "../diagnosis/quota-waiter.js";
@@ -94,10 +94,7 @@ export class DiscoveryJobs {
           started = this.dependencies.now();
           return true;
         },
-        onResult: (outcome) => {
-          const charged = !outcome.ok && ["quota_exhausted", "infra", "timeout"].includes(outcome.failure.kind) ? 0 : measuredDuration(job.label, outcome);
-          this.charged.set(input.threadId, this.spentMs(input.threadId, input.spentMs) + charged);
-        },
+        onResult: (outcome) => this.charged.set(input.threadId, this.spentMs(input.threadId, input.spentMs) + chargedMilliseconds(job.label, outcome)),
         ...(input.signal === undefined ? {} : { signal: input.signal }),
       });
     } finally {

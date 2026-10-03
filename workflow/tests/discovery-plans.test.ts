@@ -103,7 +103,7 @@ test("the rank context is sealed with its priors, and its hash covers what it ho
   const prior = { name: "2026-10-01-fix-a", folder: fixFolder, record, score: 3, target: armor.id, reasons: ["changes Chummer/frmCreate.cs"] };
   const { context, hash } = await sealRankContext({ ...base, priors: [prior] }, folder);
   strictEqual(context.priors?.[0]?.artifacts.length, 4);
-  deepStrictEqual([context.fixtures[0]!.copy.path, context.fixtures[0]!.actions], ["fixtures/Alpha.chum", undefined]);
+  deepStrictEqual([context.fixtures[0]!.copy.path, context.fixtures[0]!.actions], ["fixtures/build-Alpha.chum", undefined]);
   strictEqual(existsSync(join(folder, "priors", "2026-10-01-fix-a", "fix.json")), true);
   deepStrictEqual(JSON.parse(readFileSync(join(folder, "context.json"), "utf8")), context);
   strictEqual(hash, discoveryContextHash(context));
@@ -125,10 +125,10 @@ test("a scenario context holds its labels file with its hash, and the prompt sta
   }, folder);
   deepStrictEqual(JSON.parse(readFileSync(join(folder, "labels.json"), "utf8")), ["Selected Armor", "Cost:"]);
   deepStrictEqual([context.labels.path, context.labels.count], ["labels.json", 2]);
-  deepStrictEqual([context.fixtures[0]!.copy.path, context.fixtures[0]!.selectedTabs, context.fixtures[0]!.actions?.length], ["fixtures/Alpha.chum", ["Skills"], 3]);
-  match(readFileSync(join(folder, "fixtures", "Alpha.chum"), "utf8"), /Karma/);
+  deepStrictEqual([context.fixtures[0]!.copy.path, context.fixtures[0]!.selectedTabs, context.fixtures[0]!.actions?.length], ["fixtures/build-Alpha.chum", ["Skills"], 3]);
+  match(readFileSync(join(folder, "fixtures", "build-Alpha.chum"), "utf8"), /Karma/);
   verifyContextFiles(folder, context);
-  writeFileSync(join(folder, "fixtures", "Alpha.chum"), "<character/>");
+  writeFileSync(join(folder, "fixtures", "build-Alpha.chum"), "<character/>");
   throws(() => verifyContextFiles(folder, context), (error: Error) => error instanceof SetupError && /changed after it was sealed/.test(error.message));
   strictEqual(hash, discoveryContextHash(context));
   const prompt = scenarioPrompt(context, { ...paths, contextFolder: "C:/scratch/scenario-1" });

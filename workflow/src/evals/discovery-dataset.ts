@@ -95,6 +95,17 @@ function goldOf(record: EvalRecord, scenariosByThread: ReadonlyMap<string, reado
   return { kind: "rank", proven: targets("proven"), notProven: targets("not-proven") };
 }
 
+/**
+ * One item's gold from its records: the earliest proven plan of a scenario item; for a rank item shared by several threads, every
+ * target any of them proved, and the ones they ran without proof that none proved.
+ */
+export function mergeGold(golds: readonly DiscoveryDatasetItem["gold"][]): DiscoveryDatasetItem["gold"] {
+  const ranks = golds.filter((gold): gold is Extract<NonNullable<DiscoveryDatasetItem["gold"]>, { kind: "rank" }> => gold?.kind === "rank");
+  if (ranks.length === 0) return golds.find((gold) => gold !== null) ?? null;
+  const proven = [...new Set(ranks.flatMap((gold) => gold.proven))].sort();
+  return { kind: "rank", proven, notProven: [...new Set(ranks.flatMap((gold) => gold.notProven))].filter((target) => !proven.includes(target)).sort() };
+}
+
 export function discoveryDatasetHash(dataset: Omit<DiscoveryDataset, "datasetHash">): string {
   return sha256Text(canonicalJson(dataset));
 }
@@ -170,7 +181,7 @@ export async function freezeDiscoveryDataset(input: DiscoveryFreezeInput): Promi
     if (!existsSync(copies.context(draft.contextHash))) cpSync(draft.contextFolder, copies.context(draft.contextHash), { recursive: true });
     if (!existsSync(copies.source(draft.sourceIdentity))) cpSync(draft.sourceFolder, copies.source(draft.sourceIdentity), { recursive: true });
     const sorted = [...draft.records].sort((left, right) => (left.recordId < right.recordId ? -1 : 1));
-    const gold = sorted.map((record) => goldOf(record, scenariosByThread)).find((value) => value !== null) ?? null;
+    const gold = mergeGold(sorted.map((record) => goldOf(record, scenariosByThread)));
     items.push({ itemId, key: draft.key, contextHash: draft.contextHash, sourceIdentity: draft.sourceIdentity, records: sorted.map((record) => record.recordId), gold, partition: partitionOf(input.seed, draft.key, input.testPercent) });
   }
   for (const item of items) await verifyCopies(partial, input.jobKind, item);

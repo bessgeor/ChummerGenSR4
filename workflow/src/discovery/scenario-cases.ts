@@ -20,10 +20,13 @@ export function actionsSha256(fixtureCase: string, actions: readonly ScenarioAct
   return sha256Text(canonicalJson({ case: fixtureCase, actions }));
 }
 
-/** The target ID in lower case with every other run of characters a dash, cut to 48, and the first 8 hex digits of the actions' hash. */
+/**
+ * The target ID in lower case with every other run of characters a dash, cut to 48, and the first 8 hex digits of the SHA-256 of the
+ * target, the fixture case and the actions: two targets never share a case name, even with the same plan.
+ */
 export function scenarioName(targetId: string, fixtureCase: string, actions: readonly ScenarioAction[]): string {
   const slug = targetId.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48).replace(/-+$/, "");
-  return `${slug.length === 0 ? "scenario" : slug}-${actionsSha256(fixtureCase, actions).slice(0, 8)}`;
+  return `${slug.length === 0 ? "scenario" : slug}-${sha256Text(canonicalJson({ target: targetId, case: fixtureCase, actions })).slice(0, 8)}`;
 }
 
 /** The fixture path as a case file in `folder` names it: relative, with forward slashes. */
