@@ -1,12 +1,12 @@
 # Verification
 
-All runs on Windows 10 (build 19045, 1920x1080), .NET Framework 4.8.1, .NET SDK 10.0.401, Node.js 22.17.0. The checks, the fixture tests and every live run below were made on the final source of this change.
+All runs on Windows 10 (build 19045, 1920x1080), .NET Framework 4.8.1, .NET SDK 10.0.401, Node.js 22.17.0. The checks, the fixture tests and every desktop run below were made on the final source of this change. The two eval runs under Evaluation (run IDs are UTC stamps) used datasets frozen from stored discovery records and the current prompt versions (`scenario-v1`, `rank-v2`); the scenario run was made before the last guard and rank-scoring edits, which touch neither the scenario prompt, its validator nor its scoring, and the rank run was resumed on the final source.
 
 ## Checks
 
 | Command | Result |
 |---|---|
-| `npm run openspec:validate` | `Totals: 15 passed, 0 failed (15 items)` before the archive; the archive commit records the run after it |
+| `npm run openspec:validate` | `Totals: 15 passed, 0 failed (15 items)` before the archive and `Totals: 15 passed, 0 failed (15 items)` after it |
 | `npm run workflow:typecheck` | `tsc -p workflow` with no further output, exit 0 |
 | `npm run workflow:test` | `# tests 400`, `# pass 400`, `# fail 0` |
 | `npm run parity:test` | `Passed!  - Failed:     0, Passed:   262, Skipped:     0, Total:   262` (`Parity.Tests`) and `Passed: 13` (`Parity.Hosted.Tests`) |

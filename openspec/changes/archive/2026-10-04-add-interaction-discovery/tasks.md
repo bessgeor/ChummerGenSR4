@@ -21,4 +21,4 @@
 ## 5. Verification and archive
 
 - [x] 5.1 Run a live `npm start` baseline with the sourcebook overlay and the shared canonical cache, then a live `npm run discover` from it with model jobs. Record the canonical hash before and after, the baseline's and the discovery run's execution outcomes apart from their visual results, the jobs and their outcomes, the coverage proved and the registry in `verification.md`, separating fixture-tested scope from live evidence and naming what remains unverified.
-- [ ] 5.2 Archive the change with `openspec archive add-interaction-discovery`. Evidence: `npm run openspec:validate` passes after the archive.
+- [x] 5.2 Archive the change with `openspec archive add-interaction-discovery`. Evidence: `npm run openspec:validate` passes after the archive.
