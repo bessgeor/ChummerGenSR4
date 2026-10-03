@@ -24,7 +24,10 @@ export type CasePlan = {
   readonly excluded: readonly string[];
 };
 
-function readCaseFile(caseFile: string): ParityCases {
+/** A character entry's scenario name, which its case name carries after `@`. */
+export const scenarioPattern = /^[a-z0-9][a-z0-9-]*$/;
+
+export function readCaseFile(caseFile: string): ParityCases {
   let document: unknown;
   try {
     document = JSON.parse(readFileSync(caseFile, "utf8"));
@@ -74,21 +77,30 @@ export function captureNames(item: Pick<PlannedCase, "actions">): string[] {
  */
 export function planCases(caseFile: string, caseFilter: readonly string[], captureFilter: readonly string[]): CasePlan {
   const document = readCaseFile(caseFile);
-  const all = document.characters.map((entry): PlannedCase => {
+  const all = document.characters.map((entry, index): PlannedCase => {
     const fixturePath = resolve(dirname(caseFile), entry.path);
     const characterFile = basename(fixturePath);
+    if ((entry.scenario === undefined) !== (entry.actions === undefined)) {
+      throw new SetupError(`The case file ${caseFile}: characters[${index}] gives 'scenario' and 'actions' together or not at all.`);
+    }
+    if (entry.scenario !== undefined && !scenarioPattern.test(entry.scenario)) {
+      throw new SetupError(`The case file ${caseFile}: characters[${index}] has the scenario '${entry.scenario}', which is not lower-case letters, digits and dashes.`);
+    }
+    const stem = `${entry.mode}-${basename(fixturePath, extname(fixturePath))}`;
     return {
-      name: `${entry.mode}-${basename(fixturePath, extname(fixturePath))}`,
+      name: entry.scenario === undefined ? stem : `${stem}@${entry.scenario}`,
       characterFile,
       fixturePath,
       mode: entry.mode,
-      actions: expand(entry.mode === "career" ? document.careerActions : document.buildActions, document, []),
+      actions: expand(entry.actions ?? (entry.mode === "career" ? document.careerActions : document.buildActions), document, []),
       startupDelaySeconds: document.startupDelaySeconds,
       settleMilliseconds: document.settleMilliseconds,
       captureFilter: null,
     };
   });
 
+  const duplicate = all.find((item, index) => all.findIndex((other) => other.name.toLowerCase() === item.name.toLowerCase()) !== index);
+  if (duplicate !== undefined) throw new SetupError(`The case file ${caseFile} has two characters with the case name '${duplicate.name}'.`);
   const unmatched = caseFilter.filter((filter) => !all.some((item) => matches(item, filter)));
   if (unmatched.length > 0) {
     throw new SetupError(`--case matches no case: ${unmatched.join(", ")}.`);
