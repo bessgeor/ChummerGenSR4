@@ -18,4 +18,4 @@
 ## 4. Verification and archive
 
 - [x] 4.1 Run live `npm start` on the whole suite with the sourcebook overlay and the shared canonical cache. Record the canonical hash before and after, each case's execution outcome apart from its visual outcome, where the canonical sides came from, the `Inventory:` totals and the tree timings in `verification.md`, separating fixture-tested scope from live evidence and naming what remains unverified.
-- [ ] 4.2 Archive the change with `openspec archive add-interaction-inventory`. Evidence: `npm run openspec:validate` passes after the archive.
+- [x] 4.2 Archive the change with `openspec archive add-interaction-inventory`. Evidence: `npm run openspec:validate` passes after the archive.
