@@ -2,7 +2,7 @@ import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFi
 import { join } from "node:path";
 import { z } from "zod";
 import { canonicalJson } from "../diagnosis/context.js";
-import { DiscoveryContextSchema, discoveryContextHash, readLabels, type RankContext, type ScenarioContext } from "../discovery/discovery-context.js";
+import { DiscoveryContextSchema, discoveryContextHash, verifyContextFiles, type RankContext, type ScenarioContext } from "../discovery/discovery-context.js";
 import { RankOutputSchema, ScenarioOutputSchema } from "../discovery/job-schemas.js";
 import { selectedTabNames } from "../discovery/plan-validator.js";
 import { SetupError } from "../host/setup-error.js";
@@ -95,7 +95,7 @@ async function verifyCopies(folder: string, jobKind: "rank" | "scenario", item: 
   if (!existsSync(join(contextFolder, "context.json"))) throw new SetupError(`Dataset item ${item.itemId}: its context copy ${contextFolder} is missing.`);
   const context = readDocument(join(contextFolder, "context.json"), DiscoveryContextSchema);
   if (context.kind !== jobKind || discoveryContextHash(context) !== item.contextHash) throw new SetupError(`Dataset item ${item.itemId}: its context copy ${contextFolder} differs from its hash.`);
-  if (context.kind === "scenario") readLabels(contextFolder, context);
+  verifyContextFiles(contextFolder, context);
   const source = copies.source(item.sourceIdentity);
   if (!existsSync(source) || await fingerprintFolder(source, true) !== item.sourceIdentity) {
     throw new SetupError(`Dataset item ${item.itemId}: its snapshot copy ${source} differs from its identity.`);

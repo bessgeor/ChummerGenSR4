@@ -25,6 +25,8 @@ const FixtureSchema = z.strictObject({
   /** The tab names its actions select, in order, each once. */
   selectedTabs: z.array(z.string()),
   captures: z.array(z.string()),
+  /** The copy of its character file in the context folder (`fixtures/<file>`), with its SHA-256 so the context hash covers it. */
+  copy: z.strictObject({ path: z.string().min(1), sha256: z.string() }),
   /** Its expanded actions; only a scenario context has them. */
   actions: z.array(action).optional(),
 });
@@ -90,13 +92,39 @@ export function readLabels(folder: string, context: Pick<ScenarioContext, "label
   return z.array(z.string()).parse(JSON.parse(bytes.toString("utf8")));
 }
 
-/** A fixture case as a context shows it; with `actions` its expanded actions too. */
-export function contextFixture(item: PlannedCase, withActions: boolean): ContextFixture {
-  const selectedTabs = selectedTabNames(item.actions);
-  return {
-    case: item.name, mode: item.mode, form: formOfMode[item.mode], file: item.characterFile, selectedTabs, captures: captureNames(item),
-    ...(withActions ? { actions: item.actions.map((entry) => ({ ...entry })) } : {}),
-  };
+/** The fixture cases as a context shows them, each character file copied into `fixtures/`; with `actions` their expanded actions too. */
+async function sealFixtures(cases: readonly PlannedCase[], withActions: boolean, folder: string): Promise<ContextFixture[]> {
+  mkdirSync(join(folder, "fixtures"), { recursive: true });
+  const fixtures: ContextFixture[] = [];
+  for (const item of cases) {
+    const path = `fixtures/${item.characterFile}`;
+    if (!existsSync(join(folder, path))) copyFileSync(item.fixturePath, join(folder, path));
+    fixtures.push({
+      case: item.name, mode: item.mode, form: formOfMode[item.mode], file: item.characterFile, selectedTabs: selectedTabNames(item.actions), captures: captureNames(item),
+      copy: { path, sha256: await sha256File(join(folder, path)) }, ...(withActions ? { actions: item.actions.map((entry) => ({ ...entry })) } : {}),
+    });
+  }
+  return fixtures;
+}
+
+/** The form a fixture case opens in. */
+export function formOfCase(item: Pick<PlannedCase, "mode">): string {
+  return formOfMode[item.mode];
+}
+
+function fileSha256(path: string): string {
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+/** Fails unless every file a sealed context lists (fixture copies, prior artifacts, the labels file) has the SHA-256 it records. */
+export function verifyContextFiles(folder: string, context: DiscoveryContext): void {
+  const files = [
+    ...context.fixtures.map((fixture) => fixture.copy), ...(context.kind === "rank" ? (context.priors ?? []).flatMap((prior) => prior.artifacts) : [context.labels]),
+  ];
+  for (const file of files) {
+    const path = join(folder, file.path);
+    if (!existsSync(path) || fileSha256(path) !== file.sha256) throw new SetupError(`The file ${path} of a sealed context is missing or changed after it was sealed.`);
+  }
 }
 
 export function contextSource(snapshot: SourceSnapshot, candidate: string): RankContext["source"] {
@@ -128,29 +156,31 @@ async function sealPriors(priors: readonly RankedPrior[], folder: string): Promi
   return sealed;
 }
 
-export type RankContextInput = Omit<RankContext, "schemaVersion" | "kind" | "priors"> & { readonly priors: readonly RankedPrior[] };
+export type RankContextInput = Omit<RankContext, "schemaVersion" | "kind" | "priors" | "fixtures"> & { readonly priors: readonly RankedPrior[]; readonly fixtures: readonly PlannedCase[] };
 
 /** Writes the rank job's context folder (`context.json` and `priors/`) and returns its manifest and hash. */
 export async function sealRankContext(input: RankContextInput, folder: string): Promise<{ context: RankContext; hash: string }> {
   rmSync(folder, { recursive: true, force: true });
   mkdirSync(folder, { recursive: true });
-  const { priors, ...rest } = input;
+  const { priors, fixtures, ...rest } = input;
   const sealedPriors = await sealPriors(priors, folder);
-  const context = RankContextSchema.parse({ schemaVersion: 1, kind: "rank", ...rest, ...(sealedPriors === undefined ? {} : { priors: sealedPriors }) });
+  const context = RankContextSchema.parse({
+    schemaVersion: 1, kind: "rank", ...rest, fixtures: await sealFixtures(fixtures, false, folder), ...(sealedPriors === undefined ? {} : { priors: sealedPriors }),
+  });
   writeFileSync(join(folder, "context.json"), `${JSON.stringify(context, null, 2)}\n`);
   return { context, hash: discoveryContextHash(context) };
 }
 
-export type ScenarioContextInput = Omit<ScenarioContext, "schemaVersion" | "kind" | "labels"> & { readonly labels: readonly string[] };
+export type ScenarioContextInput = Omit<ScenarioContext, "schemaVersion" | "kind" | "labels" | "fixtures"> & { readonly labels: readonly string[]; readonly fixtures: readonly PlannedCase[] };
 
 /** Writes a scenario job's context folder (`context.json` and `labels.json`) and returns its manifest and hash. */
 export async function sealScenarioContext(input: ScenarioContextInput, folder: string): Promise<{ context: ScenarioContext; hash: string }> {
   rmSync(folder, { recursive: true, force: true });
   mkdirSync(folder, { recursive: true });
-  const { labels, ...rest } = input;
+  const { labels, fixtures, ...rest } = input;
   writeFileSync(join(folder, "labels.json"), `${JSON.stringify(labels, null, 2)}\n`);
   const context = ScenarioContextSchema.parse({
-    schemaVersion: 1, kind: "scenario", ...rest, labels: { path: "labels.json", sha256: await sha256File(join(folder, "labels.json")), count: labels.length },
+    schemaVersion: 1, kind: "scenario", ...rest, fixtures: await sealFixtures(fixtures, true, folder), labels: { path: "labels.json", sha256: await sha256File(join(folder, "labels.json")), count: labels.length },
   });
   writeFileSync(join(folder, "context.json"), `${JSON.stringify(context, null, 2)}\n`);
   return { context, hash: discoveryContextHash(context) };

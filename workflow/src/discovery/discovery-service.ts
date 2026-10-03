@@ -19,7 +19,8 @@ import { sha256Text } from "../steps/fingerprint.js";
 import { readDocument } from "../steps/read-document.js";
 import type { InputFingerprints } from "../steps/input-fingerprints.js";
 import {
-  contextFixture, contextSource, discoveryContextHash, RankContextSchema, readLabels, ScenarioContextSchema, sealRankContext, sealScenarioContext, type RankContext, type ScenarioContext,
+  contextSource, discoveryContextHash, formOfCase, RankContextSchema, readLabels, ScenarioContextSchema, sealRankContext, sealScenarioContext, verifyContextFiles,
+  type RankContext, type ScenarioContext,
 } from "./discovery-context.js";
 import type { DiscoveryJobs, JobInput } from "./discovery-jobs.js";
 import type { DiscoveryPaths } from "./discovery-paths.js";
@@ -85,7 +86,7 @@ export function fixtureCases(caseFile: string, expectedSha256: string): readonly
 /** The tab texts of every form the fixtures open in. */
 function tabTexts(cases: readonly PlannedCase[], baseline: Baseline, root: string): Record<string, string[]> {
   const strings = readLanguageStrings(root);
-  const forms = [...new Set(cases.map((item) => contextFixture(item, false).form))].sort();
+  const forms = [...new Set(cases.map((item) => formOfCase(item)))].sort();
   return Object.fromEntries(forms.map((form) => [form, knownTabTexts(form, baseline.inventory, baseline.manifest, strings)]));
 }
 
@@ -138,7 +139,7 @@ export class DiscoveryService {
     })), fixes);
     const sealed = await sealRankContext({
       baselineThread: options.from, sourceSha256: manifest.sourceSha256, tabTexts: tabTexts(cases, baseline, snapshot.folder),
-      source: contextSource(snapshot, candidateSha256), targets: targets.targets, fixtures: cases.map((item) => contextFixture(item, false)), priors,
+      source: contextSource(snapshot, candidateSha256), targets: targets.targets, fixtures: cases, priors,
     }, folders.rank);
     log(`Discovery: rank context sealed with ${priors.length} priors of ${fixes.length} archived fix changes.`);
     return { ...prepared, snapshot: { folder: snapshot.folder, identity: snapshot.identity, commit: snapshot.commit }, rankContext: { folder: folders.rank, hash: sealed.hash } };
@@ -186,7 +187,7 @@ export class DiscoveryService {
         baselineThread: state.options.from, sourceSha256: prepared.sourceSha256, tabTexts: texts,
         source: { folder: "../source", identity: prepared.snapshot.identity, commit: prepared.snapshot.commit, candidate: prepared.candidateSha256 },
         target, rank: { score: ranking.score, feasibility: ranking.feasibility, case: ranking.case, reason: ranking.reason },
-        fixtures: cases.map((item) => contextFixture(item, true)), labels,
+        fixtures: cases, labels,
       }, folder);
       scenarios[target.id] = {
         ...pendingJob<ScenarioOutput>(), targetId: target.id, index: position + 1, contextFolder: folder, contextHash: sealed.hash, ranking,
@@ -245,5 +246,6 @@ export class DiscoveryService {
 export function readSealed<T extends RankContext | ScenarioContext>(folder: string, hash: string, schema: z.ZodType<T>): T {
   const context = readDocument(join(folder, "context.json"), schema);
   if (discoveryContextHash(context) !== hash) throw new SetupError(`The context in ${folder} changed after it was sealed.`);
+  verifyContextFiles(folder, context);
   return context;
 }

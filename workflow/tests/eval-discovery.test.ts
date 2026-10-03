@@ -56,7 +56,7 @@ test("frozen scenario and rank items carry copies of their contexts and gold fro
   equal(loaded.contexts.get(scenario.dataset.items[0]!.itemId)!.kind, "scenario");
   const labels = join(scenario.folder, "contexts", scenario.dataset.items[0]!.contextHash, "labels.json");
   writeFileSync(labels, "[\"tampered\"]");
-  await rejects(loadDiscoveryDataset(scenario.folder), (error: Error) => error instanceof SetupError && /labels file .* changed/.test(error.message));
+  await rejects(loadDiscoveryDataset(scenario.folder), (error: Error) => error instanceof SetupError && /labels\.json of a sealed context is missing or changed/.test(error.message));
   await rejects(freeze(harness, "rank", "scenario"), (error: Error) => error instanceof SetupError && /keep them/.test(error.message));
 });
 

@@ -1,9 +1,10 @@
-import { deepStrictEqual, match, notStrictEqual, rejects, strictEqual } from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { deepStrictEqual, match, notStrictEqual, rejects, strictEqual, throws } from "node:assert/strict";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { discoveryContextHash, sealRankContext, sealScenarioContext } from "../src/discovery/discovery-context.js";
+import { discoveryContextHash, sealRankContext, sealScenarioContext, verifyContextFiles } from "../src/discovery/discovery-context.js";
+import type { PlannedCase } from "../src/cases/case-plan.js";
 import type { Plan, PlanAction } from "../src/discovery/job-schemas.js";
 import { scenarioActions, validatePlan, type PlanVocabulary } from "../src/discovery/plan-validator.js";
 import { rankPrompt, scenarioPrompt } from "../src/discovery/prompts.js";
@@ -59,7 +60,13 @@ test("every vocabulary rule gives its own reason", () => {
 const targets = computeTargets({ baselineThread: "wf-1", inventory, manifest: manifestWith([]), provedControls: new Set(), provedInteractions: new Set() }).targets;
 const armor = targets.find((target) => target.id === "frmCreate/tabStreetGear/tabArmor")!;
 const selection = targets.find((target) => target.id === "frmCreate.tabStreetGearTabs#selection")!;
-const fixtures = [{ case: "build-Alpha", mode: "build" as const, form: "frmCreate", file: "Alpha.chum", selectedTabs: ["Skills"], captures: ["common", "skills"] }];
+const fixtures = [{ case: "build-Alpha", mode: "build" as const, form: "frmCreate", file: "Alpha.chum", selectedTabs: ["Skills"], captures: ["common", "skills"], copy: { path: "fixtures/Alpha.chum", sha256: "0".repeat(64) } }];
+const fixtureRoot = mkdtempSync(join(tmpdir(), "discovery-fixture-"));
+writeFileSync(join(fixtureRoot, "Alpha.chum"), "<character><buildmethod>Karma</buildmethod></character>");
+const planned: PlannedCase[] = [{
+  name: "build-Alpha", characterFile: "Alpha.chum", fixturePath: join(fixtureRoot, "Alpha.chum"), mode: "build", startupDelaySeconds: 3, settleMilliseconds: 300, captureFilter: null,
+  actions: [{ type: "capture", name: "common" }, { type: "selectTab", name: "Skills" }, { type: "capture", name: "skills" }],
+}];
 
 test("a rank answer must rank every target once with a score, a known case or none, and a reason", () => {
   const rankings = targets.map((target) => ({ targetId: target.id, score: 0.5, feasibility: "uncertain" as const, case: null, reason: "r" }));
@@ -92,10 +99,11 @@ test("the rank context is sealed with its priors, and its hash covers what it ho
   const archive = mkdtempSync(join(tmpdir(), "discovery-archive-"));
   const record = fixRecord({ files: ["Chummer/frmCreate.cs"] });
   const fixFolder = archivedFix(archive, record);
-  const base = { baselineThread: "wf-1", sourceSha256: inventory.sourceSha256, tabTexts: { frmCreate: ["Armor"] }, source, targets, fixtures };
+  const base = { baselineThread: "wf-1", sourceSha256: inventory.sourceSha256, tabTexts: { frmCreate: ["Armor"] }, source, targets, fixtures: planned };
   const prior = { name: "2026-10-01-fix-a", folder: fixFolder, record, score: 3, target: armor.id, reasons: ["changes Chummer/frmCreate.cs"] };
   const { context, hash } = await sealRankContext({ ...base, priors: [prior] }, folder);
   strictEqual(context.priors?.[0]?.artifacts.length, 4);
+  deepStrictEqual([context.fixtures[0]!.copy.path, context.fixtures[0]!.actions], ["fixtures/Alpha.chum", undefined]);
   strictEqual(existsSync(join(folder, "priors", "2026-10-01-fix-a", "fix.json")), true);
   deepStrictEqual(JSON.parse(readFileSync(join(folder, "context.json"), "utf8")), context);
   strictEqual(hash, discoveryContextHash(context));
@@ -113,10 +121,15 @@ test("a scenario context holds its labels file with its hash, and the prompt sta
   const folder = join(mkdtempSync(join(tmpdir(), "discovery-context-")), "scenario-1");
   const rank = { score: 0.8, feasibility: "feasible" as const, case: "build-Alpha", reason: "r" };
   const { context, hash } = await sealScenarioContext({
-    baselineThread: "wf-1", sourceSha256: inventory.sourceSha256, tabTexts: { frmCreate: ["Armor"] }, source, target: armor, rank, fixtures, labels: ["Selected Armor", "Cost:"],
+    baselineThread: "wf-1", sourceSha256: inventory.sourceSha256, tabTexts: { frmCreate: ["Armor"] }, source, target: armor, rank, fixtures: planned, labels: ["Selected Armor", "Cost:"],
   }, folder);
   deepStrictEqual(JSON.parse(readFileSync(join(folder, "labels.json"), "utf8")), ["Selected Armor", "Cost:"]);
   deepStrictEqual([context.labels.path, context.labels.count], ["labels.json", 2]);
+  deepStrictEqual([context.fixtures[0]!.copy.path, context.fixtures[0]!.selectedTabs, context.fixtures[0]!.actions?.length], ["fixtures/Alpha.chum", ["Skills"], 3]);
+  match(readFileSync(join(folder, "fixtures", "Alpha.chum"), "utf8"), /Karma/);
+  verifyContextFiles(folder, context);
+  writeFileSync(join(folder, "fixtures", "Alpha.chum"), "<character/>");
+  throws(() => verifyContextFiles(folder, context), (error: Error) => error instanceof SetupError && /changed after it was sealed/.test(error.message));
   strictEqual(hash, discoveryContextHash(context));
   const prompt = scenarioPrompt(context, { ...paths, contextFolder: "C:/scratch/scenario-1" });
   match(prompt, /^PROMPT_VERSION=scenario-v1\n/);
