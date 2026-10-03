@@ -14,6 +14,7 @@ internal sealed class HostedApplication : IApplicationHost
     private static readonly string Folder = Path.Combine(Path.GetTempPath(), "chummer-hosted-tests-" + Guid.NewGuid().ToString("N"));
 
     public string StartupPath => Folder;
+    public string ProductVersion => throw Unasked();
     public IEquipmentHost Equipment { get; } = new RecordingEquipmentHost();
 
     public IImprovementDialogs ImprovementDialogs => throw Unasked();
@@ -43,6 +44,8 @@ internal sealed class HostedApplication : IApplicationHost
     public bool AskYesNo(string strText, string strCaption) => throw Unasked();
 
     public void Exit() => throw Unasked();
+
+    public void SaveImage(byte[] bytImage, string strFileName) => throw Unasked();
 
     public void TranslateControls(object objObject)
     {
