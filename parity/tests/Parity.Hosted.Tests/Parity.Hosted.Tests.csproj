@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Parity.Hosted.Tests</RootNamespace>
+    <UseWindowsForms>true</UseWindowsForms>
+    <!-- The app's sources, compiled below, are written without nullable annotations. -->
+    <NoWarn>$(NoWarn);CS8603</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+    <PackageReference Include="xunit.v3" Version="3.2.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The core library targets .NET Framework and uses only types that .NET also provides. -->
+    <ProjectReference Include="..\..\..\Core\Core.csproj" SkipGetTargetFrameworkProperties="true" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Adapters of the app that use only Windows Forms and drawing types and the core library's types, compiled into the tests. -->
+    <Compile Include="..\..\..\Chummer\TreeNodeView.cs" Link="App\TreeNodeView.cs" />
+    <Compile Include="..\..\..\Chummer\ContextMenuNodes.cs" Link="App\ContextMenuNodes.cs" />
+    <Compile Include="..\..\..\Chummer\GrantedWeaponLists.cs" Link="App\GrantedWeaponLists.cs" />
+    <Compile Include="..\..\..\Chummer\EquipmentTreeNodeCreation.cs" Link="App\EquipmentTreeNodeCreation.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Fakes of the unit tests that run without an application host. -->
+    <Compile Include="..\Parity.Tests\Fakes\TestTreeNode.cs" Link="Fakes\TestTreeNode.cs" />
+    <Compile Include="..\Parity.Tests\Fakes\TestItemCharacter.cs" Link="Fakes\TestItemCharacter.cs" />
+    <Compile Include="..\Parity.Tests\Fakes\TestCyberware.cs" Link="Fakes\TestCyberware.cs" />
+    <Compile Include="..\Parity.Tests\Fakes\TestWeapon.cs" Link="Fakes\TestWeapon.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+</Project>

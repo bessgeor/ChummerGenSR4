@@ -6,6 +6,7 @@
     <Project Path="src/Parity.Imaging/Parity.Imaging.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Parity.Hosted.Tests/Parity.Hosted.Tests.csproj" />
     <Project Path="tests/Parity.Tests/Parity.Tests.csproj" />
   </Folder>
 </Solution>

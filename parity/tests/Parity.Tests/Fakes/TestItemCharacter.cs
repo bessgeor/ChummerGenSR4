@@ -7,7 +7,7 @@ namespace Parity.Tests.Fakes;
 /// A character for the character's items that holds its improvements, its cyberware and the gear its searches find in memory.
 /// Every member the tests do not use throws, so a test cannot pass on a value it never set.
 /// </summary>
-internal sealed class TestItemCharacter : ICharacter
+public class TestItemCharacter : ICharacter
 {
     public List<Improvement> Improvements { get; } = [];
     public List<TestCyberware> CyberwareList { get; } = [];
