@@ -208,6 +208,10 @@ export function diagnosisHarness(options: HarnessOptions) {
       const clusters = new Set(options.spots.map((spot) => spot.x)).size;
       return { path: triagePath, discrepancies: options.spots.length, clusters, newClusters: clusters, otherFindings: 0 };
     },
+    inventory: async () => ({
+      folder: join(root, "inventory"), classes: 1, activeClasses: 1, controls: { active: 0, observed: 0 }, interactions: { active: 0, exercised: 0 },
+      tuples: { planned: 0, observed: 0 }, unresolved: 0,
+    }),
     ...options.extraSteps,
   };
   const checks: CheckCaptureRequest[] = [];

@@ -14,7 +14,7 @@ import { readDocument } from "./read-document.js";
 import { finishedStatus, type StepContext, type StepOutcome } from "./step-outcome.js";
 import type { StepStore } from "./step-store.js";
 
-/** The files a completed capture run must have; their hashes guard a reused record, with every screenshot. */
+/** The files a completed capture run must have; their hashes guard a reused record, with every screenshot and UI tree. */
 export const captureOutputs = ["summary.json", "results.json", "coverage.json"] as const;
 
 export type CaptureDependencies = {
@@ -36,9 +36,11 @@ export type CaptureSelection = { readonly cases: readonly string[]; readonly cap
 
 /**
  * The capture runner's arguments for a selection under a thread's options; every capture run uses them. A candidate
- * executable replaces the thread's candidate (`out/candidate/bin/`).
+ * executable replaces the thread's candidate (`out/candidate/bin/`); with `uiTrees` the candidate side records its UI trees.
  */
-export function captureArguments(paths: WorkflowPaths, options: RunOptions, selection: CaptureSelection, runFolderFile: string, candidateExecutable: string | null = null): string[] {
+export function captureArguments(
+  paths: WorkflowPaths, options: RunOptions, selection: CaptureSelection, runFolderFile: string, candidateExecutable: string | null = null, uiTrees = false,
+): string[] {
   const args = [join(paths.captureTools, "Parity.Capture.dll"),
     "--case", selection.cases.join(","), "--case-file", options.caseFile, "--repo-root", paths.repositoryRoot, "--run-folder-file", runFolderFile];
   if (candidateExecutable !== null) args.push("--candidate-exe", candidateExecutable);
@@ -46,6 +48,7 @@ export function captureArguments(paths: WorkflowPaths, options: RunOptions, sele
   if (options.threshold !== null) args.push("--threshold", String(options.threshold));
   if (options.settingsOverlay !== null) args.push("--settings-overlay", options.settingsOverlay);
   if (options.canonicalCache !== null) args.push("--canonical-cache", options.canonicalCache);
+  if (uiTrees) args.push("--ui-tree");
   return args;
 }
 
@@ -59,6 +62,8 @@ export type CaptureRunRequest = {
   readonly subject: string;
   /** The executable to capture as the candidate instead of the thread's. */
   readonly candidateExecutable?: string;
+  /** Record the candidate side's UI trees; only the thread's own captures do, for the inventory. */
+  readonly uiTrees?: boolean;
   readonly signal?: AbortSignal;
 };
 
@@ -72,7 +77,7 @@ export async function runCaptureRunner(request: CaptureRunRequest): Promise<{ re
     const runFolderFile = join(scratch.path, "run-folder.txt");
     const exit = await request.host.run({
       resource: "desktop", label: request.subject, command: "dotnet",
-      args: captureArguments(request.paths, request.options, request.selection, runFolderFile, request.candidateExecutable ?? null), ...(request.signal === undefined ? {} : { signal: request.signal }),
+      args: captureArguments(request.paths, request.options, request.selection, runFolderFile, request.candidateExecutable ?? null, request.uiTrees ?? false), ...(request.signal === undefined ? {} : { signal: request.signal }),
     });
     const status = finishedStatus(exit);
     if (status === null) throw new SetupError(`${request.subject} exited with ${exit}, so its run did not finish.`);
@@ -87,9 +92,9 @@ export async function runCaptureRunner(request: CaptureRunRequest): Promise<{ re
   }
 }
 
-/** The screenshots of a run, relative to its folder. */
-function screenshots(runFolder: string): string[] {
-  return existsSync(join(runFolder, "captures")) ? listFiles(join(runFolder, "captures"), true).map((path) => `captures/${path}`) : [];
+/** The files of a run folder's subfolder, relative to the run folder; none when it does not exist. */
+function filesUnder(runFolder: string, folder: string): string[] {
+  return existsSync(join(runFolder, folder)) ? listFiles(join(runFolder, folder), true).map((path) => `${folder}/${path}`) : [];
 }
 
 /** Captures one case on the desktop lane, or reuses a completed capture with the same inputs. */
@@ -119,7 +124,7 @@ export class CaptureStep {
 
     const { status, runFolder } = await runCaptureRunner({
       paths, host: this.dependencies.host, createScratchFolder: this.dependencies.createScratchFolder, options: context.options,
-      selection: { cases: [item.name], captures: item.captureFilter }, subject: `capture ${item.name}`,
+      selection: { cases: [item.name], captures: item.captureFilter }, subject: `capture ${item.name}`, uiTrees: true,
       ...(context.signal === undefined ? {} : { signal: context.signal }),
     });
     // The runner also matches `--case` against fixture file names, so it may have run more than the planned case.
@@ -129,7 +134,7 @@ export class CaptureStep {
     }
     if (status !== 2) {
       await store.save({ kind: "capture", key: stepKey.key, keyLines: [...stepKey.lines], case: item.name, runFolder, status, threadId: context.threadId },
-        [...captureOutputs, ...screenshots(runFolder)], this.dependencies.now());
+        [...captureOutputs, ...filesUnder(runFolder, "captures"), ...filesUnder(runFolder, "ui-trees")], this.dependencies.now());
     }
     return { case: item.name, status, runFolder, key: stepKey.key, reusedFrom: null };
   }

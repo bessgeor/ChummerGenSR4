@@ -1,13 +1,14 @@
 import { join } from "node:path";
 import type { BaseStore } from "@langchain/langgraph-checkpoint";
 import type { PlannedCase } from "./cases/case-plan.js";
-import type { TriageInput, WorkflowSteps } from "./graph/workflow-graph.js";
+import type { InventoryInput, TriageInput, WorkflowSteps } from "./graph/workflow-graph.js";
 import type { TriageSummary } from "./graph/workflow-state.js";
 import type { HostRunner } from "./host/host-runner.js";
 import type { ScratchFolder } from "./host/scratch-folder.js";
 import { recordCandidateSource } from "./diagnosis/candidate-source.js";
 import { compiledSourceIdentity, processGit } from "./diagnosis/source-snapshot.js";
 import { SetupError } from "./host/setup-error.js";
+import { defaultScopeFile, plannedCaptures, writeInventory, type InventorySummary } from "./inventory/inventory-service.js";
 import type { RunOptions } from "./options/run-options.js";
 import type { WorkflowPaths } from "./paths.js";
 import { readEnvironmentFingerprint, type CaptureStep } from "./steps/capture-step.js";
@@ -77,5 +78,15 @@ export class HostSteps implements WorkflowSteps {
   async triage(input: TriageInput, store: BaseStore): Promise<TriageSummary> {
     for (const outcome of Object.values(input.compares)) await requireCurrentReport(this.stepStore, outcome);
     return runTriage(input, store, this.paths.threadFolder(input.threadId), this.now());
+  }
+
+  inventory(input: InventoryInput): Promise<InventorySummary> {
+    const root = this.paths.repositoryRoot;
+    return writeInventory({
+      repositoryRoot: root, git: processGit(root), scopeFile: defaultScopeFile, candidateSource: input.candidateSource,
+      plan: input.plan.map(plannedCaptures),
+      runFolders: input.plan.flatMap((item) => (input.captures[item.name] === undefined ? [] : [input.captures[item.name]!.runFolder])),
+      outputFolder: join(this.paths.threadFolder(input.threadId), "inventory"),
+    });
   }
 }

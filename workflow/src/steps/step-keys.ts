@@ -3,8 +3,8 @@ import type { RunOptions } from "../options/run-options.js";
 import { sha256Lines } from "./fingerprint.js";
 import type { InputFingerprints } from "./input-fingerprints.js";
 
-/** Bumped whenever the meaning of a step or its key lines changes, so older records miss. */
-export const stepFormatVersion = 1;
+/** Bumped whenever the meaning of a step or its key lines changes, so older records miss: version 2 capture runs record UI trees. */
+export const stepFormatVersion = 2;
 
 export type StepKey = { readonly key: string; readonly lines: readonly string[] };
 

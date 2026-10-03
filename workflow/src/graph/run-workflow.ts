@@ -3,6 +3,7 @@ import type { CasePlan } from "../cases/case-plan.js";
 import { SetupError } from "../host/setup-error.js";
 import type { Command } from "../options/arguments.js";
 import type { RunOptions } from "../options/run-options.js";
+import { inventoryLines } from "../inventory/inventory-service.js";
 import { describeOutcome } from "../loop/outcome.js";
 import { describeRepair, repairStatus } from "../repair/repair-report.js";
 import { describeWidening, wideningStatus } from "../widening/widening-report.js";
@@ -68,6 +69,8 @@ function report(state: WorkflowStateValue, readCase: RunDependencies["readCase"]
     log(`Triage: ${triage.discrepancies} discrepancies in ${triage.clusters} clusters (${triage.newClusters} new), `
       + `${triage.otherFindings} other findings; ${triage.path}`);
   }
+  // A thread checkpointed before the inventory existed has no such field at all.
+  for (const line of inventoryLines(state.inventorySummary, state.triageSummary !== null)) log(line);
   // A thread checkpointed before diagnosis existed has no such fields at all.
   for (const line of describeDiagnosis(state.clusters ?? {}, state.diagnosisCheck ?? null, state.diagnosisPath ?? null)) log(line);
   for (const line of describeRepair(state.repairs ?? {}, state.repairPath ?? null)) log(line);
@@ -84,7 +87,7 @@ async function start(command: Extract<Command, { kind: "start" }>, dependencies:
   const cache = options.canonicalCache === null ? "off (--live-canonical)" : `${options.canonicalCache} (${options.canonicalCacheSource})`;
   dependencies.log(`Thread ${threadId}: ${plan.cases.length} cases, canonical cache ${cache}.`);
   const input: WorkflowStateValue = {
-    threadId, options, plan: [...plan.cases], fingerprints: null, captures: {}, lastCaptured: -1, compares: {}, triageSummary: null,
+    threadId, options, plan: [...plan.cases], fingerprints: null, captures: {}, lastCaptured: -1, compares: {}, triageSummary: null, inventorySummary: null,
     clusters: {}, agentMilliseconds: 0, diagnosisCheck: null, diagnosisPath: null, repairs: {}, repairPath: null, widenings: {}, earlierWidenings: [], accepted: null, wideningPath: null,
     startedUtc: dependencies.now().toISOString(), outcome: null, outcomePath: null,
   };

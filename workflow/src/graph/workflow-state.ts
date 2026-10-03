@@ -5,6 +5,7 @@ import { mergeClusters, type ClusterDiagnosis, type ClusterUpdate } from "../dia
 import type { RunOptions } from "../options/run-options.js";
 import { mergeRepairs, type ClusterRepair, type RepairUpdate } from "../repair/cluster-repair.js";
 import type { OutcomeDocument } from "../loop/outcome.js";
+import type { InventorySummary } from "../inventory/inventory-service.js";
 import type { InputFingerprints } from "../steps/input-fingerprints.js";
 import type { StepOutcome } from "../steps/step-outcome.js";
 import { mergeWidenings, type AcceptedState, type ClusterWidening, type WideningUpdate } from "../widening/cluster-widening.js";
@@ -34,6 +35,8 @@ export const WorkflowState = Annotation.Root({
   lastCaptured: Annotation<number>(),
   compares: byCase(),
   triageSummary: Annotation<TriageSummary | null>(),
+  /** The inventory's totals and folder, once the inventory after triage ran; absent in a thread stored before it existed. */
+  inventorySummary: Annotation<InventorySummary | null>(),
   /** Each triage cluster's diagnosis, by cluster ID; job nodes update the clusters they ran. */
   clusters: Annotation<Record<string, ClusterDiagnosis>, Record<string, ClusterUpdate>>({
     reducer: mergeClusters,

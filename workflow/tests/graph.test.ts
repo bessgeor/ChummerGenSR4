@@ -3,7 +3,9 @@ import { test } from "node:test";
 import { InMemoryStore, MemorySaver } from "@langchain/langgraph";
 import { resolveAgentSettings } from "../src/agents/agent-settings.js";
 import type { PlannedCase } from "../src/cases/case-plan.js";
-import { buildWorkflowGraph, nodeMode, type DiagnosisSteps, type LoopSteps, type RepairSteps, type WideningSteps, type WorkflowSteps } from "../src/graph/workflow-graph.js";
+import { buildWorkflowGraph, nodeMode, type DiagnosisSteps, type InventoryInput, type LoopSteps, type RepairSteps, type WideningSteps, type WorkflowSteps } from "../src/graph/workflow-graph.js";
+import { inventoryLines, type InventorySummary } from "../src/inventory/inventory-service.js";
+import type { WorkflowStateValue } from "../src/graph/workflow-state.js";
 import type { Conclusion, ConcludeInput } from "../src/loop/loop-service.js";
 import type { OutcomeDocument } from "../src/loop/outcome.js";
 import { exitStatus, runWorkflow, type RunDependencies } from "../src/graph/run-workflow.js";
@@ -63,6 +65,17 @@ class FakeSteps implements WorkflowSteps {
   async triage(input: { plan: readonly PlannedCase[] }) {
     this.calls.push("triage");
     return { path: "triage.json", discrepancies: 0, clusters: 0, newClusters: 0, otherFindings: 0, cases: input.plan.length };
+  }
+
+  failInventory = false;
+
+  async inventory(input: InventoryInput): Promise<InventorySummary> {
+    this.calls.push(`inventory ${input.candidateSource} ${Object.keys(input.captures).sort().join(",")}`);
+    if (this.failInventory) throw new SetupError("The scope file does not match the source.");
+    return {
+      folder: "inventory", classes: 3, activeClasses: 2, controls: { active: 10, observed: 4 }, interactions: { active: 6, exercised: 1 },
+      tuples: { planned: input.plan.length, observed: input.plan.length }, unresolved: 2,
+    };
   }
 }
 
@@ -166,13 +179,13 @@ function harness(cases: string[], steps = new FakeSteps(), checkpointer = new Me
   return { steps, lines, dependencies, startRun, threadId, checkpointer, readCalls, loop };
 }
 
-test("compare of each case overlaps the capture of the next, and triage runs last", async () => {
+test("compare of each case overlaps the capture of the next, and triage and the inventory run last", async () => {
   const { steps, startRun } = harness(["a", "b", "c"]);
   equal(await startRun(), 0);
   const at = (event: string) => steps.events.indexOf(event);
   ok(at("compare a start") < at("capture b end") && at("capture b start") < at("compare a end"));
   ok(at("compare b start") < at("capture c end") && at("capture c start") < at("compare b end"));
-  deepStrictEqual(steps.calls.at(-1), "triage");
+  deepStrictEqual(steps.calls.slice(-2), ["triage", "inventory src a,b,c"]);
   deepStrictEqual(steps.buildCandidate, [true]);
 });
 
@@ -198,7 +211,7 @@ test("a setup error stops the run with status 3 and the thread resumes without r
   equal(await runWorkflow({ kind: "resume", threadId: run.threadId() }, run.dependencies), 0);
   ok(!steps.calls.includes("capture a run"), steps.calls.join(", "));
   deepStrictEqual(steps.calls.filter((call) => call.startsWith("capture")), ["capture b run", "capture c run"]);
-  deepStrictEqual(steps.calls.at(-1), "triage");
+  deepStrictEqual(steps.calls.slice(-2), ["triage", "inventory src a,b,c"]);
 });
 
 test("a finished or unknown thread cannot be resumed", async () => {
@@ -226,11 +239,50 @@ test("--only runs one node, reuses the nodes before it and skips the nodes after
 
   const triage = harness(["a"]);
   equal(await triage.startRun("triage"), 0);
-  deepStrictEqual(triage.steps.calls, ["capture a reuse-only", "compare a reuse-only", "triage"]);
+  deepStrictEqual(triage.steps.calls, ["capture a reuse-only", "compare a reuse-only", "triage", "inventory src a"]);
   // A run that triaged concludes; one that ended before triage has no outcome.
   deepStrictEqual([triage.loop.concluded, capture.loop.concluded, compare.loop.concluded], [[triage.threadId()], [], []]);
   ok(triage.lines.at(-2)!.startsWith("Outcome: verified_for_scope; 0 of 0 clusters fixed, "), triage.lines.join("\n"));
   ok(!capture.lines.some((line) => line.startsWith("Outcome: ")));
+});
+
+test("the inventory's totals follow the triage totals in the report", async () => {
+  const run = harness(["a"]);
+  equal(await run.startRun(), 0);
+  const triage = run.lines.findIndex((line) => line.startsWith("Triage: "));
+  equal(run.lines[triage + 1], "Inventory: 3 classes (2 active), controls observed 4/10, interactions exercised 1/6, tuples observed 1/1, unresolved 2; inventory");
+});
+
+test("an inventory setup error ends the run with 3, and the resumed thread runs the inventory again without triaging again", async () => {
+  const steps = new FakeSteps();
+  steps.failInventory = true;
+  const run = harness(["a", "b"], steps);
+  equal(await run.startRun(), 3);
+  ok(run.lines.some((line) => line === "Setup error: The scope file does not match the source."), run.lines.join("\n"));
+  equal(run.loop.concluded.length, 0);
+
+  steps.failInventory = false;
+  steps.calls.length = 0;
+  equal(await runWorkflow({ kind: "resume", threadId: run.threadId() }, run.dependencies), 0);
+  deepStrictEqual(steps.calls, ["inventory src a,b"]);
+  equal(run.loop.concluded.length, 1);
+});
+
+test("a thread stored before the inventory existed skips it and its report says so", async () => {
+  const run = harness(["a"]);
+  const graph = buildWorkflowGraph(run.steps, noDiagnosis, noRepair, noWidening, run.loop).compile({ checkpointer: new MemorySaver(), store: new InMemoryStore() });
+  const options = run.dependencies.resolveOptions({ kind: "start", arguments: baseArguments });
+  const { inventorySummary: _absent, ...stored }: WorkflowStateValue = {
+    threadId: "wf-old", options, plan: [plannedCase("a")], fingerprints: null, captures: {}, lastCaptured: -1, compares: {}, triageSummary: null, inventorySummary: null,
+    clusters: {}, agentMilliseconds: 0, diagnosisCheck: null, diagnosisPath: null, repairs: {}, repairPath: null, widenings: {}, earlierWidenings: [], accepted: null,
+    wideningPath: null, startedUtc: null, outcome: null, outcomePath: null,
+  };
+  const final = await graph.invoke(stored as WorkflowStateValue, { configurable: { thread_id: "wf-old" } });
+  deepStrictEqual(run.steps.calls.filter((call) => !call.startsWith("capture") && !call.startsWith("compare")), ["triage"]);
+  equal(final.inventorySummary, undefined);
+  equal(run.loop.concluded.length, 1);
+  deepStrictEqual(inventoryLines(undefined, true), ["Inventory: not run; the thread started before its capture runs recorded UI trees."]);
+  deepStrictEqual([inventoryLines(undefined, false), inventoryLines(null, false)], [[], []]);
 });
 
 test("each case's execution outcome is reported apart from its visual outcome", async () => {
