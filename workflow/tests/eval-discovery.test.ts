@@ -69,6 +69,13 @@ test("a scenario that did not execute gives its rank no gold about its target", 
   deepStrictEqual(rank.dataset.items[0]!.gold, { kind: "rank", proven: [], notProven: [] });
 });
 
+test("a context that is not JSON stops the freeze with a setup error naming it", async () => {
+  const harness = await provenThread();
+  const context = join(discoveryPaths(harness.out).thread(threadOf(harness.lines)).root, "rank", "context.json");
+  writeFileSync(context, readFileSync(context, "utf8").slice(0, 40));
+  await rejects(freeze(harness, "rank"), (error: Error) => error instanceof SetupError && error.message.includes(context) && /cannot be read/.test(error.message));
+});
+
 test("only labelled, succeeded workflow records are frozen, and nothing to freeze is a setup error", async () => {
   // A thread whose rank answer fails validation has a failed, unlabelled rank record and no scenario record.
   const harness = await discoveryHarness((job) => ({ answer: job.kind === "rank" ? { rankings: [] } : null }));

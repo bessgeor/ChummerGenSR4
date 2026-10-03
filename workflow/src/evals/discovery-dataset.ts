@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { canonicalJson } from "../diagnosis/context.js";
@@ -57,13 +57,24 @@ export type DiscoveryFreezeInput = {
   readonly log: (line: string) => void;
 };
 
-/** The contexts of a discovery thread by hash: its rank folder and its scenario folders, read once per thread. */
+function readJson(path: string): unknown {
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    throw new SetupError(`The discovery context ${path} cannot be read: ${(error as Error).message}`);
+  }
+}
+
+/**
+ * The contexts of a discovery thread by hash: its rank folder and its scenario folders, read once per thread. A context sealed in
+ * another format than the current one cannot be staged for the current prompts, so it is not listed and its records are left out; one that is not JSON at all is a setup error.
+ */
 function threadContexts(threadFolder: string): Map<string, { readonly folder: string; readonly kind: "rank" | "scenario" }> {
   const folders = existsSync(threadFolder) ? readdirSync(threadFolder).filter((name) => name === "rank" || /^scenario-\d+$/.test(name)).map((name) => join(threadFolder, name)) : [];
   const contexts = new Map<string, { folder: string; kind: "rank" | "scenario" }>();
   for (const folder of folders.filter((entry) => existsSync(join(entry, "context.json")))) {
-    const context = readDocument(join(folder, "context.json"), DiscoveryContextSchema);
-    contexts.set(discoveryContextHash(context), { folder, kind: context.kind });
+    const parsed = DiscoveryContextSchema.safeParse(readJson(join(folder, "context.json")));
+    if (parsed.success) contexts.set(discoveryContextHash(parsed.data), { folder, kind: parsed.data.kind });
   }
   return contexts;
 }
@@ -126,7 +137,7 @@ export async function freezeDiscoveryDataset(input: DiscoveryFreezeInput): Promi
     const found = contextsByThread.get(record.threadId)!.get(record.contextHash);
     const contextFolder = found === undefined || found.kind !== record.jobKind ? null : found.folder;
     if (contextFolder === null || !existsSync(join(threadFolder, "source"))) {
-      input.log(`Freeze: record ${record.recordId} is left out: its context or its thread's snapshot no longer exists.`);
+      input.log(`Freeze: record ${record.recordId} is left out: its context (in the current format) or its thread's snapshot no longer exists.`);
       continue;
     }
     const context = readDocument(join(contextFolder, "context.json"), DiscoveryContextSchema);
