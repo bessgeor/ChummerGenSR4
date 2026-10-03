@@ -5,7 +5,7 @@ import type { InventoryInput, TriageInput, WorkflowSteps } from "./graph/workflo
 import type { TriageSummary } from "./graph/workflow-state.js";
 import type { HostRunner } from "./host/host-runner.js";
 import type { ScratchFolder } from "./host/scratch-folder.js";
-import { recordCandidateSource } from "./diagnosis/candidate-source.js";
+import { recordCandidateSha256, recordCandidateSource } from "./diagnosis/candidate-source.js";
 import { compiledSourceIdentity, processGit } from "./diagnosis/source-snapshot.js";
 import { SetupError } from "./host/setup-error.js";
 import { defaultScopeFile, plannedCaptures, writeInventory, type InventorySummary } from "./inventory/inventory-service.js";
@@ -13,6 +13,7 @@ import type { RunOptions } from "./options/run-options.js";
 import type { WorkflowPaths } from "./paths.js";
 import { readEnvironmentFingerprint, type CaptureStep } from "./steps/capture-step.js";
 import { requireCurrentReport, type CompareStep } from "./steps/compare-step.js";
+import { sha256File } from "./steps/fingerprint.js";
 import { fingerprintInputs, type InputFingerprints } from "./steps/input-fingerprints.js";
 import type { StepContext, StepOutcome } from "./steps/step-outcome.js";
 import type { StepStore } from "./steps/step-store.js";
@@ -44,7 +45,10 @@ export class HostSteps implements WorkflowSteps {
     return fingerprintInputs(this.paths, options, environment);
   }
 
-  /** Builds the candidate and records the compiled source it was built from, taken before the build so an edit during it shows. */
+  /**
+   * Builds the candidate and records the compiled source it was built from, taken before the build so an edit during it
+   * shows, and the SHA-256 of the candidate it produced.
+   */
   async buildCandidate(signal?: AbortSignal): Promise<void> {
     const compiled = await compiledSourceIdentity(this.paths.repositoryRoot, processGit(this.paths.repositoryRoot));
     const status = await this.host.run({
@@ -54,6 +58,7 @@ export class HostSteps implements WorkflowSteps {
     });
     if (status !== 0) throw new SetupError(`The candidate build failed (exit ${status}); nothing was captured.`);
     recordCandidateSource(this.paths, compiled);
+    recordCandidateSha256(this.paths, await sha256File(join(this.paths.candidateApp, "ChummerGenSR4.exe")));
   }
 
   private async buildTools(signal: AbortSignal | undefined): Promise<void> {

@@ -1,14 +1,16 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
+import type { ZodType } from "zod";
 import { captureNames, type PlannedCase } from "../cases/case-plan.js";
 import { requireRecordedSource, requireSameSource } from "../diagnosis/candidate-source.js";
-import { compiledSourceIdentity, type Git } from "../diagnosis/source-snapshot.js";
+import { compiledIdentityOfPaths, compiledSourcePaths, type Git } from "../diagnosis/source-snapshot.js";
 import { SetupError } from "../host/setup-error.js";
 import { buildCoverageManifest, type PlannedCaptures } from "./coverage-manifest.js";
-import type { CoverageManifest } from "./coverage-manifest-document.js";
+import { CoverageManifestSchema, type CoverageManifest } from "./coverage-manifest-document.js";
 import { readRunObservation } from "./run-observations.js";
 import { readScope } from "./scope.js";
-import { buildSourceInventory, designerFiles } from "./source-inventory.js";
+import { SourceInventorySchema } from "./source-inventory-document.js";
+import { buildSourceInventory, designerPaths } from "./source-inventory.js";
 
 /** What the run's report says about the inventory; the documents hold the rest. */
 export type InventorySummary = {
@@ -65,6 +67,14 @@ function summarize(folder: string, manifest: CoverageManifest): InventorySummary
   };
 }
 
+/** A document that breaks its own schema is never written: its readers would reject it. */
+export function requireValid(file: string, schema: ZodType, document: unknown): void {
+  const result = schema.safeParse(document);
+  if (result.success) return;
+  const issue = result.error.issues[0];
+  throw new SetupError(`${file} would not match its schema: ${issue?.path.join(".") ?? ""} ${issue?.message ?? "invalid"}.`);
+}
+
 /**
  * Writes `source-inventory.json` and `coverage-manifest.json` into the output folder. When it reads capture runs, the
  * working tree's compiled source must be the one the candidate was built from, as its build recorded it; otherwise the
@@ -72,11 +82,12 @@ function summarize(folder: string, manifest: CoverageManifest): InventorySummary
  */
 export async function writeInventory(request: InventoryRequest): Promise<InventorySummary> {
   const { repositoryRoot } = request;
+  const sourcePaths = compiledSourcePaths(repositoryRoot, request.git);
   if (request.runFolders.length > 0) {
     requireRecordedSource(request.candidateSource, "only the workflow's build step records it. Build it with npm start.");
-    requireSameSource(request.candidateSource, await compiledSourceIdentity(repositoryRoot, request.git), "the UI trees do not show this source. Build again.");
+    requireSameSource(request.candidateSource, await compiledIdentityOfPaths(repositoryRoot, sourcePaths), "the UI trees do not show this source. Restore the source the candidate was built from, or start a new run of npm start, which builds it again.");
   }
-  const inventory = buildSourceInventory(repositoryRoot, designerFiles(repositoryRoot, request.git));
+  const inventory = buildSourceInventory(repositoryRoot, designerPaths(sourcePaths));
   const scopeFile = resolve(repositoryRoot, request.scopeFile);
   const scope = readScope(scopeFile);
   const inside = relative(repositoryRoot, scopeFile);
@@ -89,6 +100,8 @@ export async function writeInventory(request: InventoryRequest): Promise<Invento
     }
   }
   const manifest = buildCoverageManifest({ inventory, scope, scopePath, plan: request.plan, runs });
+  requireValid("source-inventory.json", SourceInventorySchema, inventory);
+  requireValid("coverage-manifest.json", CoverageManifestSchema, manifest);
   mkdirSync(request.outputFolder, { recursive: true });
   writeFileSync(join(request.outputFolder, "source-inventory.json"), `${JSON.stringify(inventory, null, 2)}\n`);
   writeFileSync(join(request.outputFolder, "coverage-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);

@@ -16,6 +16,21 @@ export function recordCandidateSource(paths: WorkflowPaths, compiledIdentity: st
   writeFileSync(recordPath(paths), `${compiledIdentity}\n`);
 }
 
+function sha256RecordPath(paths: WorkflowPaths): string {
+  return join(dirname(paths.candidateApp), "candidate-sha256.txt");
+}
+
+/** Records the SHA-256 of the candidate the workflow's build produced, so a candidate built later outside it shows. */
+export function recordCandidateSha256(paths: WorkflowPaths, sha256: string): void {
+  writeFileSync(sha256RecordPath(paths), `${sha256}\n`);
+}
+
+/** The SHA-256 of the candidate built from the recorded source, or undefined when no build recorded one. */
+export function recordedCandidateSha256(paths: WorkflowPaths): string | undefined {
+  const path = sha256RecordPath(paths);
+  return existsSync(path) ? readFileSync(path, "utf8").trim() : undefined;
+}
+
 /** The compiled-source identity recorded by the build of the candidate that is there now, or `unrecordedSource` when none was recorded. */
 export function recordedCandidateSource(paths: WorkflowPaths): string {
   const path = recordPath(paths);

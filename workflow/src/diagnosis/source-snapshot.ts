@@ -58,8 +58,13 @@ export function compiledSourcePaths(repositoryRoot: string, git: Git): string[] 
 
 /** The identity of the compiled source of the working tree now, without copying anything; equals `compiledIdentity` of a snapshot taken now. */
 export async function compiledSourceIdentity(repositoryRoot: string, git: Git): Promise<string> {
+  return compiledIdentityOfPaths(repositoryRoot, compiledSourcePaths(repositoryRoot, git));
+}
+
+/** The compiled-source identity of files already listed by `compiledSourcePaths`. */
+export async function compiledIdentityOfPaths(repositoryRoot: string, paths: readonly string[]): Promise<string> {
   const lines: string[] = [];
-  for (const path of compiledSourcePaths(repositoryRoot, git)) {
+  for (const path of paths) {
     lines.push(`${path}\t${await sha256File(join(repositoryRoot, path))}`);
   }
   return sha256Lines(lines);
