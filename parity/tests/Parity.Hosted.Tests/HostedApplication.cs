@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Xml;
 using Chummer;
+using Parity.Tests;
 using Parity.Tests.Fakes;
 
 namespace Parity.Hosted.Tests;
@@ -17,7 +18,7 @@ internal sealed class HostedApplication : IApplicationHost
     public string ProductVersion => throw Unasked();
     public IEquipmentHost Equipment { get; } = new RecordingEquipmentHost();
 
-    public IImprovementDialogs ImprovementDialogs => throw Unasked();
+    public IImprovementDialogs ImprovementDialogs { get; } = new UnaskedDialogs();
 
     public static RecordingEquipmentHost Host => (RecordingEquipmentHost)((HostedApplication)ApplicationHost.Current).Equipment;
 
@@ -26,6 +27,8 @@ internal sealed class HostedApplication : IApplicationHost
     {
         Directory.CreateDirectory(Path.Combine(Folder, "lang"));
         Directory.CreateDirectory(Path.Combine(Folder, "data"));
+        Directory.CreateDirectory(Path.Combine(Folder, "settings"));
+        File.Copy(Path.Combine(RepositoryPaths.Root, "bin", "settings", "default.xml"), Path.Combine(Folder, "settings", "default.xml"));
         File.WriteAllText(Path.Combine(Folder, "lang", "en-us.xml"), "<chummer><strings /></chummer>");
         File.WriteAllText(Path.Combine(Folder, "data", "books.xml"), "<chummer><books /></chummer>");
         File.WriteAllText(Path.Combine(Folder, "data", "weapons.xml"), TestData.Weapons);
@@ -52,6 +55,24 @@ internal sealed class HostedApplication : IApplicationHost
     }
 
     private static InvalidOperationException Unasked() => new("The test host is asked for nothing.");
+
+    /// <summary>
+    /// Selection dialogs that a character's improvement manager holds and no test asks.
+    /// </summary>
+    private sealed class UnaskedDialogs : IImprovementDialogs
+    {
+        public string SelectText(string strFriendlyName, string strForcedValue) => throw Unasked();
+        public string SelectRestrictedItem(IImprovementCharacter objCharacter, string strForcedValue) => throw Unasked();
+        public string SelectSkill(IImprovementCharacter objCharacter, string strFriendlyName, string strOnlySkillGroup, string strOnlyCategory, string strExcludeCategory, string strLimitToSkill, string strForcedValue) => throw Unasked();
+        public string SelectSkillGroup(string strFriendlyName, string strForcedValue, string strExcludeCategory) => throw Unasked();
+        public string SelectAttribute(string strFriendlyName, bool blnAddMAG, bool blnAddRES, List<string> lstLimitTo, List<string> lstRemove, string strForcedValue) => throw Unasked();
+        public string SelectSwapSkillAttribute(string strFriendlyName, List<string> lstRemove, List<string> lstLimitTo, string strForcedValue) => throw Unasked();
+        public string SelectSpell(IImprovementCharacter objCharacter, string strLimitCategory, string strForcedValue) => throw Unasked();
+        public MentorSpiritSelection SelectMentorSpirit(IImprovementCharacter objCharacter, string strXmlFile) => throw Unasked();
+        public string SelectSide(string strFriendlyName, string strForcedValue) => throw Unasked();
+        public string SelectSprite(List<ListItem> lstSprites) => throw Unasked();
+        public string SelectWeapon(string strFriendlyName, List<ListItem> lstWeapons, string strForcedValue) => throw Unasked();
+    }
 
     /// <summary>
     /// Creates a weapon with only a name for every weapon an item grants and keeps it by its identifier.

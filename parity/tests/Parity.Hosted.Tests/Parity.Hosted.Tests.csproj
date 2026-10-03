@@ -34,6 +34,7 @@
     <Compile Include="..\Parity.Tests\Fakes\TestItemCharacter.cs" Link="Fakes\TestItemCharacter.cs" />
     <Compile Include="..\Parity.Tests\Fakes\TestCyberware.cs" Link="Fakes\TestCyberware.cs" />
     <Compile Include="..\Parity.Tests\Fakes\TestWeapon.cs" Link="Fakes\TestWeapon.cs" />
+    <Compile Include="..\Parity.Tests\RepositoryPaths.cs" Link="RepositoryPaths.cs" />
   </ItemGroup>
 
   <ItemGroup>
