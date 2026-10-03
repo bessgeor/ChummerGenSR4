@@ -209,6 +209,8 @@ export type Harness = {
   readonly lines: string[];
   readonly store: InMemoryStore;
   readonly waits: number[];
+  readonly scenarioRun: ScenarioRun;
+  readonly graph: ReturnType<ReturnType<typeof buildDiscoveryGraph>["compile"]>;
   run(args?: Partial<DiscoverArguments>): Promise<number>;
   resume(threadId: string): Promise<number>;
 };
@@ -248,7 +250,7 @@ export async function discoveryHarness(
   });
   const dependencies = { graph, resolveOptions, certificateProblems: () => [], log, now };
   return {
-    root, out, agents, capture, lines, store, waits,
+    root, out, agents, capture, lines, store, waits, scenarioRun, graph,
     run: (args = {}) => runDiscovery({ kind: "start", arguments: { from: baselineThread, targets: 3, caseFile: null, settingsOverlay: null, threshold: null, canonicalCache: null, liveCanonical: true, unattended: false, ...args } }, dependencies),
     resume: (threadId) => runDiscovery({ kind: "resume", threadId }, dependencies),
   };

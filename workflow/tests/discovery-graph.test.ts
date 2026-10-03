@@ -150,6 +150,26 @@ test("a thread stopped by a setup error resumes without running its finished job
   ok(harness.lines.some((line) => line.includes("already finished")));
 });
 
+test("a register step that runs again finds its own admissions and decides the same", async () => {
+  const harness = await discoveryHarness(replies());
+  strictEqual(await harness.run({ targets: 1 }), 0);
+  const state = (await harness.graph.getState({ configurable: { thread_id: threadOf(harness.lines) } })).values as Parameters<typeof harness.scenarioRun.register>[0];
+  const again = await harness.scenarioRun.register(state, harness.store);
+  deepStrictEqual([again.admitted, again.duplicates, again.registryEntries], [state.registered!.admitted, [], 1]);
+  deepStrictEqual(Object.values(again.proofs).map((proof) => proof.proofs.controls), [["frmCreate.tabSkills", "frmCreate.lblKarma"]]);
+  deepStrictEqual((await getRecord(harness.store, "scenario", state.scenarios[skills]!.answer!.recordId)).labels.discovery?.outcome, "proven");
+});
+
+test("a fixture case file that changed since the thread started stops it before its capture", async () => {
+  const harness = await discoveryHarness(replies(), undefined, { capture: { error: new SetupError("stopped") } });
+  strictEqual(await harness.run({ targets: 1 }), 3);
+  const caseFile = join(harness.root, "parity", "cases", "characters.json");
+  writeFileSync(caseFile, readFileSync(caseFile, "utf8").replace("\"settleMilliseconds\":300", "\"settleMilliseconds\":200"));
+  strictEqual(await harness.resume(threadOf(harness.lines)), 3);
+  ok(harness.lines.some((line) => line.includes("changed since the thread started")), harness.lines.join("\n"));
+  strictEqual(harness.capture.calls.length, 1);
+});
+
 test("targets the registry proved for this source are covered, and a thread without targets runs no job", async () => {
   const repository = await discoveryRepository();
   const manifest = JSON.parse(readFileSync(join(repository.paths.threadFolder(baselineThread), "inventory", "coverage-manifest.json"), "utf8")) as { sourceSha256: string };

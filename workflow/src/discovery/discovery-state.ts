@@ -43,6 +43,8 @@ export type Prepared = {
   readonly sourceSha256: string;
   readonly candidateSha256: string;
   readonly candidateSource: string;
+  /** The fixture case file's SHA-256: the contexts describe its cases, so it must not change while the thread runs. */
+  readonly caseFileSha256: string;
   readonly fingerprints: InputFingerprints;
   readonly targetsPath: string;
   readonly targets: number;

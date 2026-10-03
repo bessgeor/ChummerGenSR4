@@ -10,6 +10,7 @@ import { discoveryPaths } from "../src/discovery/discovery-paths.js";
 import type { ScenarioContext } from "../src/discovery/discovery-context.js";
 import { certificatePath, certificateProblems, certify } from "../src/evals/certificate.js";
 import { compareRuns } from "../src/evals/comparison.js";
+import { runEvalCommand } from "../src/evals/eval-commands.js";
 import { freezeDiscoveryDataset, loadDiscoveryDataset, type DiscoveryDatasetItem } from "../src/evals/discovery-dataset.js";
 import { failedDiscoveryScores, scoreRank, scoreScenario } from "../src/evals/discovery-scoring.js";
 import { listRecords } from "../src/evals/eval-record.js";
@@ -17,6 +18,7 @@ import { startEvalRun, summaryLines } from "../src/evals/eval-run.js";
 import { createScratchFolder } from "../src/host/scratch-folder.js";
 import { SetupError } from "../src/host/setup-error.js";
 import { discoveryHarness, FakeAgents, fixtureCase, threadOf, type Harness, type Reply } from "./discovery-harness.js";
+import { evalContext } from "./eval-fixtures.js";
 import { writeRun } from "./eval-threads.js";
 
 const act = (type: string, fields: Record<string, unknown> = {}) => ({ type, name: null, label: null, milliseconds: null, optional: null, ...fields });
@@ -58,6 +60,15 @@ test("frozen scenario and rank items carry copies of their contexts and gold fro
   await rejects(freeze(harness, "rank", "scenario"), (error: Error) => error instanceof SetupError && /keep them/.test(error.message));
 });
 
+test("a scenario that did not execute gives its rank no gold about its target", async () => {
+  const probe = await provenThread();
+  const caseName = JSON.parse(readFileSync(join(probe.out, "out", "discovery", "threads", threadOf(probe.lines), "discovery.json"), "utf8")).scenarios[0].case as string;
+  const harness = await discoveryHarness(reply(), undefined, { capture: { failed: caseName } });
+  equal(await harness.run({ targets: 1 }), 2);
+  const rank = await freeze(harness, "rank");
+  deepStrictEqual(rank.dataset.items[0]!.gold, { kind: "rank", proven: [], notProven: [] });
+});
+
 test("only labelled, succeeded workflow records are frozen, and nothing to freeze is a setup error", async () => {
   // A thread whose rank answer fails validation has a failed, unlabelled rank record and no scenario record.
   const harness = await discoveryHarness((job) => ({ answer: job.kind === "rank" ? { rankings: [] } : null }));
@@ -88,7 +99,8 @@ test("scenario answers are valid when the plan passes the validator and reach wh
   deepStrictEqual(scoreScenario(answer("Skills"), gold, context, ["Karma"]), { valid: true, reached: true });
   deepStrictEqual(scoreScenario(answer("Common"), gold, context, ["Karma"]), { valid: true, reached: false });
   deepStrictEqual(scoreScenario(answer("Skills"), gold, context, []), { valid: false, reached: false });
-  deepStrictEqual(scoreScenario({ outcome: "abstain", reason: "r", plan: null }, item(null), context, []), { valid: false, reached: null });
+  deepStrictEqual(scoreScenario({ outcome: "abstain", reason: "r", plan: null }, item(null), context, []), { valid: null, reached: null });
+  deepStrictEqual(scoreScenario({ outcome: "abstain", reason: "r", plan: null }, gold, context, []), { valid: null, reached: false });
 });
 
 test("an eval run on a scenario dataset scores valid and reached and records its samples as eval-run records", async () => {
@@ -109,7 +121,7 @@ test("an eval run on a scenario dataset scores valid and reached and records its
   ok(threadOf(harness.lines).startsWith("disc-"));
 });
 
-test("certify and compare take valid and reached for discovery runs and refuse the diagnosis metrics", () => {
+test("certify and compare take valid and reached for discovery runs and refuse the diagnosis metrics", async () => {
   const root = mkdtempSync(join(tmpdir(), "eval-discovery-"));
   writeRun(join(root, "runs", "s1"), { jobKind: "scenario", promptVersion: "scenario-v1" }, Array.from({ length: 20 }, () => true));
   writeRun(join(root, "runs", "s2"), { jobKind: "scenario", promptVersion: "scenario-v1" }, Array.from({ length: 20 }, () => true));
@@ -120,6 +132,10 @@ test("certify and compare take valid and reached for discovery runs and refuse t
     (error: Error) => error instanceof SetupError && /scores valid and reached, not rootCause/.test(error.message));
   equal(compareRuns(join(root, "runs", "s1"), join(root, "runs", "s2"), "reached", new Date()).verdict, "no-difference");
   throws(() => compareRuns(join(root, "runs", "s1"), join(root, "runs", "s2"), "prediction", new Date()), SetupError);
+  const context = evalContext();
+  for (const name of ["s1", "s2"]) writeRun(join(context.paths.evalsFolder, "runs", name), { jobKind: "scenario", promptVersion: "scenario-v1" }, [true, false, true]);
+  equal(await runEvalCommand(["compare", "--baseline", "s1", "--candidate", "s2"], context), 0);
+  ok(context.lines.some((line) => line.includes("(scenario, test), metric valid:")), context.lines.join("\n"));
   const settings = resolveAgentSettings(undefined);
   deepStrictEqual(certificateProblems(join(root, "certificates"), ["rank", "scenario"], settings).map((line) => line.split(":")[0]), ["rank"]);
 });

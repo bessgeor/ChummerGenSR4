@@ -15,9 +15,10 @@ import { CommandOptions } from "./command-options.js";
 import { listRecords } from "./eval-record.js";
 import { certify as issueCertificate } from "./certificate.js";
 import { comparisonLines, compareRuns, metrics } from "./comparison.js";
+import { metricsOfJobKind } from "./metrics.js";
 import { freezeDataset } from "./dataset.js";
 import { freezeDiscoveryDataset } from "./discovery-dataset.js";
-import { resumeEvalRun, runPartitions, startEvalRun, summaryLines } from "./eval-run.js";
+import { readRun, resumeEvalRun, runPartitions, startEvalRun, summaryLines } from "./eval-run.js";
 import { gradeRecords } from "./grader.js";
 import { labelHindsight } from "./hindsight.js";
 import { recordSummary } from "./record-summary.js";
@@ -41,7 +42,7 @@ export const evalUsage = `Usage: npm run eval -- <command> [options]
   run --dataset <folder> [--partition test|development|all] [--repeat <n>] [--name <text>]
                                   run the current prompt with the profile's agent choice on a dataset (out/evals/runs/<run>/)
   run --resume <run>              finish a stopped eval run with its stored settings
-  compare --baseline <run> --candidate <run> [--metric prediction|rootCause|valid|reached]
+  compare --baseline <run> --candidate <run> [--metric prediction|rootCause|valid|reached]  (default: prediction, or valid for rank and scenario runs)
                                   paired comparison of two eval runs with a 95% confidence interval
   compare-threads --baseline <threads> --candidate <threads>
                                   paired comparison of finished workflow threads (comma-separated IDs) by cluster:
@@ -201,7 +202,9 @@ const run: Command = async (args, context) => {
 const compare: Command = async (args, context) => {
   const options = CommandOptions.parse("compare", args, ["baseline", "candidate", "metric"]);
   const runs = join(context.paths.evalsFolder, "runs");
-  const metric = options.choice("metric", metrics, "prediction");
+  // Without --metric, the first metric the runs' job kind scores.
+  const fallback = metricsOfJobKind[readRun(join(runs, options.required("baseline"))).settings.jobKind][0];
+  const metric = options.choice("metric", metrics, fallback);
   const comparison = compareRuns(join(runs, options.required("baseline")), join(runs, options.required("candidate")), metric, context.now());
   const folder = join(context.paths.evalsFolder, "comparisons");
   mkdirSync(folder, { recursive: true });

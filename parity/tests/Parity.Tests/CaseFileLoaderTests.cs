@@ -261,6 +261,11 @@ public sealed class CaseFileLoaderTests : IDisposable
 
         CaseFileException error = Assert.Throws<CaseFileException>(() => _loader.Load(WriteCaseFile(characters)));
         Assert.Contains("scenario 'Upper Case'", error.Message);
+
+        JsonArray trailing = Characters((BuildFixture, "build"));
+        trailing[0]!["scenario"] = "calendar\n";
+        trailing[0]!["actions"] = new JsonArray(Action("capture", "name", "common"));
+        Assert.Contains("scenario 'calendar\n'", Assert.Throws<CaseFileException>(() => _loader.Load(WriteCaseFile(trailing))).Message);
     }
 
     [Fact]

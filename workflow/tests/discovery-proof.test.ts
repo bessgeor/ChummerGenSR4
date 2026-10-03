@@ -134,6 +134,9 @@ test("the registry admits new scenarios in case order, keeps duplicates out and 
   deepStrictEqual(first.registry.entries.map((item) => item.case), ["build-Alpha@a", "build-Alpha@b"]);
   const again = admit(first.registry, [entry("c"), entry("a", { actionsSha256: "e".repeat(64) })]);
   deepStrictEqual([again.admitted, again.duplicates], [[], ["build-Alpha@c", "build-Alpha@a"]]);
+  const refreshed = admit(first.registry, [entry("b", { sourceSha256: "9".repeat(64), proofs: { controls: ["frmCreate.lblArmorAvail"], interactions: [] } })]);
+  deepStrictEqual([refreshed.admitted, refreshed.duplicates], [["build-Alpha@b"], []]);
+  deepStrictEqual(refreshed.registry.entries.map((item) => [item.case, item.sourceSha256.slice(0, 1)]), [["build-Alpha@a", "a"], ["build-Alpha@b", "9"]]);
   const rendered = renderCaseFile(first.registry);
   deepStrictEqual(rendered.characters.map((item) => [item.scenario, item.path, item.mode]), [["a", "../fixtures/Alpha.chum", "build"], ["b", "../fixtures/Alpha.chum", "build"]]);
   deepStrictEqual([rendered.buildActions, rendered.careerActions, rendered.sequences, rendered.startupDelaySeconds], [[], [], {}, 3]);

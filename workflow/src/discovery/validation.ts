@@ -1,6 +1,12 @@
 import type { RankContext, ScenarioContext } from "./discovery-context.js";
-import type { RankOutput, ScenarioOutput } from "./job-schemas.js";
+import type { Ranking, RankOutput, ScenarioOutput } from "./job-schemas.js";
 import type { Target } from "./targets.js";
+
+/** The rankings a selection may take, best first: not infeasible, by score, then by target ID. */
+export function selectableRankings(output: RankOutput): Ranking[] {
+  return output.rankings.filter((ranking) => ranking.feasibility !== "infeasible")
+    .sort((left, right) => right.score - left.score || (left.targetId < right.targetId ? -1 : left.targetId > right.targetId ? 1 : 0));
+}
 
 /** Every reason a rank answer does not rank each target of its context exactly once with a valid score, case and reason. */
 export function validateRank(output: RankOutput, context: Pick<RankContext, "targets" | "fixtures">): string[] {

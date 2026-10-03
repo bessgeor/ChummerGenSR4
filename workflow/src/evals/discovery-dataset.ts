@@ -4,6 +4,7 @@ import { z } from "zod";
 import { canonicalJson } from "../diagnosis/context.js";
 import { DiscoveryContextSchema, discoveryContextHash, readLabels, type RankContext, type ScenarioContext } from "../discovery/discovery-context.js";
 import { RankOutputSchema, ScenarioOutputSchema } from "../discovery/job-schemas.js";
+import { selectedTabNames } from "../discovery/plan-validator.js";
 import { SetupError } from "../host/setup-error.js";
 import { fingerprintFolder, sha256Text } from "../steps/fingerprint.js";
 import { readDocument } from "../steps/read-document.js";
@@ -56,32 +57,31 @@ export type DiscoveryFreezeInput = {
   readonly log: (line: string) => void;
 };
 
-/** The context folder of a discovery record in its thread: the rank folder, or the scenario folder whose context has the record's hash. */
-function contextFolderOf(threadFolder: string, record: EvalRecord): string | null {
-  const candidates = record.jobKind === "rank" ? [join(threadFolder, "rank")]
-    : existsSync(threadFolder) ? readdirSync(threadFolder).filter((name) => /^scenario-\d+$/.test(name)).map((name) => join(threadFolder, name)) : [];
-  for (const folder of candidates) {
-    if (!existsSync(join(folder, "context.json"))) continue;
+/** The contexts of a discovery thread by hash: its rank folder and its scenario folders, read once per thread. */
+function threadContexts(threadFolder: string): Map<string, { readonly folder: string; readonly kind: "rank" | "scenario" }> {
+  const folders = existsSync(threadFolder) ? readdirSync(threadFolder).filter((name) => name === "rank" || /^scenario-\d+$/.test(name)).map((name) => join(threadFolder, name)) : [];
+  const contexts = new Map<string, { folder: string; kind: "rank" | "scenario" }>();
+  for (const folder of folders.filter((entry) => existsSync(join(entry, "context.json")))) {
     const context = readDocument(join(folder, "context.json"), DiscoveryContextSchema);
-    if (context.kind === record.jobKind && discoveryContextHash(context) === record.contextHash) return folder;
+    contexts.set(discoveryContextHash(context), { folder, kind: context.kind });
   }
-  return null;
+  return contexts;
 }
 
-function selectedTabs(record: EvalRecord): string[] {
-  const plan = ScenarioOutputSchema.parse(record.output).plan;
-  return plan === null ? [] : [...new Set(plan.actions.filter((action) => action.type === "selectTab").map((action) => action.name ?? ""))];
-}
-
-function goldOf(record: EvalRecord, records: readonly EvalRecord[]): DiscoveryDatasetItem["gold"] {
+/**
+ * A scenario record's gold is its proven plan; a rank record's is what its thread's scenarios showed: the targets proven, and those
+ * that executed without proof. A scenario that did not execute says nothing about its target.
+ */
+function goldOf(record: EvalRecord, scenariosByThread: ReadonlyMap<string, readonly EvalRecord[]>): DiscoveryDatasetItem["gold"] {
   if (record.jobKind === "scenario") {
     if (record.labels.discovery?.outcome !== "proven") return null;
-    return { kind: "scenario", case: ScenarioOutputSchema.parse(record.output).plan!.case, selectedTabs: selectedTabs(record) };
+    const plan = ScenarioOutputSchema.parse(record.output).plan!;
+    return { kind: "scenario", case: plan.case, selectedTabs: selectedTabNames(plan.actions) };
   }
   RankOutputSchema.parse(record.output);
-  const scenarios = records.filter((item) => item.origin === "workflow" && item.jobKind === "scenario" && item.threadId === record.threadId && item.labels.discovery !== null);
-  const targets = (outcomes: readonly string[]) => [...new Set(scenarios.filter((item) => outcomes.includes(item.labels.discovery!.outcome)).map((item) => item.subject.id))].sort();
-  return { kind: "rank", proven: targets(["proven"]), notProven: targets(["not-proven", "execution-failed"]) };
+  const scenarios = scenariosByThread.get(record.threadId) ?? [];
+  const targets = (outcome: string) => [...new Set(scenarios.filter((item) => item.labels.discovery!.outcome === outcome).map((item) => item.subject.id))].sort();
+  return { kind: "rank", proven: targets("proven"), notProven: targets("not-proven") };
 }
 
 export function discoveryDatasetHash(dataset: Omit<DiscoveryDataset, "datasetHash">): string {
@@ -119,9 +119,12 @@ export async function freezeDiscoveryDataset(input: DiscoveryFreezeInput): Promi
   type Draft = { key: string; contextHash: string; sourceIdentity: string; records: EvalRecord[]; contextFolder: string; sourceFolder: string };
   const drafts = new Map<string, Draft>();
   const chosen = input.records.filter((record) => record.origin === "workflow" && record.jobKind === input.jobKind && record.result.status === "succeeded" && record.labels.discovery !== null);
+  const contextsByThread = new Map<string, ReturnType<typeof threadContexts>>();
   for (const record of chosen) {
     const threadFolder = input.threadFolder(record.threadId);
-    const contextFolder = contextFolderOf(threadFolder, record);
+    if (!contextsByThread.has(record.threadId)) contextsByThread.set(record.threadId, threadContexts(threadFolder));
+    const found = contextsByThread.get(record.threadId)!.get(record.contextHash);
+    const contextFolder = found === undefined || found.kind !== record.jobKind ? null : found.folder;
     if (contextFolder === null || !existsSync(join(threadFolder, "source"))) {
       input.log(`Freeze: record ${record.recordId} is left out: its context or its thread's snapshot no longer exists.`);
       continue;
@@ -147,12 +150,16 @@ export async function freezeDiscoveryDataset(input: DiscoveryFreezeInput): Promi
   const partial = join(nameFolder, `v${previous + 1}.partial`);
   rmSync(partial, { recursive: true, force: true });
   const copies = datasetFolders(partial);
+  const scenariosByThread = new Map<string, EvalRecord[]>();
+  for (const record of input.records.filter((item) => item.origin === "workflow" && item.jobKind === "scenario" && item.labels.discovery !== null)) {
+    scenariosByThread.set(record.threadId, [...(scenariosByThread.get(record.threadId) ?? []), record]);
+  }
   const items: DiscoveryDatasetItem[] = [];
   for (const [itemId, draft] of [...drafts].sort(([left], [right]) => (left < right ? -1 : 1))) {
     if (!existsSync(copies.context(draft.contextHash))) cpSync(draft.contextFolder, copies.context(draft.contextHash), { recursive: true });
     if (!existsSync(copies.source(draft.sourceIdentity))) cpSync(draft.sourceFolder, copies.source(draft.sourceIdentity), { recursive: true });
     const sorted = [...draft.records].sort((left, right) => (left.recordId < right.recordId ? -1 : 1));
-    const gold = sorted.map((record) => goldOf(record, input.records)).find((value) => value !== null) ?? null;
+    const gold = sorted.map((record) => goldOf(record, scenariosByThread)).find((value) => value !== null) ?? null;
     items.push({ itemId, key: draft.key, contextHash: draft.contextHash, sourceIdentity: draft.sourceIdentity, records: sorted.map((record) => record.recordId), gold, partition: partitionOf(input.seed, draft.key, input.testPercent) });
   }
   for (const item of items) await verifyCopies(partial, input.jobKind, item);

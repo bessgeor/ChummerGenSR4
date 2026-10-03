@@ -11,7 +11,7 @@ import { requireCoveredCases } from "../steps/capture-step.js";
 import type { InputFingerprints } from "../steps/input-fingerprints.js";
 import { readDocument } from "../steps/read-document.js";
 import type { DiscoveryPaths } from "./discovery-paths.js";
-import { captureOptions, readBaseline } from "./discovery-service.js";
+import { captureOptions, fixtureCases, readBaseline } from "./discovery-service.js";
 import type { DiscoveryStateValue, Execution, Registered, ScenarioJob } from "./discovery-state.js";
 import { scenarioActions } from "./plan-validator.js";
 import { isProven, proveScenarios, type ScenarioProof } from "./proof.js";
@@ -56,7 +56,7 @@ export class ScenarioRun {
     const { prepared } = state;
     if (prepared === null) throw new Error("The scenario run started before discovery was prepared.");
     const folders = this.dependencies.folders.thread(state.threadId);
-    const fixtures = planCases(state.options.caseFile, [], []).cases;
+    const fixtures = fixtureCases(state.options.caseFile, prepared.caseFileSha256);
     const valid = validScenarios(state);
     writeScenarioCaseFile(folders.cases, readCaseFile(state.options.caseFile), valid.map((job) => {
       const plan = job.answer!.output.plan!;
@@ -85,11 +85,13 @@ export class ScenarioRun {
     if (prepared === null) throw new Error("Registration ran before discovery was prepared.");
     const root = this.dependencies.repositoryRoot;
     const paths = this.dependencies.registry;
-    const registry = readRegistry(paths) ?? emptyRegistry(readCaseFile(state.options.caseFile));
+    const stored = readRegistry(paths) ?? emptyRegistry(readCaseFile(state.options.caseFile));
+    // A register step that runs again after an interruption finds its own admissions: they neither count as earlier proofs nor as duplicates.
+    const registry = { ...stored, entries: stored.entries.filter((entry) => entry.provenance.thread !== state.threadId) };
     const proofs: Record<string, ScenarioProof> = {};
     let manifestPath: string | null = null;
     const valid = validScenarios(state);
-    const fixtures = planCases(state.options.caseFile, [], []).cases;
+    const fixtures = fixtureCases(state.options.caseFile, prepared.caseFileSha256);
     const fixtureOf = (job: ScenarioJob) => fixtures.find((item) => item.name === job.answer!.output.plan!.case)!;
     if (state.execution !== null) {
       const baseline = readBaseline(prepared.baselineFolder, root);
@@ -120,7 +122,7 @@ export class ScenarioRun {
       }];
     });
     const admission = admit(registry, candidates);
-    if (admission.admitted.length > 0) writeRegistry(paths, admission.registry);
+    if (admission.admitted.length > 0 || admission.registry.entries.length !== stored.entries.length) writeRegistry(paths, admission.registry);
     await this.label(state, store, proofs, admittedUtc);
     return { proofs, admitted: admission.admitted, duplicates: admission.duplicates, manifestPath, registryEntries: admission.registry.entries.length };
   }

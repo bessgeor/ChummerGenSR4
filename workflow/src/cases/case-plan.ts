@@ -27,6 +27,12 @@ export type CasePlan = {
 /** A character entry's scenario name, which its case name carries after `@`. */
 export const scenarioPattern = /^[a-z0-9][a-z0-9-]*$/;
 
+/** A case's name as the capture runner gives it: `<mode>-<file without extension>`, with `@<scenario>` for an entry with its own actions. */
+export function caseName(mode: "build" | "career", fixturePath: string, scenario: string | undefined): string {
+  const stem = `${mode}-${basename(fixturePath, extname(fixturePath))}`;
+  return scenario === undefined ? stem : `${stem}@${scenario}`;
+}
+
 export function readCaseFile(caseFile: string): ParityCases {
   let document: unknown;
   try {
@@ -86,9 +92,8 @@ export function planCases(caseFile: string, caseFilter: readonly string[], captu
     if (entry.scenario !== undefined && !scenarioPattern.test(entry.scenario)) {
       throw new SetupError(`The case file ${caseFile}: characters[${index}] has the scenario '${entry.scenario}', which is not lower-case letters, digits and dashes.`);
     }
-    const stem = `${entry.mode}-${basename(fixturePath, extname(fixturePath))}`;
     return {
-      name: entry.scenario === undefined ? stem : `${stem}@${entry.scenario}`,
+      name: caseName(entry.mode, fixturePath, entry.scenario),
       characterFile,
       fixturePath,
       mode: entry.mode,

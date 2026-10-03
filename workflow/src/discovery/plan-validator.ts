@@ -58,6 +58,11 @@ export function validatePlan(plan: Plan, vocabulary: PlanVocabulary): string[] {
   return reasons;
 }
 
+/** The tab names some actions select, in order, each once. */
+export function selectedTabNames(actions: readonly { readonly type: string; readonly name?: string | null | undefined }[]): string[] {
+  return [...new Set(actions.filter((action) => action.type === "selectTab").map((action) => action.name ?? ""))];
+}
+
 /** A valid plan's actions as a case file states them. */
 export function scenarioActions(plan: Plan): ScenarioAction[] {
   return plan.actions.map((action): ScenarioAction => {

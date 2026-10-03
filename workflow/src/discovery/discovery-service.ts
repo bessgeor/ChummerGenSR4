@@ -1,8 +1,8 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { BaseStore } from "@langchain/langgraph-checkpoint";
 import type { z } from "zod";
-import { planCases, type PlannedCase } from "../cases/case-plan.js";
+import { caseName, planCases, type PlannedCase } from "../cases/case-plan.js";
 import { recordedCandidateSha256, recordedCandidateSource, requireRecordedSource, requireSameSource } from "../diagnosis/candidate-source.js";
 import { compiledSourceIdentity, compiledSourcePaths, createSourceSnapshot, type Git } from "../diagnosis/source-snapshot.js";
 import { fixArchiveOf, fixesRootOf } from "../fixes/fix-archiver.js";
@@ -15,6 +15,7 @@ import { SourceInventorySchema, type SourceInventory } from "../inventory/source
 import { buildSourceInventory, designerPaths } from "../inventory/source-inventory.js";
 import type { RunOptions } from "../options/run-options.js";
 import type { WorkflowPaths } from "../paths.js";
+import { sha256Text } from "../steps/fingerprint.js";
 import { readDocument } from "../steps/read-document.js";
 import type { InputFingerprints } from "../steps/input-fingerprints.js";
 import {
@@ -31,7 +32,7 @@ import { rankPrompt, scenarioPrompt } from "./prompts.js";
 import { provedFor, readRegistry, type RegistryPaths } from "./registry.js";
 import { scenarioName } from "./scenario-cases.js";
 import { computeTargets, TargetsDocumentSchema, type TargetsDocument } from "./targets.js";
-import { validateRank, validateScenario } from "./validation.js";
+import { selectableRankings, validateRank, validateScenario } from "./validation.js";
 
 export type DiscoveryDependencies = {
   readonly repositoryRoot: string;
@@ -75,6 +76,12 @@ function coverageOf(manifest: CoverageManifest): Coverage {
   return { controls: { active: controls.active, observed: controls.observed }, interactions: { active: interactions.active, exercised: interactions.exercised } };
 }
 
+/** The fixture cases of a thread; a case file that changed since the thread started is a setup error, since its sealed contexts describe the old one. */
+export function fixtureCases(caseFile: string, expectedSha256: string): readonly PlannedCase[] {
+  if (sha256Text(readFileSync(caseFile, "utf8")) !== expectedSha256) throw new SetupError(`The case file ${caseFile} changed since the thread started; start a new thread.`);
+  return planCases(caseFile, [], []).cases;
+}
+
 /** The tab texts of every form the fixtures open in. */
 function tabTexts(cases: readonly PlannedCase[], baseline: Baseline, root: string): Record<string, string[]> {
   const strings = readLanguageStrings(root);
@@ -109,6 +116,8 @@ export class DiscoveryService {
     if (other !== undefined) {
       throw new SetupError(`The baseline run ${other.runFolder} captured the candidate ${other.candidateSha256.slice(0, 12)}, not the built one (${candidateSha256.slice(0, 12)}); run npm start again.`);
     }
+    const caseFileSha256 = sha256Text(readFileSync(options.caseFile, "utf8"));
+    const cases = fixtureCases(options.caseFile, caseFileSha256);
     const registry = readRegistry(this.dependencies.registry);
     const fingerprints = await this.dependencies.buildTools(captureOptions(options), signal);
     const proved = provedFor(registry, manifest.sourceSha256);
@@ -116,13 +125,12 @@ export class DiscoveryService {
     writeFileSync(folders.targets, `${JSON.stringify(targets, null, 2)}\n`);
     log(`Discovery: ${targets.targets.length} targets from thread ${options.from}; ${targets.outOfReach.reduce((sum, item) => sum + item.count, 0)} bindings out of the actions' reach.`);
     const prepared = {
-      baselineFolder, sourceSha256: manifest.sourceSha256, candidateSha256, candidateSource, fingerprints, targetsPath: folders.targets, targets: targets.targets.length,
+      baselineFolder, sourceSha256: manifest.sourceSha256, candidateSha256, candidateSource, caseFileSha256, fingerprints, targetsPath: folders.targets, targets: targets.targets.length,
       registryEntries: registry?.entries.length ?? 0, coverageBefore: coverageOf(manifest),
     };
     if (targets.targets.length === 0) return { ...prepared, snapshot: null, rankContext: null };
     const snapshot = await createSourceSnapshot(root, folders.source, git);
     requireSameSource(candidateSource, snapshot.compiledIdentity, "the jobs would read another source than the candidate's. Run npm start again.");
-    const cases = planCases(options.caseFile, [], []).cases;
     const fixes = readArchivedFixes(fixArchiveOf(fixesRootOf(root)));
     const priors = rankPriors(targets.targets.map((target) => ({
       target, classFiles: classFiles(baseline.inventory.classes.find((item) => item.name === target.class)!),
@@ -164,12 +172,10 @@ export class DiscoveryService {
     const prepared = this.prepared(state);
     const output = state.rankJob.answer?.output;
     if (output === undefined) throw new Error("Selection ran without a rank answer.");
-    const chosen = output.rankings.filter((ranking) => ranking.feasibility !== "infeasible")
-      .sort((left, right) => right.score - left.score || (left.targetId < right.targetId ? -1 : left.targetId > right.targetId ? 1 : 0))
-      .slice(0, state.options.targets);
+    const chosen = selectableRankings(output).slice(0, state.options.targets);
     const targets = readDocument(prepared.targetsPath, TargetsDocumentSchema) as TargetsDocument;
     const baseline = readBaseline(prepared.baselineFolder, this.dependencies.repositoryRoot);
-    const cases = planCases(state.options.caseFile, [], []).cases;
+    const cases = fixtureCases(state.options.caseFile, prepared.caseFileSha256);
     const labels = knownLabels(baseline.inventory, baseline.manifest, readLanguageStrings(prepared.snapshot.folder));
     const texts = tabTexts(cases, baseline, prepared.snapshot.folder);
     const scenarios: Record<string, ScenarioJob> = {};
@@ -212,7 +218,8 @@ export class DiscoveryService {
 
   /** Validates every plan against its context's vocabulary and names the valid ones' cases. */
   validate(state: DiscoveryStateValue): Record<string, ScenarioUpdate> {
-    const cases = planCases(state.options.caseFile, [], []).cases;
+    if (state.prepared === null) throw new Error("Validation ran before discovery was prepared.");
+    const cases = fixtureCases(state.options.caseFile, state.prepared.caseFileSha256);
     const updates: Record<string, ScenarioUpdate> = {};
     for (const job of Object.values(state.scenarios)) {
       const plan = job.answer?.output.plan;
@@ -227,7 +234,7 @@ export class DiscoveryService {
       }
       const fixture = cases.find((item) => item.name === plan.case)!;
       const scenario = scenarioName(job.targetId, plan.case, scenarioActions(plan));
-      const name = `${fixture.mode}-${fixture.characterFile.replace(/\.[^.]*$/, "")}@${scenario}`;
+      const name = caseName(fixture.mode, fixture.fixturePath, scenario);
       updates[job.targetId] = { targetId: job.targetId, validation: [], case: name, scenario };
     }
     return updates;

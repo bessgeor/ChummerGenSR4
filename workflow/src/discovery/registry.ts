@@ -64,16 +64,21 @@ export function provedFor(registry: Registry | null, sourceSha256: string): { co
   return { controls: new Set(entries.flatMap((entry) => entry.proofs.controls)), interactions: new Set(entries.flatMap((entry) => entry.proofs.interactions)) };
 }
 
-/** Adds the entries whose fixture case and actions no entry has yet; the others are duplicates and change nothing. */
+/**
+ * Adds the entries whose fixture case and actions no entry has yet. One that an entry of another source has replaces that entry,
+ * whose proofs no longer count; one that an entry of the same source has is a duplicate and changes nothing.
+ */
 export function admit(registry: Registry, candidates: readonly RegistryEntry[]): { registry: Registry; admitted: string[]; duplicates: string[] } {
   const entries = [...registry.entries];
   const admitted: string[] = [];
   const duplicates: string[] = [];
   for (const candidate of candidates) {
-    if (entries.some((entry) => entry.actionsSha256 === candidate.actionsSha256 || entry.case === candidate.case)) {
+    const same = entries.findIndex((entry) => entry.actionsSha256 === candidate.actionsSha256 || entry.case === candidate.case);
+    if (same >= 0 && entries[same]!.sourceSha256 === candidate.sourceSha256) {
       duplicates.push(candidate.case);
       continue;
     }
+    if (same >= 0) entries.splice(same, 1);
     entries.push(candidate);
     admitted.push(candidate.case);
   }

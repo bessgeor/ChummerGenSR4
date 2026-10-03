@@ -9,7 +9,7 @@ namespace Parity.Cases;
 /// <summary>Loads a case file and validates it against the fixtures it names.</summary>
 public sealed class CaseFileLoader(ActionExpander expander, CharacterModeReader modeReader)
 {
-    private static readonly Regex ScenarioName = new("^[a-z0-9][a-z0-9-]*$", RegexOptions.CultureInvariant);
+    private static readonly Regex ScenarioName = new(@"^[a-z0-9][a-z0-9-]*\z", RegexOptions.CultureInvariant);
 
     public CaseSuite Load(string caseFilePath)
     {

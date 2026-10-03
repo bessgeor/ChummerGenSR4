@@ -8,6 +8,7 @@ import type { SourceSnapshot } from "../diagnosis/source-snapshot.js";
 import { SetupError } from "../host/setup-error.js";
 import { sha256File, sha256Text } from "../steps/fingerprint.js";
 import { feasibilities } from "./job-schemas.js";
+import { selectedTabNames } from "./plan-validator.js";
 import type { RankedPrior } from "./priors.js";
 import { formOfMode, TargetSchema } from "./targets.js";
 
@@ -91,7 +92,7 @@ export function readLabels(folder: string, context: Pick<ScenarioContext, "label
 
 /** A fixture case as a context shows it; with `actions` its expanded actions too. */
 export function contextFixture(item: PlannedCase, withActions: boolean): ContextFixture {
-  const selectedTabs = [...new Set(item.actions.filter((entry) => entry.type === "selectTab").map((entry) => entry.name ?? ""))];
+  const selectedTabs = selectedTabNames(item.actions);
   return {
     case: item.name, mode: item.mode, form: formOfMode[item.mode], file: item.characterFile, selectedTabs, captures: captureNames(item),
     ...(withActions ? { actions: item.actions.map((entry) => ({ ...entry })) } : {}),
