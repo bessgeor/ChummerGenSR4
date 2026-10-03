@@ -13,6 +13,7 @@ const ChoiceSchema = z.strictObject({
 export const AgentsProfileSchema = z.strictObject({
   jobs: z.strictObject({
     hypothesis: ChoiceSchema.optional(), challenge: ChoiceSchema.optional(), grade: ChoiceSchema.optional(), repair: ChoiceSchema.optional(),
+    rank: ChoiceSchema.optional(), scenario: ChoiceSchema.optional(),
   }).optional(),
   modelPool: z.number().int().min(1).optional(),
   runBudgetMinutes: z.number().positive().optional(),
@@ -35,13 +36,15 @@ export type AgentSettings = {
 
 /**
  * Hypotheses on Claude, challenges on Codex, so the challenger is another provider unless the profile says
- * otherwise; grades and repairs on Claude, repairs with more effort.
+ * otherwise; grades, repairs and the discovery jobs on Claude, repairs with more effort.
  */
 const defaultChoices: Readonly<Record<JobKind, AgentChoice>> = {
   hypothesis: { provider: "claude", model: null, effort: "medium", timeoutMinutes: 30 },
   challenge: { provider: "codex", model: null, effort: "medium", timeoutMinutes: 30 },
   grade: { provider: "claude", model: null, effort: "medium", timeoutMinutes: 30 },
   repair: { provider: "claude", model: null, effort: "high", timeoutMinutes: 30 },
+  rank: { provider: "claude", model: null, effort: "medium", timeoutMinutes: 30 },
+  scenario: { provider: "claude", model: null, effort: "medium", timeoutMinutes: 30 },
 };
 
 function choice(kind: JobKind, configured: z.infer<typeof ChoiceSchema> | undefined): AgentChoice {

@@ -1,4 +1,5 @@
-import { copyFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { captureNames, type PlannedCase } from "../cases/case-plan.js";
@@ -74,6 +75,15 @@ export type DiscoveryContext = RankContext | ScenarioContext;
 
 export function discoveryContextHash(context: DiscoveryContext): string {
   return sha256Text(canonicalJson(context));
+}
+
+/** The labels of a scenario context folder; a labels file that differs from the hash its context records is a setup error. */
+export function readLabels(folder: string, context: Pick<ScenarioContext, "labels">): string[] {
+  const path = join(folder, context.labels.path);
+  if (!existsSync(path)) throw new SetupError(`The labels file ${path} of a sealed context is missing.`);
+  const bytes = readFileSync(path);
+  if (createHash("sha256").update(bytes).digest("hex") !== context.labels.sha256) throw new SetupError(`The labels file ${path} changed after its context was sealed.`);
+  return z.array(z.string()).parse(JSON.parse(bytes.toString("utf8")));
 }
 
 /** A fixture case as a context shows it; with `actions` its expanded actions too. */

@@ -4,15 +4,15 @@ import { SetupError } from "../host/setup-error.js";
 export class CommandOptions {
   private constructor(private readonly command: string, private readonly values: Map<string, string>, private readonly flags: Set<string>) {}
 
-  /** Parses `args`; an unknown option, a missing value and a repeated option are setup errors naming the command. */
-  static parse(command: string, args: readonly string[], valued: readonly string[], flags: readonly string[] = []): CommandOptions {
+  /** Parses `args`; an unknown option, a missing value and a repeated option are setup errors naming the command; `help` is the command line that prints its usage. */
+  static parse(command: string, args: readonly string[], valued: readonly string[], flags: readonly string[] = [], help = "npm run eval -- --help"): CommandOptions {
     const values = new Map<string, string>();
     const set = new Set<string>();
     for (let index = 0; index < args.length; index++) {
       const option = args[index]!;
       const name = option.replace(/^--/, "");
       if (!option.startsWith("--") || (!valued.includes(name) && !flags.includes(name))) {
-        throw new SetupError(`Unknown option '${option}' for '${command}'. See npm run eval -- --help.`);
+        throw new SetupError(`Unknown option '${option}' for '${command}'. See ${help}.`);
       }
       if (values.has(name) || set.has(name)) throw new SetupError(`Option '${option}' is given twice.`);
       if (flags.includes(name)) {

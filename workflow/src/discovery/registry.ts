@@ -14,7 +14,7 @@ export function registryPaths(repositoryRoot: string): RegistryPaths {
 
 /** A registry with the case timings it renders with and no entry. */
 export function emptyRegistry(timings: Pick<Registry, "startupDelaySeconds" | "settleMilliseconds">): Registry {
-  return { schemaVersion: 1, ...timings, entries: [] };
+  return { schemaVersion: 1, startupDelaySeconds: timings.startupDelaySeconds, settleMilliseconds: timings.settleMilliseconds, entries: [] };
 }
 
 /** The case file a registry renders to: one entry per registry entry, in case order. */

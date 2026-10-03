@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { BaseStore } from "@langchain/langgraph-checkpoint";
 import { z } from "zod";
-import { efforts, providers, wasNotStarted, type AgentResult, type AgentRunner } from "../agents/agent-job.js";
+import { efforts, jobKinds, providers, wasNotStarted, type AgentChoice, type AgentResult, type AgentRunner, type JobKind } from "../agents/agent-job.js";
 import type { AgentSettings } from "../agents/agent-settings.js";
 import { compiledFoldersIn } from "../compiled-source.js";
 import type { ContextManifest } from "../diagnosis/context.js";
@@ -10,6 +10,7 @@ import {
   ChallengeOutputSchema, challengePromptVersion, HypothesisOutputSchema, hypothesisPromptVersion, type ChallengeOutput, type HypothesisOutput,
 } from "../diagnosis/job-schemas.js";
 import { stageJobFolder } from "../diagnosis/job-folder.js";
+import { rankPromptVersion, scenarioPromptVersion } from "../discovery/job-schemas.js";
 import { challengePrompt, hypothesisPrompt, withoutPriors } from "../diagnosis/prompts.js";
 import type { QuotaWaiter } from "../diagnosis/quota-waiter.js";
 import { validateChallenge, validateHypothesis } from "../diagnosis/validation.js";
@@ -24,7 +25,10 @@ import { wilsonInterval } from "./statistics.js";
 export const runPartitions = ["test", "development", "all"] as const;
 export type RunPartition = (typeof runPartitions)[number];
 
-export const promptVersions = { hypothesis: hypothesisPromptVersion, challenge: challengePromptVersion } as const;
+/** The job kinds evaluation runs, scores and certifies, with the prompt version the code has for each. */
+export const promptVersions = { hypothesis: hypothesisPromptVersion, challenge: challengePromptVersion, rank: rankPromptVersion, scenario: scenarioPromptVersion } as const;
+export const evaluatedJobKinds = ["hypothesis", "challenge", "rank", "scenario"] as const;
+export type EvaluatedJobKind = (typeof evaluatedJobKinds)[number];
 
 const ChoiceSchema = z.strictObject({ provider: z.enum(providers), model: z.string().nullable(), effort: z.enum(efforts), timeoutMinutes: z.number().positive() });
 
@@ -164,7 +168,7 @@ async function runSamples(dependencies: EvalRunDependencies, folder: string, set
   dependencies.log(`Eval run ${settings.runId}: ${settings.jobKind} on ${dataset.name} v${dataset.version} (${settings.partition}), ${settings.choice.provider} `
     + `(${settings.choice.model ?? "default model"}, effort ${settings.choice.effort}); ${missing.length} of ${settings.samples.length} samples to run.`);
   const agentSettings: AgentSettings = {
-    jobs: { hypothesis: settings.choice, challenge: settings.choice, grade: settings.choice, repair: settings.choice }, modelPool: settings.modelPool,
+    jobs: Object.fromEntries(jobKinds.map((kind) => [kind, settings.choice])) as Record<JobKind, AgentChoice>, modelPool: settings.modelPool,
     runBudgetMinutes: 0, executables: settings.executables,
   };
   const runner = dependencies.agents(agentSettings);
