@@ -20,7 +20,8 @@ internal sealed class ChummerSession(
     WindowCapturer capturer,
     PointerParker pointer,
     UiTreeReader trees,
-    ActiveWindowResolver activeWindows) : IAppSession
+    ActiveWindowResolver activeWindows,
+    ControlActions controls) : IAppSession
 {
     private static readonly TimeSpan WindowTimeout = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan LiveWindowTimeout = TimeSpan.FromSeconds(10);
@@ -116,6 +117,14 @@ internal sealed class ChummerSession(
 
     public void Wait(int milliseconds) => Thread.Sleep(milliseconds);
 
+    public void SetValue(string control, string value) => controls.SetValue(Acting(), control, value);
+
+    public void Click(string control) => controls.Click(Acting(), control);
+
+    public void SelectItem(string control, string item) => controls.SelectItem(Acting(), control, item);
+
+    public void ContextMenu(string control, string item) => controls.ContextMenu(Acting(), control, item);
+
     /// <summary>Captures the active window; only the character form has a status bar to move the focus to.</summary>
     public Bitmap Capture()
     {
@@ -181,6 +190,15 @@ internal sealed class ChummerSession(
         }
 
         throw new TimeoutException($"The app's main window disappeared for more than {LiveWindowTimeout.TotalSeconds:0} s.");
+    }
+
+    private ActionContext Acting() => new(ActiveWindow, _caller, Settle, process.Id);
+
+    /// <summary>After an acting call: the app is idle, then the settle time passes for it to paint.</summary>
+    private void Settle()
+    {
+        WaitForInputIdle();
+        Thread.Sleep(timing.Settle);
     }
 
     /// <summary>The active window; a disabled window that owns no enabled one for <see cref="ActiveWindowTimeout"/> is a failure.</summary>

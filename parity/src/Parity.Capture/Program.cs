@@ -45,6 +45,9 @@ internal static class Program
         services.AddSingleton<UiTreeReader>();
         services.AddSingleton<IWindowGraph, Win32WindowGraph>();
         services.AddSingleton<ActiveWindowResolver>();
+        services.AddSingleton<ControlFinder>();
+        services.AddSingleton<KeyboardInput>();
+        services.AddSingleton<ControlActions>();
         services.AddSingleton<ChummerUiDriver>();
         services.AddSingleton<TimingRecorder>();
         services.AddSingleton<IUiDriver>(provider => new TimedUiDriver(

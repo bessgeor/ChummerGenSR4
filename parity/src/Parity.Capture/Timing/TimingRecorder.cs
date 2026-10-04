@@ -10,7 +10,10 @@ internal sealed class TimingRecorder
 {
     /// <summary>Operations in the order a side performs them, which is also the report order.</summary>
     private static readonly Operation[] OperationOrder =
-        [Operation.Launch, Operation.Activate, Operation.SelectTab, Operation.WaitForLabel, Operation.Wait, Operation.Capture, Operation.UiTree, Operation.Close];
+        [
+            Operation.Launch, Operation.Activate, Operation.SelectTab, Operation.WaitForLabel, Operation.Wait, Operation.SetValue,
+            Operation.Click, Operation.SelectItem, Operation.ContextMenu, Operation.SaveReload, Operation.Capture, Operation.UiTree, Operation.Close,
+        ];
 
     private readonly List<SideTiming> _sides = [];
     private SideTiming? _current;

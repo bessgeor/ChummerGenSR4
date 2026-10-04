@@ -10,6 +10,9 @@ internal sealed class ScriptedUiDriver : IUiDriver
 
     public HashSet<string> MissingLabels { get; } = new(StringComparer.Ordinal);
 
+    /// <summary>Controls every acting call on fails to find.</summary>
+    public HashSet<string> MissingControls { get; } = new(StringComparer.Ordinal);
+
     public Exception? LaunchFailure { get; set; }
 
     public int ActivationFailuresBeforeCapture { get; set; } = -1;
@@ -69,6 +72,23 @@ internal sealed class ScriptedUiDriver : IUiDriver
         }
 
         public void Wait(int milliseconds) => owner.Calls.Add($"wait:{milliseconds}");
+
+        public void SetValue(string control, string value) => Act($"setValue:{control}={value}", control);
+
+        public void Click(string control) => Act($"click:{control}", control);
+
+        public void SelectItem(string control, string item) => Act($"selectItem:{control}={item}", control);
+
+        public void ContextMenu(string control, string item) => Act($"contextMenu:{control}={item}", control);
+
+        private void Act(string call, string control)
+        {
+            owner.Calls.Add(call);
+            if (owner.MissingControls.Contains(control))
+            {
+                throw new InvalidOperationException($"No enabled control '{control}' is on screen.");
+            }
+        }
 
         public Bitmap Capture()
         {

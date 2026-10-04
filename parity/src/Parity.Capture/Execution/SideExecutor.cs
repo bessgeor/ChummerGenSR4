@@ -107,6 +107,18 @@ internal sealed class SideExecutor(IUiDriver driver)
             case WaitAction wait:
                 session.Wait(wait.Milliseconds);
                 break;
+            case SetValueAction setValue:
+                session.SetValue(setValue.Control, setValue.Value);
+                break;
+            case ClickAction click:
+                session.Click(click.Control);
+                break;
+            case SelectItemAction selectItem:
+                session.SelectItem(selectItem.Control, selectItem.Item);
+                break;
+            case ContextMenuAction contextMenu:
+                session.ContextMenu(contextMenu.Control, contextMenu.Item);
+                break;
             case CaptureAction capture:
                 string path = capturePath(capture.CaptureName);
                 Directory.CreateDirectory(Path.GetDirectoryName(path)!);

@@ -130,6 +130,21 @@ public sealed class TimingTests : IDisposable
         Assert.Contains("no report order", Assert.Throws<InvalidOperationException>(() => recorder.Build("test-run")).Message);
     }
 
+    [Fact]
+    public void Every_operation_has_a_report_order()
+    {
+        TimingRecorder recorder = new();
+        using (recorder.BeginSide("build-test", "candidate"))
+        {
+            foreach (Operation operation in Enum.GetValues<Operation>())
+            {
+                recorder.Record(operation, null, TimeSpan.FromMilliseconds(1), null);
+            }
+        }
+
+        Assert.Equal(Enum.GetValues<Operation>().Length, recorder.Build("test-run").Operations.Count);
+    }
+
     [Theory]
     [InlineData(0.5, 3)]
     [InlineData(0.8, 4)]

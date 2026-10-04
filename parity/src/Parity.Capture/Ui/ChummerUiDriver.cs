@@ -12,7 +12,8 @@ internal sealed class ChummerUiDriver(
     WindowCapturer capturer,
     PointerParker pointer,
     UiTreeReader trees,
-    ActiveWindowResolver activeWindows) : IUiDriver
+    ActiveWindowResolver activeWindows,
+    ControlActions controls) : IUiDriver
 {
     public IAppSession Launch(string executablePath, string characterPath, UiTiming timing)
     {
@@ -25,7 +26,7 @@ internal sealed class ChummerUiDriver(
         startInfo.ArgumentList.Add(characterPath);
         Process process = Process.Start(startInfo)
                           ?? throw new InvalidOperationException($"Could not start {executablePath}.");
-        ChummerSession session = new(process, timing, finder, activator, geometry, tabs, labels, capturer, pointer, trees, activeWindows);
+        ChummerSession session = new(process, timing, finder, activator, geometry, tabs, labels, capturer, pointer, trees, activeWindows, controls);
         try
         {
             session.WaitUntilReady();
