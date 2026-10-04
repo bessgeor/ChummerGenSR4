@@ -81,6 +81,8 @@ internal sealed class ScriptedUiDriver : IUiDriver
 
         public void ContextMenu(string control, string item) => Act($"contextMenu:{control}={item}", control);
 
+        public void SaveReload() => owner.Calls.Add("saveReload");
+
         private void Act(string call, string control)
         {
             owner.Calls.Add(call);

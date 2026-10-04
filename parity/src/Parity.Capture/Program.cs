@@ -48,6 +48,7 @@ internal static class Program
         services.AddSingleton<ControlFinder>();
         services.AddSingleton<KeyboardInput>();
         services.AddSingleton<ControlActions>();
+        services.AddSingleton<CharacterSaver>();
         services.AddSingleton<ChummerUiDriver>();
         services.AddSingleton<TimingRecorder>();
         services.AddSingleton<IUiDriver>(provider => new TimedUiDriver(

@@ -7,4 +7,4 @@ internal sealed record StagedRun(
     string CandidateExecutable,
     string CandidateSha256,
     IReadOnlyList<OverlayFileRecord>? Overlay,
-    IReadOnlyDictionary<string, string> CharacterCopies);
+    IReadOnlyDictionary<string, CharacterCopy> CharacterCopies);

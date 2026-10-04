@@ -27,6 +27,8 @@ internal sealed class TimedAppSession(IAppSession inner, TimedUiDriver driver) :
     public void ContextMenu(string control, string item) =>
         driver.Measure(Operation.ContextMenu, $"{control}={item}", () => inner.ContextMenu(control, item));
 
+    public void SaveReload() => driver.Measure(Operation.SaveReload, null, inner.SaveReload);
+
     public Bitmap Capture() => driver.Measure(Operation.Capture, null, inner.Capture);
 
     public IReadOnlyList<Parity.Contracts.UiTree.UiNode> DescribeTree() => driver.Measure(Operation.UiTree, null, inner.DescribeTree);

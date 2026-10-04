@@ -31,11 +31,11 @@ internal sealed class CaseRunner(
         CacheSession? cacheSession,
         bool uiTrees)
     {
-        string character = staged.CharacterCopies[parityCase.Name];
+        CharacterCopy character = staged.CharacterCopies[parityCase.Name];
         SideRun canonical = cacheSession is null
-            ? RunSide(RunLayout.CanonicalSide, staged.CanonicalExecutable, parityCase, character, layout, timing, captureFilter)
-            : RunCanonicalWithCache(cacheSession, parityCase, character, layout, staged, timing, captureFilter);
-        SideRun candidate = RunSide(RunLayout.CandidateSide, staged.CandidateExecutable, parityCase, character, layout, timing, captureFilter,
+            ? RunSide(RunLayout.CanonicalSide, staged.CanonicalExecutable, parityCase, character.Canonical, layout, timing, captureFilter)
+            : RunCanonicalWithCache(cacheSession, parityCase, character.Canonical, layout, staged, timing, captureFilter);
+        SideRun candidate = RunSide(RunLayout.CandidateSide, staged.CandidateExecutable, parityCase, character.Candidate, layout, timing, captureFilter,
             uiTrees ? new UiTreeRecorder(layout, parityCase.Name) : null);
         IReadOnlyList<CaptureResult> rows = results.Build(parityCase, canonical, candidate, threshold, layout.Relative);
         return new CaseRun(parityCase, canonical, candidate, rows);

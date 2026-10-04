@@ -13,20 +13,28 @@ internal sealed class ChummerUiDriver(
     PointerParker pointer,
     UiTreeReader trees,
     ActiveWindowResolver activeWindows,
-    ControlActions controls) : IUiDriver
+    ControlActions controls,
+    CharacterSaver saver) : IUiDriver
 {
     public IAppSession Launch(string executablePath, string characterPath, UiTiming timing)
     {
-        ProcessStartInfo startInfo = new()
-        {
-            FileName = executablePath,
-            WorkingDirectory = Path.GetDirectoryName(executablePath)!,
-            UseShellExecute = false,
-        };
-        startInfo.ArgumentList.Add(characterPath);
-        Process process = Process.Start(startInfo)
-                          ?? throw new InvalidOperationException($"Could not start {executablePath}.");
-        ChummerSession session = new(process, timing, finder, activator, geometry, tabs, labels, capturer, pointer, trees, activeWindows, controls);
+        Process process = Start(executablePath, characterPath);
+        ChummerSession session = new(
+            process,
+            () => Start(executablePath, characterPath),
+            characterPath,
+            timing,
+            finder,
+            activator,
+            geometry,
+            tabs,
+            labels,
+            capturer,
+            pointer,
+            trees,
+            activeWindows,
+            controls,
+            saver);
         try
         {
             session.WaitUntilReady();
@@ -37,5 +45,17 @@ internal sealed class ChummerUiDriver(
             session.Dispose();
             throw;
         }
+    }
+
+    private static Process Start(string executablePath, string characterPath)
+    {
+        ProcessStartInfo startInfo = new()
+        {
+            FileName = executablePath,
+            WorkingDirectory = Path.GetDirectoryName(executablePath)!,
+            UseShellExecute = false,
+        };
+        startInfo.ArgumentList.Add(characterPath);
+        return Process.Start(startInfo) ?? throw new InvalidOperationException($"Could not start {executablePath}.");
     }
 }

@@ -25,6 +25,9 @@ internal interface IAppSession : IDisposable
     /// <summary>Opens the context menu of a control of the active window and invokes one of its items.</summary>
     void ContextMenu(string control, string item);
 
+    /// <summary>Saves the character with the app's Save command, closes the app and opens the saved file in a new process.</summary>
+    void SaveReload();
+
     Bitmap Capture();
 
     /// <summary>The UI Automation tree of the main window as it is on screen, depth first with parent indexes.</summary>

@@ -35,6 +35,10 @@ internal sealed record RunLayout(string RunId, string Root)
     public string CharacterCopy(string caseName, string characterFile) =>
         Path.Combine(Characters, SafeSegment(caseName), characterFile);
 
+    /// <summary>One side's own copy of a fixture, for a case that saves the character.</summary>
+    public string CharacterCopy(string caseName, string side, string characterFile) =>
+        Path.Combine(Characters, SafeSegment(caseName), side, characterFile);
+
     public string CapturePath(string caseName, string side, string captureName) =>
         Path.Combine(Root, "captures", SafeSegment(caseName), side, $"{SafeSegment(captureName)}.png");
 

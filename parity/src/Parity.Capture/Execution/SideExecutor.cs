@@ -119,6 +119,9 @@ internal sealed class SideExecutor(IUiDriver driver)
             case ContextMenuAction contextMenu:
                 session.ContextMenu(contextMenu.Control, contextMenu.Item);
                 break;
+            case SaveReloadAction:
+                session.SaveReload();
+                break;
             case CaptureAction capture:
                 string path = capturePath(capture.CaptureName);
                 Directory.CreateDirectory(Path.GetDirectoryName(path)!);

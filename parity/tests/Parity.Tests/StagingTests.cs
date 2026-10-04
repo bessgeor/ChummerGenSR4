@@ -64,8 +64,28 @@ public sealed class StagingTests : IDisposable
         }
 
         Assert.True(File.Exists(Path.Combine(layout.CandidateApp, "helper.dll")));
-        Assert.Equal(File.ReadAllBytes(parityCase.CharacterPath), File.ReadAllBytes(staged.CharacterCopies[parityCase.Name]));
-        Assert.StartsWith(layout.Characters, staged.CharacterCopies[parityCase.Name]);
+        CharacterCopy copy = staged.CharacterCopies[parityCase.Name];
+        Assert.Equal(copy.Canonical, copy.Candidate);
+        Assert.Equal(File.ReadAllBytes(parityCase.CharacterPath), File.ReadAllBytes(copy.Canonical));
+        Assert.StartsWith(layout.Characters, copy.Canonical);
+    }
+
+    [Fact]
+    public void A_case_that_saves_gets_a_copy_per_side()
+    {
+        ParityCase reading = FixtureCase();
+        ParityCase saving = reading with { Name = $"{reading.Name}@round-trip", Actions = [new SaveReloadAction(), new CaptureAction("reloaded")] };
+        RunLayout layout = Layout();
+
+        StagedRun staged = Stager().Stage(layout, RepositoryPaths.Root, CanonicalExecutable, Candidate(), null, [reading, saving]);
+
+        CharacterCopy copy = staged.CharacterCopies[saving.Name];
+        Assert.Equal(layout.CharacterCopy(saving.Name, RunLayout.CanonicalSide, saving.CharacterFile), copy.Canonical);
+        Assert.Equal(layout.CharacterCopy(saving.Name, RunLayout.CandidateSide, saving.CharacterFile), copy.Candidate);
+        Assert.All([copy.Canonical, copy.Candidate], path => Assert.Equal(File.ReadAllBytes(saving.CharacterPath), File.ReadAllBytes(path)));
+        Assert.Equal(staged.CharacterCopies[reading.Name].Canonical, staged.CharacterCopies[reading.Name].Candidate);
+        Assert.True(saving.Saves);
+        Assert.False(reading.Saves);
     }
 
     [Fact]
@@ -110,9 +130,9 @@ public sealed class StagingTests : IDisposable
 
         StagedRun staged = Stager().Stage(Layout(), RepositoryPaths.Root, CanonicalExecutable, Candidate(), null, [build, career]);
 
-        Assert.NotEqual(staged.CharacterCopies[build.Name], staged.CharacterCopies[career.Name]);
-        Assert.All(staged.CharacterCopies.Values, copy => Assert.Equal(build.CharacterFile, Path.GetFileName(copy)));
-        Assert.All(staged.CharacterCopies.Values, copy => Assert.True(File.Exists(copy)));
+        Assert.NotEqual(staged.CharacterCopies[build.Name].Canonical, staged.CharacterCopies[career.Name].Canonical);
+        Assert.All(staged.CharacterCopies.Values, copy => Assert.Equal(build.CharacterFile, Path.GetFileName(copy.Canonical)));
+        Assert.All(staged.CharacterCopies.Values, copy => Assert.True(File.Exists(copy.Canonical)));
     }
 
     [Fact]
