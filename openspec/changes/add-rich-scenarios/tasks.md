@@ -2,7 +2,7 @@
 
 ## 1. Contracts and case loading
 
-- [ ] 1.1 Add `setValue`, `click`, `selectItem`, `contextMenu` and `saveReload` with the fields `control`, `value` and `item` to `parity-cases.schema.json`, and their operations to `parity-capture-timing.schema.json`, with examples and generated code; map them in `ActionExpander`. Evidence: `npm run contracts:check`, `npm run contracts:test` and `npm run parity:test` pass, with expander tests for each type's required and forbidden fields.
+- [x] 1.1 Add `setValue`, `click`, `selectItem`, `contextMenu` and `saveReload` with the fields `control`, `value` and `item` to `parity-cases.schema.json`, and their operations to `parity-capture-timing.schema.json`, with examples and generated code; map them in `ActionExpander`. Evidence: `npm run contracts:check`, `npm run contracts:test` and `npm run parity:test` pass, with expander tests for each type's required and forbidden fields.
 
 ## 2. Capture runner
 

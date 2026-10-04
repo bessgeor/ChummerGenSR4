@@ -22,7 +22,7 @@
   "definitions": {
     "Operation": {
       "type": "string",
-      "enum": ["launch", "activate", "selectTab", "waitForLabel", "wait", "capture", "uiTree", "close"]
+      "enum": ["launch", "activate", "selectTab", "waitForLabel", "wait", "setValue", "click", "selectItem", "contextMenu", "saveReload", "capture", "uiTree", "close"]
     },
     "OperationTiming": {
       "type": "object",

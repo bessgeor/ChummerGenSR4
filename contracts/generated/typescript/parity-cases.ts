@@ -3,8 +3,13 @@ import * as z from "zod";
 
 export const CaseActionTypeSchema = z.enum([
     "capture",
+    "click",
+    "contextMenu",
     "include",
+    "saveReload",
+    "selectItem",
     "selectTab",
+    "setValue",
     "wait",
     "waitFor",
 ]);
@@ -19,11 +24,14 @@ export const CharacterModeSchema = z.enum([
 export type CharacterMode = z.infer<typeof CharacterModeSchema>;
 
 export const CaseActionSchema = z.object({
+    "control": z.string().optional(),
+    "item": z.string().optional(),
     "label": z.string().optional(),
     "milliseconds": z.number().optional(),
     "name": z.string().optional(),
     "optional": z.boolean().optional(),
     "type": CaseActionTypeSchema,
+    "value": z.string().optional(),
 });
 export type CaseAction = z.infer<typeof CaseActionSchema>;
 

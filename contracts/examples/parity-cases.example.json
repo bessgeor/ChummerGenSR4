@@ -34,6 +34,24 @@
         { "type": "waitFor", "label": "Add Week" },
         { "type": "capture", "name": "calendar" }
       ]
+    },
+    {
+      "path": "../fixtures/characters/example-build.chum",
+      "mode": "build",
+      "scenario": "edit-and-reload",
+      "actions": [
+        { "type": "selectTab", "name": "Character Info" },
+        { "type": "capture", "name": "character-info" },
+        { "type": "setValue", "control": "txtCharacterName", "value": "Example" },
+        { "type": "selectTab", "name": "Street Gear" },
+        { "type": "selectTab", "name": "Gear" },
+        { "type": "selectItem", "control": "treGear", "item": "Commlink" },
+        { "type": "contextMenu", "control": "treGear", "item": "Add as Plugin" },
+        { "type": "capture", "name": "gear-dialog" },
+        { "type": "click", "control": "cmdCancel" },
+        { "type": "saveReload" },
+        { "type": "capture", "name": "reloaded" }
+      ]
     }
   ]
 }

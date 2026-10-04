@@ -73,7 +73,7 @@
       "enum": ["build", "career"]
     },
     "CaseAction": {
-      "description": "One UI action. selectTab and capture use name; include uses name (a sequence); waitFor uses label; wait uses milliseconds; optional applies to selectTab only.",
+      "description": "One UI action. selectTab and capture use name; include uses name (a sequence); waitFor uses label; wait uses milliseconds; optional applies to selectTab only. setValue uses control and value; click uses control; selectItem and contextMenu use control and item; saveReload takes no field.",
       "type": "object",
       "additionalProperties": false,
       "required": ["type"],
@@ -82,12 +82,26 @@
         "name": { "type": "string", "minLength": 1 },
         "label": { "type": "string", "minLength": 1 },
         "milliseconds": { "type": "integer", "minimum": 0 },
-        "optional": { "type": "boolean" }
+        "optional": { "type": "boolean" },
+        "control": {
+          "description": "A control's WinForms name, which UI Automation reports as its automation ID.",
+          "type": "string",
+          "minLength": 1
+        },
+        "value": {
+          "description": "The text setValue gives the control.",
+          "type": "string"
+        },
+        "item": {
+          "description": "The name of a list, combo box, tree or menu item, without accelerator ampersands.",
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "CaseActionType": {
       "type": "string",
-      "enum": ["selectTab", "waitFor", "wait", "capture", "include"]
+      "enum": ["selectTab", "waitFor", "wait", "capture", "include", "setValue", "click", "selectItem", "contextMenu", "saveReload"]
     }
   }
 }

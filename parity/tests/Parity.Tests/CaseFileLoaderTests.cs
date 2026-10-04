@@ -173,6 +173,54 @@ public sealed class CaseFileLoaderTests : IDisposable
     }
 
     [Fact]
+    public void Rich_actions_map_with_their_fields_and_descriptions()
+    {
+        JsonObject document = MinimalCaseFile(Characters((BuildFixture, "build")));
+        document["buildActions"] = new JsonArray(
+            new JsonObject { ["type"] = "setValue", ["control"] = "txtCharacterName", ["value"] = "" },
+            new JsonObject { ["type"] = "click", ["control"] = "cmdAddGear" },
+            new JsonObject { ["type"] = "selectItem", ["control"] = "lstGear", ["item"] = "Commlink" },
+            new JsonObject { ["type"] = "contextMenu", ["control"] = "treGear", ["item"] = "Add as Plugin" },
+            new JsonObject { ["type"] = "saveReload" });
+
+        IReadOnlyList<ParityAction> actions = _loader.Load(Write(document)).Cases[0].Actions;
+
+        Assert.Equal(
+            [
+                new SetValueAction("txtCharacterName", ""),
+                new ClickAction("cmdAddGear"),
+                new SelectItemAction("lstGear", "Commlink"),
+                new ContextMenuAction("treGear", "Add as Plugin"),
+                new SaveReloadAction(),
+            ],
+            actions);
+        Assert.Equal(
+            ["setValue:txtCharacterName=", "click:cmdAddGear", "selectItem:lstGear=Commlink", "contextMenu:treGear=Add as Plugin", "saveReload"],
+            actions.Select(action => action.Describe()));
+        Assert.All(actions, action => Assert.True(action.Required));
+    }
+
+    [Theory]
+    [InlineData("""{ "type": "setValue", "control": "a" }""", "'setValue' requires 'value'")]
+    [InlineData("""{ "type": "setValue", "value": "a" }""", "'setValue' requires 'control'")]
+    [InlineData("""{ "type": "click", "control": "a", "item": "b" }""", "'click' does not take 'item'")]
+    [InlineData("""{ "type": "click", "name": "a" }""", "'click' does not take 'name'")]
+    [InlineData("""{ "type": "selectItem", "control": "a" }""", "'selectItem' requires 'item'")]
+    [InlineData("""{ "type": "contextMenu", "item": "a" }""", "'contextMenu' requires 'control'")]
+    [InlineData("""{ "type": "contextMenu", "control": "a", "item": "b", "value": "c" }""", "'contextMenu' does not take 'value'")]
+    [InlineData("""{ "type": "saveReload", "control": "a" }""", "'saveReload' does not take 'control'")]
+    [InlineData("""{ "type": "saveReload", "optional": true }""", "'saveReload' does not take 'optional'")]
+    [InlineData("""{ "type": "capture", "name": "a", "control": "b" }""", "'capture' does not take 'control'")]
+    public void Rich_action_fields_must_match_the_type(string action, string message)
+    {
+        JsonObject document = MinimalCaseFile(Characters((BuildFixture, "build")));
+        document["buildActions"] = new JsonArray(JsonNode.Parse(action));
+
+        CaseFileException error = Assert.Throws<CaseFileException>(() => _loader.Load(Write(document)));
+        Assert.Contains($"buildActions[0]: {message}", error.Message);
+    }
+
+    [Fact]
     public void Duplicate_capture_names_fail()
     {
         JsonObject document = MinimalCaseFile(Characters((BuildFixture, "build")));

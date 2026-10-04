@@ -148,7 +148,7 @@ namespace Parity.Contracts.CaptureTiming
         public string? Target { get; set; }
     }
 
-    public enum Operation { Activate, Capture, Close, Launch, SelectTab, UiTree, Wait, WaitForLabel };
+    public enum Operation { Activate, Capture, Click, Close, ContextMenu, Launch, SaveReload, SelectItem, SelectTab, SetValue, UiTree, Wait, WaitForLabel };
 
     public enum Side { Candidate, Canonical };
 
@@ -217,12 +217,22 @@ namespace Parity.Contracts.CaptureTiming
                     return Operation.Activate;
                 case "capture":
                     return Operation.Capture;
+                case "click":
+                    return Operation.Click;
                 case "close":
                     return Operation.Close;
+                case "contextMenu":
+                    return Operation.ContextMenu;
                 case "launch":
                     return Operation.Launch;
+                case "saveReload":
+                    return Operation.SaveReload;
+                case "selectItem":
+                    return Operation.SelectItem;
                 case "selectTab":
                     return Operation.SelectTab;
+                case "setValue":
+                    return Operation.SetValue;
                 case "uiTree":
                     return Operation.UiTree;
                 case "wait":
@@ -243,14 +253,29 @@ namespace Parity.Contracts.CaptureTiming
                 case Operation.Capture:
                     JsonSerializer.Serialize(writer, "capture", options);
                     return;
+                case Operation.Click:
+                    JsonSerializer.Serialize(writer, "click", options);
+                    return;
                 case Operation.Close:
                     JsonSerializer.Serialize(writer, "close", options);
+                    return;
+                case Operation.ContextMenu:
+                    JsonSerializer.Serialize(writer, "contextMenu", options);
                     return;
                 case Operation.Launch:
                     JsonSerializer.Serialize(writer, "launch", options);
                     return;
+                case Operation.SaveReload:
+                    JsonSerializer.Serialize(writer, "saveReload", options);
+                    return;
+                case Operation.SelectItem:
+                    JsonSerializer.Serialize(writer, "selectItem", options);
+                    return;
                 case Operation.SelectTab:
                     JsonSerializer.Serialize(writer, "selectTab", options);
+                    return;
+                case Operation.SetValue:
+                    JsonSerializer.Serialize(writer, "setValue", options);
                     return;
                 case Operation.UiTree:
                     JsonSerializer.Serialize(writer, "uiTree", options);
