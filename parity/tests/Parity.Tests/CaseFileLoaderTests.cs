@@ -59,6 +59,45 @@ public sealed class CaseFileLoaderTests : IDisposable
     }
 
     [Fact]
+    public void Rich_scenario_file_loads_with_the_suite_timing_and_a_capture_before_each_acting_action()
+    {
+        CaseSuite suite = _loader.Load(RepositoryPaths.RichScenarioFile);
+        CaseSuite characters = _loader.Load(RepositoryPaths.CaseFile);
+
+        Assert.Equal(characters.StartupDelaySeconds, suite.StartupDelaySeconds);
+        Assert.Equal(characters.SettleMilliseconds, suite.SettleMilliseconds);
+        Assert.Equal(
+            [
+                "build-Diego_v_alpha2_by_bessgeor@edit-name",
+                "build-Diego_v_alpha2_by_bessgeor@raise-body",
+                "build-Diego_v_alpha2_by_bessgeor@add-gear",
+                "build-Diego_v_alpha2_by_bessgeor@plugin-menu",
+                "build-Diego_v_alpha2_by_bessgeor@save-reload",
+                "career-facemage_Sam_career@save-reload",
+            ],
+            suite.Cases.Select(item => item.Name));
+        Assert.Equal(["build-Diego_v_alpha2_by_bessgeor@save-reload", "career-facemage_Sam_career@save-reload"], suite.Cases.Where(item => item.Saves).Select(item => item.Name));
+        IEnumerable<ParityAction> all = suite.Cases.SelectMany(item => item.Actions);
+        Assert.Contains(all, action => action is SetValueAction);
+        Assert.Contains(all, action => action is ClickAction);
+        Assert.Contains(all, action => action is SelectItemAction);
+        Assert.Contains(all, action => action is ContextMenuAction);
+        foreach (ParityCase parityCase in suite.Cases)
+        {
+            for (int index = 0; index < parityCase.Actions.Count; index++)
+            {
+                if (parityCase.Actions[index] is not (SetValueAction or ClickAction or SelectItemAction))
+                {
+                    continue;
+                }
+
+                ParityAction? before = parityCase.Actions.Take(index).LastOrDefault(action => action is not (WaitAction or WaitForAction));
+                Assert.True(before is CaptureAction, $"{parityCase.Name}: action {index} ({parityCase.Actions[index].Describe()}) follows no capture.");
+            }
+        }
+    }
+
+    [Fact]
     public void Fixtures_link_no_other_character_file()
     {
         foreach (string fixture in Directory.GetFiles(Path.Combine(RepositoryPaths.Root, "parity", "fixtures", "characters"), "*.chum"))

@@ -45,7 +45,7 @@ test("without runs the app's inventory is written and nothing is observed", asyn
   equal(manifest.scope.path, "parity/inventory/scope.json");
   ok(manifest.tuples.length > 100 && manifest.tuples.every((tuple) => tuple.status === "not-captured"));
   equal(manifest.totals.controls.observed, 0);
-  ok(lines[0]!.startsWith(`Inventory: ${inventory.totals.classes} classes (9 active), controls observed 0/`), lines[0]);
+  ok(lines[0]!.startsWith(`Inventory: ${inventory.totals.classes} classes (10 active), controls observed 0/`), lines[0]);
 });
 
 test("a run's observations count once its candidate is the one built from the recorded source", async () => {

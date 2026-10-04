@@ -9,6 +9,8 @@ internal static class RepositoryPaths
 
     public static string CaseFile => Path.Combine(Root, "parity", "cases", "characters.json");
 
+    public static string RichScenarioFile => Path.Combine(Root, "parity", "cases", "rich-scenarios.json");
+
     public static string Fixtures => Path.Combine(Root, "parity", "fixtures", "characters");
 
     private static string FindRoot()
