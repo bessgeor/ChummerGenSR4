@@ -12,10 +12,10 @@ public sealed class DialogSafeCallerTests
         DialogSafeCaller caller = new();
         bool called = false;
 
-        caller.Run("click:cmdOK", () => called = true, () => 1, DialogSafeCaller.Timeout);
+        Assert.True(caller.Run("click:cmdOK", () => called = true, () => 1, DialogSafeCaller.Timeout));
 
         Assert.True(called);
-        caller.ThrowIfEarlierCallFailed();
+        caller.CheckKeptCalls(() => 1);
     }
 
     [Fact]
@@ -30,15 +30,15 @@ public sealed class DialogSafeCallerTests
     }
 
     [Fact]
-    public void A_call_that_opens_a_window_is_done_while_it_runs()
+    public void A_call_that_opens_a_window_is_done_while_it_runs_and_kept_while_the_window_is_open()
     {
         DialogSafeCaller caller = new();
         using ManualResetEventSlim dialogClosed = new();
         IntPtr active = 1;
 
-        caller.Run("click:cmdAddGear", () => { active = 2; dialogClosed.Wait(); }, () => active, DialogSafeCaller.Timeout);
+        Assert.False(caller.Run("click:cmdAddGear", () => { active = 2; dialogClosed.Wait(); }, () => active, DialogSafeCaller.Timeout));
 
-        caller.ThrowIfEarlierCallFailed();
+        caller.CheckKeptCalls(() => active);
         dialogClosed.Set();
     }
 
@@ -65,11 +65,10 @@ public sealed class DialogSafeCallerTests
     }
 
     [Fact]
-    public void A_later_failure_of_a_kept_call_reaches_the_next_action_once()
+    public void A_kept_call_is_awaited_once_its_window_is_active_again_and_its_failure_raised_once()
     {
         DialogSafeCaller caller = new();
         using ManualResetEventSlim dialogClosed = new();
-        using ManualResetEventSlim callEnded = new();
         IntPtr active = 1;
         caller.Run(
             "contextMenu:treGear=Add as Plugin",
@@ -77,19 +76,32 @@ public sealed class DialogSafeCallerTests
             {
                 active = 2;
                 dialogClosed.Wait();
-                callEnded.Set();
+                Thread.Sleep(100);
                 throw new InvalidOperationException("element gone");
             },
             () => active,
             DialogSafeCaller.Timeout);
 
-        caller.ThrowIfEarlierCallFailed();
+        active = 1;
         dialogClosed.Set();
-        callEnded.Wait(TestContext.Current.CancellationToken);
-        SpinWait.SpinUntil(() => false, 50);
+        InvalidOperationException error = Assert.Throws<InvalidOperationException>(() => caller.CheckKeptCalls(() => active));
 
-        InvalidOperationException error = Assert.Throws<InvalidOperationException>(caller.ThrowIfEarlierCallFailed);
-        Assert.Equal("contextMenu:treGear=Add as Plugin failed after it had opened a window: InvalidOperationException: element gone", error!.Message);
-        caller.ThrowIfEarlierCallFailed();
+        Assert.Equal("contextMenu:treGear=Add as Plugin failed after it had opened a window: InvalidOperationException: element gone", error.Message);
+        caller.CheckKeptCalls(() => active);
+    }
+
+    [Fact]
+    public void A_kept_call_that_does_not_return_after_its_window_closed_fails()
+    {
+        DialogSafeCaller caller = new();
+        using ManualResetEventSlim release = new();
+        IntPtr active = 1;
+        caller.Run("click:cmdAddGear", () => { active = 2; release.Wait(); }, () => active, DialogSafeCaller.Timeout);
+
+        active = 1;
+        TimeoutException error = Assert.Throws<TimeoutException>(() => caller.CheckKeptCalls(() => active));
+
+        Assert.Equal("click:cmdAddGear did not return within 10 s after the window it opened had closed.", error.Message);
+        release.Set();
     }
 }

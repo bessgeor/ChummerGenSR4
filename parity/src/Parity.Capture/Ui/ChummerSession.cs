@@ -5,7 +5,7 @@ using Parity.Capture.Interop;
 namespace Parity.Capture.Ui;
 
 /// <summary>
-/// One running app _process. Keeps the main window handle and resolved tab items, and re-resolves
+/// One running app process. Keeps the main window handle and resolved tab items, and re-resolves
 /// them when the app recreates its window or tab controls. Every action applies to the active window: the
 /// main window, or the modal dialog it shows. A save and reload replaces the process with a new one on the same file.
 /// </summary>
@@ -24,7 +24,9 @@ internal sealed class ChummerSession(
     UiTreeReader trees,
     ActiveWindowResolver activeWindows,
     ControlActions controls,
-    CharacterSaver saver) : IAppSession
+    SaveReloader reloader,
+    MessageRoundTrip roundTrip,
+    DialogSafeCaller caller) : IAppSession
 {
     private static readonly TimeSpan WindowTimeout = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan LiveWindowTimeout = TimeSpan.FromSeconds(10);
@@ -32,11 +34,9 @@ internal sealed class ChummerSession(
     private static readonly TimeSpan FirstSelectionCheck = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan SelectionTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan CharacterFormTimeout = TimeSpan.FromSeconds(10);
-    private static readonly TimeSpan ActiveWindowTimeout = TimeSpan.FromSeconds(2);
-    private static readonly TimeSpan ExitTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan ActiveWindowTimeout = TimeSpan.FromSeconds(10);
 
     private readonly Dictionary<string, AccessibleTab> _tabCache = new(StringComparer.Ordinal);
-    private readonly DialogSafeCaller _caller = new();
     private IntPtr _tabWindow;
     private IntPtr _mainWindow;
     private IntPtr _stableWindow;
@@ -68,7 +68,7 @@ internal sealed class ChummerSession(
     /// <summary>Raises the failure of an earlier action's call that ended after its action, then activates the active window.</summary>
     public void Activate()
     {
-        _caller.ThrowIfEarlierCallFailed();
+        caller.CheckKeptCalls(TryActiveWindow);
         activator.Activate(ActiveWindow());
     }
 
@@ -137,20 +137,9 @@ internal sealed class ChummerSession(
     public void SaveReload()
     {
         IntPtr main = LiveWindow();
-        if (ActiveWindow() != main)
-        {
-            throw new InvalidOperationException(
-                $"The dialog '{ControlFinder.Title(ActiveWindow())}' is open; the character is saved from the character form.");
-        }
-
-        saver.Save(main, characterPath, WaitForInputIdle);
-        _process.CloseMainWindow();
-        if (!_process.WaitForExit(ExitTimeout))
-        {
-            throw new InvalidOperationException(
-                $"The app did not exit within {ExitTimeout.TotalSeconds:0} s after saving; its active window is '{ControlFinder.Title(ActiveWindow())}'.");
-        }
-
+        reloader.SaveAndClose(
+            new SaveTarget(main, ActiveWindow(), characterPath, () => roundTrip.Wait(main), () => ControlFinder.Title(ActiveWindow())),
+            new ProcessApp(_process));
         Process next = restart();
         _process.Dispose();
         _process = next;
@@ -228,14 +217,21 @@ internal sealed class ChummerSession(
         throw new TimeoutException($"The app's main window disappeared for more than {LiveWindowTimeout.TotalSeconds:0} s.");
     }
 
-    private ActionContext Acting() => new(ActiveWindow, _caller, Settle, _process.Id);
+    private ActionContext Acting() => new(ActiveWindow, TryActiveWindow, caller, Settle, _process.Id);
 
-    /// <summary>After an acting call: the app is idle, then the settle time passes for it to paint.</summary>
+    /// <summary>
+    /// After an acting call: the app handles a message, so its handlers have run; a call whose dialog has closed has
+    /// returned; then the settle time passes for the app to paint.
+    /// </summary>
     private void Settle()
     {
-        WaitForInputIdle();
+        roundTrip.Wait(LiveWindow());
+        caller.CheckKeptCalls(TryActiveWindow);
         Thread.Sleep(timing.Settle);
     }
+
+    /// <summary>The active window as it is now, or <see cref="IntPtr.Zero"/> while a disabled window shows none yet.</summary>
+    private IntPtr TryActiveWindow() => activeWindows.Resolve(LiveWindow());
 
     /// <summary>The active window; a disabled window that owns no enabled one for <see cref="ActiveWindowTimeout"/> is a failure.</summary>
     private IntPtr ActiveWindow()
@@ -243,7 +239,7 @@ internal sealed class ChummerSession(
         Stopwatch timer = Stopwatch.StartNew();
         while (true)
         {
-            IntPtr window = activeWindows.Resolve(LiveWindow());
+            IntPtr window = TryActiveWindow();
             if (window != IntPtr.Zero)
             {
                 return window;

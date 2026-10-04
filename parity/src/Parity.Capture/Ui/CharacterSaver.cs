@@ -1,42 +1,40 @@
 using System.Diagnostics;
-using Parity.Capture.Interop;
 
 namespace Parity.Capture.Ui;
 
 /// <summary>
-/// Saves the open character with the character form's own Save command, Ctrl+S, and waits until the app has
-/// rewritten its file: the file's write time is set back first, so a write the app makes shows as a newer one.
+/// Saves the open character with the character form's own Save command and waits until the app has rewritten its
+/// file: the file's write time is set back first, so a write the app makes shows as a newer one.
 /// </summary>
-internal sealed class CharacterSaver(WindowCapturer capturer, KeyboardInput keyboard)
+internal sealed class CharacterSaver(ISaveCommand command, SaveTimeouts timeouts)
 {
-    public static readonly TimeSpan WriteTimeout = TimeSpan.FromSeconds(10);
     private static readonly DateTime Marker = new(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
-    public void Save(IntPtr mainWindow, string characterPath, Action waitUntilIdle)
+    public void Save(IntPtr mainWindow, string characterPath, Action waitUntilHandled)
     {
         File.SetLastWriteTimeUtc(characterPath, Marker);
-        capturer.FocusStatusBar(mainWindow);
-        keyboard.Press(NativeMethods.VkControl, NativeMethods.VkS);
+        command.Send(mainWindow);
         Stopwatch timer = Stopwatch.StartNew();
         while (File.GetLastWriteTimeUtc(characterPath) == Marker)
         {
-            if (timer.Elapsed >= WriteTimeout)
+            if (timer.Elapsed >= timeouts.Write)
             {
                 throw new TimeoutException(
-                    $"The app did not write {Path.GetFileName(characterPath)} within {WriteTimeout.TotalSeconds:0} s after Ctrl+S.");
+                    $"The app did not write {Path.GetFileName(characterPath)} within {timeouts.Write.TotalSeconds:0} s after the save command.");
             }
 
-            Thread.Sleep(100);
+            Thread.Sleep(50);
         }
 
-        // The app saves on its UI thread, so it is idle again only once the file is written.
-        waitUntilIdle();
-        WaitUntilClosed(characterPath, timer);
+        // The app saves on its UI thread, so it handles a message again only once the file is written.
+        waitUntilHandled();
+        WaitUntilClosed(characterPath);
     }
 
-    /// <summary>Waits until no process holds the file open, so the next process reads the whole of it.</summary>
-    private static void WaitUntilClosed(string characterPath, Stopwatch timer)
+    /// <summary>Waits, for a time of its own, until no process holds the file open, so the next process reads the whole of it.</summary>
+    private void WaitUntilClosed(string characterPath)
     {
+        Stopwatch timer = Stopwatch.StartNew();
         while (true)
         {
             try
@@ -44,9 +42,16 @@ internal sealed class CharacterSaver(WindowCapturer capturer, KeyboardInput keyb
                 using FileStream stream = new(characterPath, FileMode.Open, FileAccess.Read, FileShare.None);
                 return;
             }
-            catch (IOException) when (timer.Elapsed < WriteTimeout)
+            catch (IOException exception)
             {
-                Thread.Sleep(100);
+                if (timer.Elapsed >= timeouts.Close)
+                {
+                    throw new IOException(
+                        $"{Path.GetFileName(characterPath)} was still held open {timeouts.Close.TotalSeconds:0} s after the app wrote it: {exception.Message}",
+                        exception);
+                }
+
+                Thread.Sleep(50);
             }
         }
     }

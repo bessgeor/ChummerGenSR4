@@ -47,8 +47,15 @@ internal static class Program
         services.AddSingleton<ActiveWindowResolver>();
         services.AddSingleton<ControlFinder>();
         services.AddSingleton<KeyboardInput>();
+        services.AddSingleton<IControlAccess, UiaControlAccess>();
         services.AddSingleton<ControlActions>();
+        services.AddSingleton(SaveTimeouts.Default);
+        services.AddSingleton<ISaveCommand, CtrlSSaveCommand>();
         services.AddSingleton<CharacterSaver>();
+        services.AddSingleton<SaveReloader>();
+        services.AddTransient<DialogSafeCaller>();
+        services.AddSingleton<Func<DialogSafeCaller>>(provider => provider.GetRequiredService<DialogSafeCaller>);
+        services.AddSingleton<MessageRoundTrip>();
         services.AddSingleton<ChummerUiDriver>();
         services.AddSingleton<TimingRecorder>();
         services.AddSingleton<IUiDriver>(provider => new TimedUiDriver(

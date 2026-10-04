@@ -84,7 +84,9 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     public static extern IntPtr SendMessage(IntPtr handle, int message, IntPtr wParam, IntPtr lParam);
 
-    public const uint GwEnabledPopup = 6;
+    public const uint GwOwner = 4;
+    public const int WmNull = 0x0000;
+    public const uint SmtoNormal = 0x0000;
     public const ushort VkTab = 0x09;
     public const ushort VkEscape = 0x1B;
     public const ushort VkControl = 0x11;
@@ -98,6 +100,10 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")]
     public static extern IntPtr GetWindow(IntPtr handle, uint command);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr SendMessageTimeout(
+        IntPtr handle, int message, IntPtr wParam, IntPtr lParam, uint flags, uint timeoutMilliseconds, out IntPtr result);
 
 
     [DllImport("user32.dll", SetLastError = true)]

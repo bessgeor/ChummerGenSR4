@@ -14,7 +14,9 @@ internal sealed class ChummerUiDriver(
     UiTreeReader trees,
     ActiveWindowResolver activeWindows,
     ControlActions controls,
-    CharacterSaver saver) : IUiDriver
+    SaveReloader reloader,
+    MessageRoundTrip roundTrip,
+    Func<DialogSafeCaller> newCaller) : IUiDriver
 {
     public IAppSession Launch(string executablePath, string characterPath, UiTiming timing)
     {
@@ -34,7 +36,9 @@ internal sealed class ChummerUiDriver(
             trees,
             activeWindows,
             controls,
-            saver);
+            reloader,
+            roundTrip,
+            newCaller());
         try
         {
             session.WaitUntilReady();

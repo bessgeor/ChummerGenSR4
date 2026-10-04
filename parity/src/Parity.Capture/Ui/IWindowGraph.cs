@@ -5,6 +5,6 @@ internal interface IWindowGraph
 {
     bool IsEnabled(IntPtr window);
 
-    /// <summary>The enabled pop-up window <paramref name="window"/> owns, or the window itself when it owns none.</summary>
-    IntPtr EnabledPopup(IntPtr window);
+    /// <summary>The visible windows <paramref name="owner"/> owns directly, topmost first, without tooltips.</summary>
+    IReadOnlyList<IntPtr> OwnedWindows(IntPtr owner);
 }
