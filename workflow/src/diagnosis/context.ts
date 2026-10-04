@@ -15,8 +15,10 @@ export const maximumMembers = 5;
 
 const rect = z.strictObject({ x: z.number(), y: z.number(), width: z.number(), height: z.number() });
 const ocr = z.strictObject({ status: z.string(), text: z.string().nullable() });
-const action = z.strictObject({
+/** A case-file action as a sealed context records it. */
+export const ContextActionSchema = z.strictObject({
   type: z.string(), name: z.string().optional(), label: z.string().optional(), milliseconds: z.number().optional(), optional: z.boolean().optional(),
+  control: z.string().optional(), value: z.string().optional(), item: z.string().optional(),
 });
 
 /** The sealed context of one cluster: everything a job about it may know, from recorded files only. */
@@ -35,7 +37,7 @@ export const ContextManifestSchema = z.strictObject({
     case: z.string(), mode: z.enum(["build", "career"]), fixture: z.strictObject({ file: z.string(), sha256: z.string() }),
     capture: z.string(),
     /** The expanded actions up to and including the capture. */
-    actions: z.array(action),
+    actions: z.array(ContextActionSchema),
   })),
   /** The cases and captures a check may name. */
   vocabulary: z.array(z.strictObject({ case: z.string(), mode: z.enum(["build", "career"]), captures: z.array(z.string()) })),
