@@ -6,7 +6,8 @@ namespace Parity.Capture.Ui;
 
 /// <summary>
 /// One running app process. Keeps the main window handle and resolved tab items, and re-resolves
-/// them when the app recreates its window or tab controls.
+/// them when the app recreates its window or tab controls. Every action applies to the active window: the
+/// main window, or the modal dialog it shows.
 /// </summary>
 internal sealed class ChummerSession(
     Process process,
@@ -18,7 +19,8 @@ internal sealed class ChummerSession(
     LabelWaiter labels,
     WindowCapturer capturer,
     PointerParker pointer,
-    UiTreeReader trees) : IAppSession
+    UiTreeReader trees,
+    ActiveWindowResolver activeWindows) : IAppSession
 {
     private static readonly TimeSpan WindowTimeout = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan LiveWindowTimeout = TimeSpan.FromSeconds(10);
@@ -26,8 +28,11 @@ internal sealed class ChummerSession(
     private static readonly TimeSpan FirstSelectionCheck = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan SelectionTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan CharacterFormTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan ActiveWindowTimeout = TimeSpan.FromSeconds(2);
 
     private readonly Dictionary<string, AccessibleTab> _tabCache = new(StringComparer.Ordinal);
+    private readonly DialogSafeCaller _caller = new();
+    private IntPtr _tabWindow;
     private IntPtr _mainWindow;
     private IntPtr _stableWindow;
     private Rectangle? _stableBounds;
@@ -54,11 +59,22 @@ internal sealed class ChummerSession(
         EnsureCharacterOpen();
     }
 
-    public void Activate() => activator.Activate(LiveWindow());
+    /// <summary>Raises the failure of an earlier action's call that ended after its action, then activates the active window.</summary>
+    public void Activate()
+    {
+        _caller.ThrowIfEarlierCallFailed();
+        activator.Activate(ActiveWindow());
+    }
 
     public void SelectTab(string tabName)
     {
-        IntPtr window = LiveWindow();
+        IntPtr window = ActiveWindow();
+        if (window != _tabWindow)
+        {
+            _tabCache.Clear();
+            _tabWindow = window;
+        }
+
         if (!_tabCache.TryGetValue(tabName, out AccessibleTab? tab))
         {
             tab = tabs.Find(window, tabName);
@@ -94,23 +110,28 @@ internal sealed class ChummerSession(
     public void WaitForLabel(string label)
     {
         WaitForStableBounds();
-        labels.WaitForVisibleLabel(LiveWindow(), label);
+        labels.WaitForVisibleLabel(ActiveWindow, label);
         Thread.Sleep(timing.Settle);
     }
 
     public void Wait(int milliseconds) => Thread.Sleep(milliseconds);
 
+    /// <summary>Captures the active window; only the character form has a status bar to move the focus to.</summary>
     public Bitmap Capture()
     {
         Rectangle bounds = WaitForStableBounds();
-        IntPtr window = LiveWindow();
+        IntPtr window = ActiveWindow();
         activator.Activate(window);
-        capturer.FocusStatusBar(window);
+        if (window == LiveWindow())
+        {
+            capturer.FocusStatusBar(window);
+        }
+
         pointer.EnsureAt(_pointerSpot);
         return capturer.Capture(window, bounds);
     }
 
-    public IReadOnlyList<Parity.Contracts.UiTree.UiNode> DescribeTree() => trees.Read(LiveWindow());
+    public IReadOnlyList<Parity.Contracts.UiTree.UiNode> DescribeTree() => trees.Read(ActiveWindow());
 
     public void Dispose()
     {
@@ -162,17 +183,39 @@ internal sealed class ChummerSession(
         throw new TimeoutException($"The app's main window disappeared for more than {LiveWindowTimeout.TotalSeconds:0} s.");
     }
 
-    /// <summary>Returns the cached bounds when the same window still has them; otherwise waits for stability.</summary>
+    /// <summary>The active window; a disabled window that owns no enabled one for <see cref="ActiveWindowTimeout"/> is a failure.</summary>
+    private IntPtr ActiveWindow()
+    {
+        Stopwatch timer = Stopwatch.StartNew();
+        while (true)
+        {
+            IntPtr window = activeWindows.Resolve(LiveWindow());
+            if (window != IntPtr.Zero)
+            {
+                return window;
+            }
+
+            if (timer.Elapsed >= ActiveWindowTimeout)
+            {
+                throw new InvalidOperationException(
+                    $"The app's window is disabled and has no enabled dialog for {ActiveWindowTimeout.TotalSeconds:0} s.");
+            }
+
+            Thread.Sleep(100);
+        }
+    }
+
+    /// <summary>Returns the cached bounds when the active window is the same and still has them; otherwise waits for stability.</summary>
     private Rectangle WaitForStableBounds()
     {
-        IntPtr window = LiveWindow();
+        IntPtr window = ActiveWindow();
         if (_stableWindow == window && _stableBounds is { } cached && geometry.GetVisibleBounds(window) == cached)
         {
             return cached;
         }
 
-        Rectangle bounds = geometry.WaitForStableBounds(LiveWindow, timing.Settle);
-        _stableWindow = LiveWindow();
+        Rectangle bounds = geometry.WaitForStableBounds(ActiveWindow, timing.Settle);
+        _stableWindow = ActiveWindow();
         _stableBounds = bounds;
         return bounds;
     }

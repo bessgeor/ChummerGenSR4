@@ -84,6 +84,44 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     public static extern IntPtr SendMessage(IntPtr handle, int message, IntPtr wParam, IntPtr lParam);
 
+    public const uint GwEnabledPopup = 6;
+    public const ushort VkTab = 0x09;
+    public const ushort VkEscape = 0x1B;
+    public const ushort VkControl = 0x11;
+    public const ushort VkS = 0x53;
+    public const ushort VkApps = 0x5D;
+    public const uint InputKeyboard = 1;
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool IsWindowEnabled(IntPtr handle);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetWindow(IntPtr handle, uint command);
+
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern uint SendInput(uint count, Input[] inputs, int size);
+
+    /// <summary>An <c>INPUT</c> holding a keyboard event; the union is padded to the size of its mouse member.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Input
+    {
+        public uint Type;
+        public KeyboardInput Keyboard;
+        public ulong Padding;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct KeyboardInput
+    {
+        public ushort VirtualKey;
+        public ushort ScanCode;
+        public uint Flags;
+        public uint Time;
+        public UIntPtr ExtraInfo;
+    }
+
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool PrintWindow(IntPtr handle, IntPtr hdc, uint flags);

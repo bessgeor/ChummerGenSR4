@@ -43,6 +43,8 @@ internal static class Program
         services.AddSingleton<WindowCapturer>();
         services.AddSingleton<PointerParker>();
         services.AddSingleton<UiTreeReader>();
+        services.AddSingleton<IWindowGraph, Win32WindowGraph>();
+        services.AddSingleton<ActiveWindowResolver>();
         services.AddSingleton<ChummerUiDriver>();
         services.AddSingleton<TimingRecorder>();
         services.AddSingleton<IUiDriver>(provider => new TimedUiDriver(

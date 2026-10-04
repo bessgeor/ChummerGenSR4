@@ -6,7 +6,7 @@
 
 ## 2. Capture runner
 
-- [ ] 2.1 Resolve the active window and use it for activation, `selectTab`, `waitFor`, captures and UI trees; run acting calls so a dialog does not block them. Evidence: unit tests for the active-window walk on a fake window graph and for the call waiter (returns, window change, timeout, a later failure reaching the next action).
+- [x] 2.1 Resolve the active window and use it for activation, `selectTab`, `waitFor`, captures and UI trees; run acting calls so a dialog does not block them. Evidence: unit tests for the active-window walk on a fake window graph and for the call waiter (returns, window change, timeout, a later failure reaching the next action).
 - [ ] 2.2 Perform `setValue`, `click`, `selectItem` and `contextMenu`, measured by the timing decorator. Evidence: unit tests for the session's checks where they need no window; the live run of task 4.1.
 - [ ] 2.3 Perform `saveReload` with per-side fixture copies for saving cases. Evidence: unit tests for staging (per-side copies only for saving cases); the live run of task 4.1.
 
