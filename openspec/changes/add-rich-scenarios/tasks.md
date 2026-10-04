@@ -12,7 +12,7 @@
 
 ## 3. Coverage and scenarios
 
-- [ ] 3.1 Prove bindings from `setValue`, `click` and `selectItem` in the coverage manifest. Evidence: workflow tests for each action's events, an action without a capture before it, a control the capture did not show and the unchanged tab proofs.
+- [x] 3.1 Prove bindings from `setValue`, `click` and `selectItem` in the coverage manifest. Evidence: workflow tests for each action's events, an action without a capture before it, a control the capture did not show and the unchanged tab proofs.
 - [ ] 3.2 Add `parity/cases/rich-scenarios.json` and document the actions in `AGENTS.md` and `README.md`. Evidence: a loader test loads the case file against its fixtures; the live run of task 4.1.
 
 ## 4. Verification and archive

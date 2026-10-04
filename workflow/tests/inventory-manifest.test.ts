@@ -167,9 +167,113 @@ test("a page change without a selectTab between the captures, or a tab control m
   }]);
   const result = manifest(plan(["build-a", ["lifestyle", "armor", "skills", "gear"]]), run);
   const exercised = result.interactions.filter((item) => item.status === "exercised");
-  deepStrictEqual(exercised.map((item) => item.status === "exercised" ? [item.id, item.proofs.map((proof) => `${proof.from}>${proof.to}`)] : []), [
+  deepStrictEqual(exercised.map((item) => item.status === "exercised" ? [item.id, item.proofs.map((proof) => ("from" in proof ? `${proof.from}>${proof.to}` : proof.action))] : []), [
     ["frmCreate.tabCharacterTabs.SelectedIndexChanged", ["armor>skills", "skills>gear"]],
   ]);
+});
+
+/** The inventory with a name box and a gear list on the character form, and the dialog active. */
+const richInventory = {
+  ...inventory,
+  classes: inventory.classes.map((item) => item.name !== "frmCreate" ? item : {
+    ...item,
+    controls: [...item.controls, { name: "txtName", type: "System.Windows.Forms.TextBox", parent: "tabSkills", line: 1, text: null, tag: null, contextMenu: null }],
+    interactions: [...item.interactions, ...["TextChanged", "Leave"].map((event, offset) => ({
+      id: `frmCreate.txtName.${event}`, target: "txtName", member: null, event, handlerType: "System.EventHandler",
+      handler: `txtName_${event}`, handlerFile: "Chummer/frmCreate.cs", handlerLine: 20 + offset, designerLine: 20 + offset,
+    }))],
+  }),
+};
+
+function richManifest(planned: PlannedCaptures[], run: string): CoverageManifest {
+  return CoverageManifestSchema.parse(buildCoverageManifest({ inventory: richInventory, scope, scopePath: scope.path, plan: planned, runs: [readRunObservation(run)] }));
+}
+
+test("a performed action on a control the capture before it showed proves the action's events of that control", () => {
+  const root = scratch();
+  const shown = formTree("Skills", null, [["cmdAdd", 4], ["txtName", 4]]);
+  const run = writeRun(root, "run-1", [{
+    case: "build-a",
+    actions: [
+      { action: "capture:skills", outcome: "performed" },
+      { action: "waitFor:Name", outcome: "performed" },
+      { action: "setValue:txtName=A=B", outcome: "performed" },
+      { action: "click:cmdAdd", outcome: "performed" },
+      { action: "capture:after", outcome: "performed" },
+      { action: "wait:5", outcome: "performed" },
+      { action: "click:cmdAdd", outcome: "performed" },
+      { action: "selectItem:txtName=x", outcome: "failed" },
+    ],
+    captures: [{ capture: "skills", outcome: "performed", tree: shown }, { capture: "after", outcome: "performed", tree: shown }],
+  }]);
+  const result = richManifest(plan(["build-a", ["skills", "after"]]), run);
+  const interaction = (id: string) => result.interactions.find((item) => item.id === id)!;
+
+  deepStrictEqual(interaction("frmCreate.txtName.TextChanged"), {
+    id: "frmCreate.txtName.TextChanged", class: "frmCreate", target: "txtName", event: "TextChanged", handler: "txtName_TextChanged",
+    handlerFile: "Chummer/frmCreate.cs", handlerLine: 20, status: "exercised",
+    proofs: [{ case: "build-a", capture: "skills", action: "setValue:txtName=A=B", actionIndex: 2 }],
+  });
+  equal(interaction("frmCreate.txtName.Leave").status, "unexercised");
+  // The first click follows another action, not the capture; the second follows the capture through a wait.
+  deepStrictEqual(interaction("frmCreate.cmdAdd.Click"), {
+    ...interaction("frmCreate.cmdAdd.Click"), status: "exercised", proofs: [{ case: "build-a", capture: "after", action: "click:cmdAdd", actionIndex: 6 }],
+  });
+  equal(result.totals.interactions.exercised, 2);
+});
+
+test("an action proves nothing for a control the capture before it did not show, or without a capture before it", () => {
+  const root = scratch();
+  const run = writeRun(root, "run-1", [{
+    case: "build-a",
+    actions: [
+      { action: "setValue:txtName=A", outcome: "performed" },
+      { action: "capture:skills", outcome: "performed" },
+      { action: "click:cmdAdd", outcome: "performed" },
+      { action: "contextMenu:txtName=Copy", outcome: "performed" },
+      { action: "capture:again", outcome: "performed" },
+      { action: "saveReload", outcome: "performed" },
+      { action: "setValue:txtName=B", outcome: "performed" },
+    ],
+    captures: [
+      { capture: "skills", outcome: "performed", tree: formTree("Skills", null, [["txtName", 4]]) },
+      { capture: "again", outcome: "performed", tree: formTree("Skills", null, [["txtName", 4]]) },
+    ],
+  }]);
+  const result = richManifest(plan(["build-a", ["skills", "again"]]), run);
+
+  deepStrictEqual(result.interactions.filter((item) => item.status === "exercised").map((item) => item.id), []);
+});
+
+test("a control two classes of the capture declare proves nothing, and an acting action between captures leaves no tab proof", () => {
+  const root = scratch();
+  const twice = {
+    ...richInventory,
+    classes: richInventory.classes.map((item) => item.name !== "SkillControl" ? item : {
+      ...item,
+      controls: [...item.controls, { name: "cmdAdd", type: "System.Windows.Forms.Button", parent: "(self)", line: 1, text: null, tag: null, contextMenu: null }],
+    }),
+  };
+  const run = writeRun(root, "run-1", [{
+    case: "build-a",
+    actions: [
+      { action: "capture:skills", outcome: "performed" },
+      { action: "click:cmdAdd", outcome: "performed" },
+      { action: "selectTab:Street Gear", outcome: "performed" },
+      { action: "saveReload", outcome: "performed" },
+      { action: "selectTab:Lifestyle", outcome: "performed" },
+      { action: "capture:gear", outcome: "performed" },
+    ],
+    captures: [
+      { capture: "skills", outcome: "performed", tree: formTree("Skills", null, [["cmdAdd", 4], ["SkillControl", 4], ["cmdAdd", 7]]) },
+      { capture: "gear", outcome: "performed", tree: formTree("Street Gear", "Lifestyle") },
+    ],
+  }]);
+  const result = CoverageManifestSchema.parse(buildCoverageManifest({
+    inventory: twice, scope, scopePath: scope.path, plan: plan(["build-a", ["skills", "gear"]]), runs: [readRunObservation(run)],
+  }));
+
+  deepStrictEqual(result.interactions.filter((item) => item.status === "exercised").map((item) => item.id), []);
 });
 
 test("unresolved automation IDs are listed per capture", () => {
