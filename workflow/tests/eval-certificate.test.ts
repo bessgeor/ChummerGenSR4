@@ -3,11 +3,12 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { join } from "node:path";
 import { test } from "node:test";
 import { resolveAgentSettings } from "../src/agents/agent-settings.js";
-import { certificatePath, certificateProblems, certify, dispatchedJobKinds, unattendedProblems, type Certificate } from "../src/evals/certificate.js";
+import { certificatePath, certificateProblems, certify, unattendedProblems, type Certificate } from "../src/evals/certificate.js";
 import { runEvalCommand } from "../src/evals/eval-commands.js";
 import { parseArguments } from "../src/options/arguments.js";
 import { resolveRunOptions, type RunOptions } from "../src/options/run-options.js";
 import { workflowPaths } from "../src/paths.js";
+import { dispatchedJobKinds } from "../src/tuning/tuning.js";
 import { scratch } from "./diagnosis-fixtures.js";
 import { diagnosisHarness, FakeAgents, twoClusters } from "./diagnosis-harness.js";
 import { evalContext } from "./eval-fixtures.js";

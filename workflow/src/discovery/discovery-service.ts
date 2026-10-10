@@ -25,6 +25,7 @@ import {
 import type { DiscoveryJobs, JobInput } from "./discovery-jobs.js";
 import type { DiscoveryPaths } from "./discovery-paths.js";
 import { pendingJob, type Coverage, type DiscoveryOptions, type DiscoveryStateValue, type JobState, type Prepared, type ScenarioJob, type ScenarioUpdate } from "./discovery-state.js";
+import { dispatchedTuningOf, tunedPromptVersion } from "../tuning/tuning.js";
 import { RankOutputSchema, rankPromptVersion, ScenarioOutputSchema, scenarioPromptVersion, type RankOutput, type ScenarioOutput } from "./job-schemas.js";
 import { knownLabels, knownTabTexts, readLanguageStrings } from "./known-texts.js";
 import { scenarioActions, validatePlan } from "./plan-validator.js";
@@ -179,10 +180,11 @@ export class DiscoveryService {
   async rank(state: DiscoveryStateValue, store: BaseStore, signal?: AbortSignal): Promise<{ rank: JobState<RankOutput>; chargedMs: number }> {
     const prepared = this.prepared(state);
     const context = readSealed(prepared.rankContext.folder, prepared.rankContext.hash, RankContextSchema);
+    const tuning = dispatchedTuningOf(state.options.tuning, "rank");
     const step = await this.dependencies.jobs.run({
       kind: "rank", label: "rank", recordPrefix: `${state.threadId}/rank`, subject: { kind: "discovery-thread", id: state.threadId },
       contextFolder: prepared.rankContext.folder, contextHash: prepared.rankContext.hash, snapshotFolder: prepared.snapshot.folder,
-      logsFolder: this.dependencies.folders.thread(state.threadId).logs, promptVersion: rankPromptVersion, prompt: (paths) => rankPrompt(context, paths),
+      logsFolder: this.dependencies.folders.thread(state.threadId).logs, promptVersion: tunedPromptVersion(rankPromptVersion, tuning), prompt: (paths) => rankPrompt(context, paths, tuning),
       schema: RankOutputSchema, validate: (output) => validateRank(output, context),
     }, state.rankJob, this.jobInput(state, signal), store);
     return { rank: step.state, chargedMs: step.chargedMs };
@@ -224,10 +226,11 @@ export class DiscoveryService {
     const job = state.scenarios[targetId];
     if (job === undefined) throw new Error(`No scenario of target ${targetId}.`);
     const context = readSealed(job.contextFolder, job.contextHash, ScenarioContextSchema);
+    const tuning = dispatchedTuningOf(state.options.tuning, "scenario");
     const step = await this.dependencies.jobs.run({
       kind: "scenario", label: `scenario ${targetId}`, recordPrefix: `${state.threadId}/${targetId}/scenario`, subject: { kind: "discovery-target", id: targetId },
       contextFolder: job.contextFolder, contextHash: job.contextHash, snapshotFolder: prepared.snapshot.folder,
-      logsFolder: this.dependencies.folders.thread(state.threadId).logs, promptVersion: scenarioPromptVersion, prompt: (paths) => scenarioPrompt(context, paths),
+      logsFolder: this.dependencies.folders.thread(state.threadId).logs, promptVersion: tunedPromptVersion(scenarioPromptVersion, tuning), prompt: (paths) => scenarioPrompt(context, paths, tuning),
       schema: ScenarioOutputSchema, validate: (output) => validateScenario(output, context),
     }, job, this.jobInput(state, signal), store);
     return { update: { targetId, ...step.state }, chargedMs: step.chargedMs };

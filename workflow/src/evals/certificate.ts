@@ -4,6 +4,7 @@ import { z } from "zod";
 import { efforts, providers, type JobKind } from "../agents/agent-job.js";
 import type { AgentSettings } from "../agents/agent-settings.js";
 import type { RunOptions } from "../options/run-options.js";
+import { dispatchedJobKinds, tunedPromptVersion, tuningOf, type DispatchedTuning } from "../tuning/tuning.js";
 import { metrics, requireMetric, type Metric } from "./metrics.js";
 import { evaluatedJobKinds, promptVersions, readRun, summarize, type EvaluatedJobKind } from "./eval-run.js";
 
@@ -69,9 +70,9 @@ export function certify(runFolder: string, thresholds: Thresholds, certificatesF
 
 /**
  * Why each job kind may not be dispatched unattended: no certificate, an invalid one, or one for another agent
- * choice or prompt version than the run's. An empty list lets the run start.
+ * choice or prompt version than the run's (the tuned version when the run dispatches a configuration). An empty list lets the run start.
  */
-export function certificateProblems(folder: string, jobKinds: readonly EvaluatedJobKind[], agents: AgentSettings): string[] {
+export function certificateProblems(folder: string, jobKinds: readonly EvaluatedJobKind[], agents: AgentSettings, tuning?: DispatchedTuning): string[] {
   const problems: string[] = [];
   for (const jobKind of jobKinds) {
     const path = certificatePath(folder, jobKind);
@@ -96,19 +97,13 @@ export function certificateProblems(folder: string, jobKinds: readonly Evaluated
       ["provider", certified.agent.provider, choice.provider],
       ["model", certified.agent.model ?? "default", choice.model ?? "default"],
       ["effort", certified.agent.effort, choice.effort],
-      ["prompt version", certified.promptVersion, promptVersions[jobKind]],
+      ["prompt version", certified.promptVersion, tunedPromptVersion(promptVersions[jobKind], tuningOf(tuning, jobKind))],
     ].filter(([, left, right]) => left !== right);
     if (differences.length > 0) {
       problems.push(`${jobKind}: the certificate is for ${differences.map(([field, left, right]) => `${field} ${left}, the run uses ${right}`).join("; ")}`);
     }
   }
   return problems;
-}
-
-/** The job kinds a run's diagnosis dispatches: none without diagnosis or with --only of an earlier node. */
-export function dispatchedJobKinds(options: Pick<RunOptions, "diagnosis" | "only">): ("hypothesis" | "challenge")[] {
-  if (!options.diagnosis || (options.only !== null && options.only !== "diagnose")) return [];
-  return ["hypothesis", "challenge"];
 }
 
 /** The one field of a run's stored options the gate reads; options that do not state `unattended` are not unattended. */
@@ -122,7 +117,7 @@ export function dispatchesRepair(options: Pick<RunOptions, "diagnosis" | "only" 
 /** Why an unattended run may not start; empty for a run that is not unattended. No certificate covers repair jobs. */
 export function unattendedProblems(options: RunOptions): string[] {
   if (!UnattendedFlagSchema.parse(options).unattended) return [];
-  const problems = certificateProblems(options.certificates, dispatchedJobKinds(options), options.agents);
+  const problems = certificateProblems(options.certificates, dispatchedJobKinds(options), options.agents, options.tuning);
   if (dispatchesRepair(options)) problems.push("repair: no certificate covers repair jobs, so an unattended run cannot repair; add --no-repair");
   return problems;
 }

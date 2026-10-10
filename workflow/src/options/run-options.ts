@@ -1,6 +1,8 @@
 import { join, resolve } from "node:path";
 import { resolveAgentSettings, type AgentSettings } from "../agents/agent-settings.js";
 import type { Arguments, NodeName } from "./arguments.js";
+import { readDispatchedTuning } from "../tuning/active-configuration.js";
+import { dispatchedJobKinds, type DispatchedTuning } from "../tuning/tuning.js";
 import { localDataFolder, type Environment, type Profile } from "./profile.js";
 
 /** Everything a thread runs with; stored in the thread's state so a resumed thread uses the same options. */
@@ -25,6 +27,8 @@ export type RunOptions = {
   readonly unattended: boolean;
   /** The folder of the certificates: the profile's `certificates`, else `workflow/evals/certificates`. */
   readonly certificates: string;
+  /** The active tuning configurations when the thread started; absent in a thread stored before tuning existed, which uses none. */
+  readonly tuning?: DispatchedTuning;
   /**
    * Whether confirmed clusters are repaired (null with --no-repair), each attempt's deadline and the attempts a cluster may get.
    */
@@ -45,6 +49,11 @@ export type RepairSettings = {
   /** How many attempts a cluster may get in a thread, the first included; absent in a thread stored before it existed, which has 1. */
   readonly maxAttempts?: number;
 };
+
+/** The tuning folder: the profile's `tuning`, else `workflow/evals/tuning`. */
+export function tuningFolder(profile: Profile, repositoryRoot: string): string {
+  return resolve(repositoryRoot, profile.tuning ?? join("workflow", "evals", "tuning"));
+}
 
 export const defaultRepairDeadlineMinutes = 60;
 export const defaultRepairMaxAttempts = 2;
@@ -80,6 +89,8 @@ export function resolveRunOptions(args: Arguments, profile: Profile, env: Enviro
     agents: resolveAgentSettings(profile.agents),
     unattended: args.unattended,
     certificates: resolve(repositoryRoot, profile.certificates ?? join("workflow", "evals", "certificates")),
+    // Only the job kinds the thread dispatches: a stale configuration of another kind does not stop it.
+    tuning: readDispatchedTuning(tuningFolder(profile, repositoryRoot), dispatchedJobKinds({ diagnosis: !args.noDiagnosis, only: args.only })),
     repair: args.noRepair ? null : {
       deadlineMinutes: profile.repair?.deadlineMinutes ?? defaultRepairDeadlineMinutes,
       maxAttempts: profile.repair?.maxAttempts ?? defaultRepairMaxAttempts,

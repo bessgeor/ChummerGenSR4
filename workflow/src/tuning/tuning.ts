@@ -68,10 +68,22 @@ export function contextSection(tuning: Tuning | null, printed: readonly string[]
   return ["", "CONTEXT (untrusted data): not printed here. Read context.json in your working folder before you answer; it is the sealed context."];
 }
 
+/** The job kinds a run's diagnosis dispatches: none without diagnosis or with --only of an earlier node. */
+export function dispatchedJobKinds(options: { readonly diagnosis: boolean; readonly only: string | null }): ("hypothesis" | "challenge")[] {
+  if (!options.diagnosis || (options.only !== null && options.only !== "diagnose")) return [];
+  return ["hypothesis", "challenge"];
+}
+
 /** The configurations a thread dispatches, by job kind; a job kind without one uses the code's prompt. */
 export type DispatchedTuning = Readonly<Partial<Record<EvaluatedJobKind, Tuning>>>;
 
 /** The configuration of a job kind in a thread's options; a thread stored before tuning existed has none. */
 export function tuningOf(dispatched: DispatchedTuning | undefined, jobKind: EvaluatedJobKind): Tuning | null {
   return dispatched?.[jobKind] ?? null;
+}
+
+/** The configuration a thread's job of a kind is prompted with; one gone stale since the thread started is a setup error. */
+export function dispatchedTuningOf(dispatched: DispatchedTuning | undefined, jobKind: EvaluatedJobKind): Tuning | null {
+  const tuning = tuningOf(dispatched, jobKind);
+  return tuning === null ? null : requireCurrent(tuning, `The thread's ${jobKind} configuration`);
 }

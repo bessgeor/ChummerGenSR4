@@ -15,6 +15,7 @@ import { SetupError } from "../host/setup-error.js";
 import type { RunOptions } from "../options/run-options.js";
 import { readDocument } from "../steps/read-document.js";
 import { TriageDocumentSchema } from "../triage/triage-document.js";
+import { dispatchedTuningOf, tunedPromptVersion } from "../tuning/tuning.js";
 import { judge, observe, planCheck, type CheckResult, type ClusterCheck } from "./check.js";
 import type { CheckCapture } from "./check-capture.js";
 import type { ClusterDiagnosis, ClusterUpdate, QuotaWaitMark } from "./cluster-diagnosis.js";
@@ -193,7 +194,7 @@ export class DiagnosisService {
     return { update: { clusterId, status: "budget_exhausted" }, chargedMs: 0 };
   }
 
-  private async runJob(kind: JobKind, input: JobInput, store: BaseStore): Promise<JobStep> {
+  private async runJob(kind: "hypothesis" | "challenge", input: JobInput, store: BaseStore): Promise<JobStep> {
     const { cluster, options } = input;
     const label = `${kind} ${cluster.clusterId}`;
     const budgetMs = options.agents.runBudgetMinutes * 60_000;
@@ -205,6 +206,7 @@ export class DiagnosisService {
     if (kind === "challenge" && hypothesis === null) throw new Error(`${label}: there is no hypothesis to challenge.`);
     const { recordId, unlisted } = await this.nextRecord(store, input.threadId, cluster, kind);
     const choice = options.agents.jobs[kind];
+    const tuning = dispatchedTuningOf(options.tuning, kind);
     const scratch = this.dependencies.createScratchFolder("workflow-job-");
     let started = this.dependencies.now();
     let result: AgentResult<unknown> | NotStarted;
@@ -229,9 +231,9 @@ export class DiagnosisService {
       this.dependencies.log(`${label}: running on ${choice.provider} (${choice.model ?? "default model"}, effort ${choice.effort}).`);
       const runner = this.dependencies.agents(options.agents);
       result = kind === "hypothesis"
-        ? await runner.run<HypothesisOutput>({ ...common, prompt: hypothesisPrompt(manifest, paths), schema: HypothesisOutputSchema,
+        ? await runner.run<HypothesisOutput>({ ...common, prompt: hypothesisPrompt(manifest, paths, tuning), schema: HypothesisOutputSchema,
           validate: (output) => validateHypothesis(output, manifest, folders.source) })
-        : await runner.run<ChallengeOutput>({ ...common, prompt: challengePrompt(manifest, hypothesis!, paths), schema: ChallengeOutputSchema,
+        : await runner.run<ChallengeOutput>({ ...common, prompt: challengePrompt(manifest, hypothesis!, paths, tuning), schema: ChallengeOutputSchema,
           validate: (output) => validateChallenge(output, hypothesis!, manifest, folders.source) });
     } finally {
       // A leftover copy is not a failure of the job: its result is still recorded, and the copy is named for the operator.
@@ -246,7 +248,7 @@ export class DiagnosisService {
     const record: EvalRecord = {
       schemaVersion: 2, recordId, jobKind: kind, origin: "workflow", threadId: input.threadId, subject: { kind: "discrepancy-cluster", id: cluster.clusterId },
       challenged: kind === "challenge" ? cluster.hypothesis!.recordId : null,
-      contextHash: cluster.contextHash, promptVersion: kind === "hypothesis" ? hypothesisPromptVersionOf(manifest) : challengePromptVersion,
+      contextHash: cluster.contextHash, promptVersion: tunedPromptVersion(kind === "hypothesis" ? hypothesisPromptVersionOf(manifest) : challengePromptVersion, tuning),
       agent: { provider: choice.provider, model: choice.model, effort: choice.effort },
       startedUtc: started.toISOString(), finishedUtc: finished.toISOString(), durationMs: measuredDuration(label, result),
       usage: result.usage,
