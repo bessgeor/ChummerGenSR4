@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { join, resolve } from "node:path";
 import { CommandOptions } from "../evals/command-options.js";
 import { runDependencies, type EvalContext } from "../evals/eval-context.js";
@@ -8,6 +9,7 @@ import { SetupError } from "../host/setup-error.js";
 import type { ComparisonSummary } from "./active-configuration.js";
 import { activate, entryName, rollback } from "./activation.js";
 import { candidatesFolder, parseTuningFile, storeCandidate } from "./candidates.js";
+import { cycleFolder, resumeCycle, startCycle, type Cycle, type CycleDependencies } from "./cycle.js";
 import { defaultMaximumExposures, openHoldout, type HoldoutDependencies } from "./holdout.js";
 import { proposeCandidate, type TuneDependencies } from "./propose.js";
 import { requireCurrent } from "./tuning.js";
@@ -20,7 +22,10 @@ export const tuneUsage = `  tune add --file <json>          store a tuning confi
   tune activate --run <run> --baseline <run> --metric <m> --min-pass <0-1> [--max-mean-cost-usd <usd>]
                                   activate the candidate of a holdout run with its certificate (workflow/evals/tuning/)
   tune rollback --job <kind> [--reason <text>]
-                                  restore the job kind's previous configuration and certificate`;
+                                  restore the job kind's previous configuration and certificate
+  tune cycle --dataset <folder> --min-pass <0-1> [--metric <m>] [--candidates <1-3>] [--repeat <n>] [--max-exposures <1-3>] [--max-mean-cost-usd <usd>]
+                                  development baseline, proposals, holdout and activation in one resumable cycle
+  tune cycle --resume <cycle>     continue a stopped cycle with its stored options`;
 
 type TuneCommand = (args: readonly string[], context: EvalContext) => Promise<number>;
 
@@ -120,7 +125,48 @@ export function comparisonLine(comparison: ComparisonSummary): string {
     + `95% t interval ${interval}: ${comparison.verdict}; model time ${comparison.modelTimeMeanDifferenceMs === null ? "n/a" : `${(comparison.modelTimeMeanDifferenceMs / 1000).toFixed(1)} s`}`;
 }
 
-const commands: Readonly<Record<string, TuneCommand>> = { add, propose, holdout, activate: activateCommand, rollback: rollbackCommand };
+const cycleCommand: TuneCommand = async (args, context) => {
+  const options = CommandOptions.parse("tune cycle", args, ["dataset", "metric", "min-pass", "candidates", "repeat", "max-exposures", "max-mean-cost-usd", "resume"]);
+  const dependencies: CycleDependencies = {
+    run: holdoutDependencies(context), tune: tuneDependencies(context), evalsFolder: context.paths.evalsFolder, tuningFolder: context.tuningFolder(),
+    certificatesFolder: context.certificatesFolder(), newRunId: () => newEvalRunId(context.now()),
+  };
+  const resumed = options.text("resume");
+  let cycle: Cycle;
+  if (resumed !== null) {
+    for (const other of ["dataset", "metric", "min-pass", "candidates", "repeat", "max-exposures", "max-mean-cost-usd"]) {
+      if (options.text(other) !== null) throw new SetupError(`--resume takes no --${other}: a cycle keeps the options it was started with.`);
+    }
+    cycle = await resumeCycle(dependencies, resumed);
+  } else {
+    options.required("min-pass");
+    const cycleId = `tc-${context.now().toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "")}-${randomBytes(4).toString("hex")}`;
+    cycle = await startCycle(dependencies, cycleId, {
+      dataset: resolve(options.required("dataset")), metric: options.text("metric") === null ? null : options.choice("metric", metrics, "prediction"),
+      minPass: options.number("min-pass", 0, 0, 1), candidates: options.number("candidates", 1, 1, 3, true), repeat: options.number("repeat", 1, 1, 100, true),
+      maxExposures: options.number("max-exposures", defaultMaximumExposures, 1, defaultMaximumExposures, true),
+      maxMeanCostUsd: options.text("max-mean-cost-usd") === null ? null : options.number("max-mean-cost-usd", 0, Number.MIN_VALUE, Number.MAX_VALUE),
+    });
+  }
+  for (const line of cycleLines(cycle)) context.log(line);
+  context.log(`Cycle folder: ${cycleFolder(context.paths.evalsFolder, cycle.cycleId)}`);
+  return cycle.outcome === "rejected" ? 1 : cycle.outcome === "failed" ? 2 : 0;
+};
+
+/** The cycle's runs, comparisons and outcome, with n and the 95% interval of every difference. */
+export function cycleLines(cycle: Cycle): string[] {
+  return [
+    `Tuning cycle ${cycle.cycleId} (${cycle.jobKind}, metric ${cycle.options.metric}): ${cycle.outcome}; active before: ${cycle.active}.`,
+    `  development baseline: ${cycle.baseline ?? "none"}`,
+    ...cycle.proposals.map((proposal, index) => `  proposal ${index + 1}: ${proposal.outcome}${proposal.candidate === null ? "" : ` ${proposal.candidate}, run ${proposal.run ?? "none"}`}`
+      + `${proposal.development === null ? "" : `; ${comparisonLine(proposal.development)}`}`),
+    ...(cycle.holdout === null ? [] : [`  holdout: ${cycle.selected} as run ${cycle.holdout.run}${cycle.holdout.refused === null ? "" : " (refused)"}; test baseline ${cycle.testBaseline ?? "none"}`]),
+    ...(cycle.activation?.comparison == null ? [] : [`  test: ${comparisonLine(cycle.activation.comparison)}`]),
+    ...cycle.reasons.map((reason) => `  ${reason}`),
+  ];
+}
+
+const commands: Readonly<Record<string, TuneCommand>> = { add, propose, holdout, activate: activateCommand, rollback: rollbackCommand, cycle: cycleCommand };
 
 /** Runs a `tune` subcommand and returns its exit status; a setup error is thrown. */
 export async function runTuneCommand(args: readonly string[], context: EvalContext): Promise<number> {
