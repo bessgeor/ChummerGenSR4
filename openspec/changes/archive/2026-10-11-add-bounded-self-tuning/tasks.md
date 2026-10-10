@@ -19,9 +19,9 @@
 
 ## 5. Cycle and docs
 
-- [x] 5.1 Run the tuning cycle (`tune cycle`, `--resume`) and document tuning in `AGENTS.md` and `README.md`. Evidence: workflow tests with a fake agent runner for the stage order, `no_improvement`, `rejected`, `activated` and a resume after a kill; `npm run workflow:typecheck` and `npm run workflow:test` pass.
+- [x] 5.1 Run the tuning cycle (`tune cycle`, `--resume`) and document tuning in `AGENTS.md` and `README.md`. Evidence: workflow tests with a fake agent runner for the stage order, `no_improvement`, `rejected`, `activated` and a resume after a kill; `npm run workflow:typecheck` passes and every workflow test file passes (in two invocations, recorded in `verification.md`).
 
 ## 6. Verification and archive
 
 - [x] 6.1 Run a tuning cycle live on a frozen dataset, then a live `npm start` run and a live `npm run discover` thread started with the configuration it activated (the discovery thread's scenario jobs dispatch with it); record in `verification.md` the cycle's runs, the paired deltas with n and 95% intervals, the holdout and activation outcome, the dispatched prompt versions, a deliberate kill and resume, the canonical hash before and after, execution outcomes apart from visual results, fixture-tested scope apart from live evidence, and what remains unverified.
-- [ ] 6.2 Archive the change with `openspec archive add-bounded-self-tuning`. Evidence: `npm run openspec:validate` passes after the archive.
+- [x] 6.2 Archive the change with `openspec archive add-bounded-self-tuning`. Evidence: `npm run openspec:validate` passes after the archive.
