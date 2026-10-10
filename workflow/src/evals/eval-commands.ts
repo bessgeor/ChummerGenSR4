@@ -26,6 +26,7 @@ import { snapshotBaseCheck } from "./snapshot-base.js";
 import { compareThreads, threadComparisonLines, threadMeasures } from "./thread-comparison.js";
 import { defaultQueueOptions, queueLines, reviewQueue } from "./review-queue.js";
 import { requireNoHoldoutExposure, selectedTuning } from "../tuning/run-tuning.js";
+import { runTuneCommand, tuneUsage } from "../tuning/tune-commands.js";
 
 export const evalUsage = `Usage: npm run eval -- <command> [options]
 
@@ -51,8 +52,9 @@ export const evalUsage = `Usage: npm run eval -- <command> [options]
                                   fix rate and model time, with 95% confidence intervals
   certify --run <run> --metric prediction|rootCause|valid|reached --min-pass <0-1> [--max-mean-cost-usd <usd>]
                                   certify the run's job kind configuration for unattended runs (npm start or npm run discover -- --unattended)
+${tuneUsage}
 
-Exit status: 0 done, 1 certificate refused, 2 a grader job failed, 3 setup error.`;
+Exit status: 0 done, 1 certificate, holdout or activation refused, 2 a grader or tune job failed, 3 setup error.`;
 
 /** What the evaluation commands use; the composition root makes the real ones. */
 export type EvalContext = {
@@ -266,7 +268,9 @@ const certify: Command = async (args, context) => {
   return 0;
 };
 
-const commands: Readonly<Record<string, Command>> = { records, benchmark, hindsight, grade, queue, freeze, run, compare, "compare-threads": compareThreadsCommand, certify };
+const commands: Readonly<Record<string, Command>> = {
+  records, benchmark, hindsight, grade, queue, freeze, run, compare, "compare-threads": compareThreadsCommand, certify, tune: runTuneCommand,
+};
 
 /** Runs one evaluation command and returns its exit status; a setup error is thrown. */
 export async function runEvalCommand(args: readonly string[], context: EvalContext): Promise<number> {

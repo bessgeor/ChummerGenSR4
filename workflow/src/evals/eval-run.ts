@@ -5,14 +5,15 @@ import { jobKinds, type AgentChoice, type JobKind } from "../agents/agent-job.js
 import type { AgentSettings } from "../agents/agent-settings.js";
 import type { ContextManifest } from "../diagnosis/context.js";
 import { ChallengeOutputSchema, HypothesisOutputSchema, type ChallengeOutput, type HypothesisOutput } from "../diagnosis/job-schemas.js";
-import { challengePrompt, hypothesisPrompt, withoutPriors } from "../diagnosis/prompts.js";
+import { challengePrompt, hypothesisPrompt, withoutPriors, type PromptPaths } from "../diagnosis/prompts.js";
 import { validateChallenge, validateHypothesis } from "../diagnosis/validation.js";
 import { SetupError } from "../host/setup-error.js";
+import { compiledFoldersIn } from "../compiled-source.js";
 import { readDocument } from "../steps/read-document.js";
 import { requireCurrent, tunedPromptVersion, tuningId, type Tuning } from "../tuning/tuning.js";
 import { datasetFolders, loadDataset, type DatasetItem, type Partition } from "./dataset.js";
 import { loadDiscoveryDataset } from "./discovery-dataset.js";
-import { runDiscoverySample } from "./discovery-eval-run.js";
+import { discoveryPrompt, runDiscoverySample } from "./discovery-eval-run.js";
 import { runEvalSample, verdictText, type EvalJob, type SampleScores } from "./eval-job.js";
 import {
   evaluatedJobKinds, promptVersions, RunSettingsSchema, SampleSchema, type EvalRunDependencies, type EvaluatedJobKind, type RunPartition, type RunSettings, type Sample,
@@ -84,18 +85,30 @@ export function readRun(folder: string): { settings: RunSettings; samples: Sampl
   return { settings, samples };
 }
 
-/** A loaded dataset of any evaluated job kind: its identity, its items, and how one of its samples runs. */
-type RunnableDataset = {
+/**
+ * A loaded dataset of any evaluated job kind: its identity, its items, how one of its samples runs, the prompt an
+ * item's job gets with a configuration, and what an item's answers are scored against.
+ */
+export type RunnableDataset = {
   readonly jobKind: RunSettings["jobKind"];
   readonly name: string;
   readonly version: number;
   readonly hash: string;
+  readonly folder: string;
   readonly items: readonly { readonly itemId: string; readonly partition: Partition }[];
   readonly run: (context: SampleContext, itemId: string, repetition: number) => Promise<Sample>;
+  /** The prompt with the item's compiled folders, as a job sees it in the given folders. */
+  readonly prompt: (itemId: string, folders: Pick<PromptPaths, "contextFolder" | "snapshotFolder">, tuning: Tuning | null) => string;
+  readonly reference: (itemId: string) => unknown;
 };
 
 function diagnosisScores(value: Scores): SampleScores {
   return { prediction: value.prediction, rootCause: value.rootCause, valid: null, reached: null };
+}
+
+/** The prompt of a hypothesis or challenge item's job with a configuration: the one the job is sent and the one a dataset shows. */
+function diagnosisPrompt(jobKind: "hypothesis" | "challenge", manifest: ContextManifest, item: DatasetItem, paths: PromptPaths, tuning: Tuning | null): string {
+  return jobKind === "hypothesis" ? hypothesisPrompt(withoutPriors(manifest), paths, tuning) : challengePrompt(manifest, item.hypothesis!, paths, tuning);
 }
 
 function diagnosisSample(context: SampleContext, item: DatasetItem, manifest: ContextManifest, repetition: number): Promise<Sample> {
@@ -110,32 +123,41 @@ function diagnosisSample(context: SampleContext, item: DatasetItem, manifest: Co
   };
   if (context.settings.jobKind === "hypothesis") {
     const job: EvalJob<HypothesisOutput> = {
-      ...common, prompt: (paths) => hypothesisPrompt(withoutPriors(manifest), paths, context.settings.tuning), schema: HypothesisOutputSchema,
+      ...common, prompt: (paths) => diagnosisPrompt("hypothesis", manifest, item, paths, context.settings.tuning), schema: HypothesisOutputSchema,
       validate: (output) => validateHypothesis(output, manifest, sourceCopy), score: (output) => diagnosisScores(scoreHypothesis(output, item)),
     };
     return runEvalSample(context, job, repetition);
   }
   const job: EvalJob<ChallengeOutput> = {
-    ...common, prompt: (paths) => challengePrompt(manifest, item.hypothesis!, paths, context.settings.tuning), schema: ChallengeOutputSchema,
+    ...common, prompt: (paths) => diagnosisPrompt("challenge", manifest, item, paths, context.settings.tuning), schema: ChallengeOutputSchema,
     validate: (output) => validateChallenge(output, item.hypothesis!, manifest, sourceCopy), score: (output) => diagnosisScores(scoreChallenge(output, item)),
   };
   return runEvalSample(context, job, repetition);
 }
 
 /** Loads a dataset of any job kind, verifying its hash and copies. */
-async function loadRunnable(folder: string): Promise<RunnableDataset> {
+export async function loadRunnable(folder: string): Promise<RunnableDataset> {
   const jobKind = datasetJobKind(folder);
   if (jobKind === "rank" || jobKind === "scenario") {
     const { dataset, contexts } = await loadDiscoveryDataset(folder);
+    const item = (itemId: string) => dataset.items.find((entry) => entry.itemId === itemId)!;
     return {
-      jobKind: dataset.jobKind, name: dataset.name, version: dataset.version, hash: dataset.datasetHash, items: dataset.items,
-      run: (context, itemId, repetition) => runDiscoverySample(context, dataset.items.find((item) => item.itemId === itemId)!, contexts.get(itemId)!, repetition),
+      jobKind: dataset.jobKind, name: dataset.name, version: dataset.version, hash: dataset.datasetHash, folder, items: dataset.items,
+      run: (context, itemId, repetition) => runDiscoverySample(context, item(itemId), contexts.get(itemId)!, repetition),
+      prompt: (itemId, folders, tuning) => discoveryPrompt(contexts.get(itemId)!, { ...folders, compiledFolders: compiledFoldersIn(datasetFolders(folder).source(item(itemId).sourceIdentity)) }, tuning),
+      reference: (itemId) => ({ gold: item(itemId).gold }),
     };
   }
   const { dataset, manifests } = await loadDataset(folder);
+  const item = (itemId: string) => dataset.items.find((entry) => entry.itemId === itemId)!;
   return {
-    jobKind: dataset.jobKind, name: dataset.name, version: dataset.version, hash: dataset.datasetHash, items: dataset.items,
-    run: (context, itemId, repetition) => diagnosisSample(context, dataset.items.find((item) => item.itemId === itemId)!, manifests.get(itemId)!, repetition),
+    jobKind: dataset.jobKind, name: dataset.name, version: dataset.version, hash: dataset.datasetHash, folder, items: dataset.items,
+    run: (context, itemId, repetition) => diagnosisSample(context, item(itemId), manifests.get(itemId)!, repetition),
+    prompt: (itemId, folders, tuning) => {
+      const paths = { ...folders, compiledFolders: compiledFoldersIn(datasetFolders(folder).source(item(itemId).sourceIdentity)) };
+      return diagnosisPrompt(dataset.jobKind, manifests.get(itemId)!, item(itemId), paths, tuning);
+    },
+    reference: (itemId) => ({ observations: item(itemId).observations, gold: item(itemId).gold }),
   };
 }
 

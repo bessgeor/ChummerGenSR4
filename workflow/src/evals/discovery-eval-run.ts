@@ -6,6 +6,8 @@ import { validateRank, validateScenario } from "../discovery/validation.js";
 import { datasetFolders } from "./dataset.js";
 import type { DiscoveryDatasetItem } from "./discovery-dataset.js";
 import { failedDiscoveryScores, scoreRank, scoreScenario, type DiscoveryScores } from "./discovery-scoring.js";
+import type { PromptPaths } from "../diagnosis/prompts.js";
+import type { Tuning } from "../tuning/tuning.js";
 import { runEvalSample, verdictText, type EvalJob, type SampleScores } from "./eval-job.js";
 import type { Sample, SampleContext } from "./eval-sample.js";
 
@@ -17,6 +19,11 @@ function describe(value: SampleScores): string {
   return `valid ${verdictText(value.valid)}, reached ${verdictText(value.reached)}`;
 }
 
+/** The prompt of a rank or scenario item's job with a configuration. */
+export function discoveryPrompt(frozen: RankContext | ScenarioContext, paths: PromptPaths, tuning: Tuning | null): string {
+  return frozen.kind === "rank" ? rankPrompt(frozen, paths, tuning) : scenarioPrompt(frozen, paths, tuning);
+}
+
 /** Runs one sample of a rank or scenario item: the current prompt on the frozen context, scored by `valid` and `reached`. */
 export function runDiscoverySample(context: SampleContext, item: DiscoveryDatasetItem, frozen: RankContext | ScenarioContext, repetition: number): Promise<Sample> {
   const copies = datasetFolders(context.settings.dataset.folder);
@@ -26,14 +33,14 @@ export function runDiscoverySample(context: SampleContext, item: DiscoveryDatase
   };
   if (frozen.kind === "rank") {
     const job: EvalJob<RankOutput> = {
-      ...common, subject: { kind: "discovery-thread", id: item.key }, prompt: (paths) => rankPrompt(frozen, paths, context.settings.tuning), schema: RankOutputSchema,
+      ...common, subject: { kind: "discovery-thread", id: item.key }, prompt: (paths) => discoveryPrompt(frozen, paths, context.settings.tuning), schema: RankOutputSchema,
       validate: (output) => validateRank(output, frozen), score: (output) => scores(scoreRank(output, item)),
     };
     return runEvalSample(context, job, repetition);
   }
   const labels = readLabels(copies.context(item.contextHash), frozen);
   const job: EvalJob<ScenarioOutput> = {
-    ...common, subject: { kind: "discovery-target", id: item.key }, prompt: (paths) => scenarioPrompt(frozen, paths, context.settings.tuning), schema: ScenarioOutputSchema,
+    ...common, subject: { kind: "discovery-target", id: item.key }, prompt: (paths) => discoveryPrompt(frozen, paths, context.settings.tuning), schema: ScenarioOutputSchema,
     validate: (output) => validateScenario(output, frozen), score: (output) => scores(scoreScenario(output, item, frozen, labels)),
   };
   return runEvalSample(context, job, repetition);

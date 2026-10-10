@@ -100,13 +100,13 @@ export class FakeAgents implements AgentRunner {
     await this.place();
     this.peak = Math.max(this.peak, this.running);
     if (job.mayStart?.() === false) {
-      this.refusedWithCopy.push(existsSync(job.workspace.folder) || existsSync(job.workspace.readOnly[0]!));
+      this.refusedWithCopy.push(existsSync(job.workspace.folder) || (job.workspace.readOnly[0] !== undefined && existsSync(job.workspace.readOnly[0])));
       this.release();
       return notStarted;
     }
     const call: JobCall = {
       kind: job.kind, cluster: job.label.split(" ")[1]!, prompt: job.prompt, images: job.images, provider: job.choice.provider,
-      workspace: { ...job.workspace, contextFiles: readdirSync(job.workspace.folder), snapshotFiles: readdirSync(job.workspace.readOnly[0]!) },
+      workspace: { ...job.workspace, contextFiles: readdirSync(job.workspace.folder), snapshotFiles: job.workspace.readOnly[0] === undefined ? [] : readdirSync(job.workspace.readOnly[0]) },
     };
     this.calls.push(call);
     const attempt = this.calls.filter((other) => other.kind === call.kind && other.cluster === call.cluster).length;
