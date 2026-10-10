@@ -18,4 +18,4 @@
 ## 4. Verification and archive
 
 - [x] 4.1 Run `npm start -- --case-file parity/cases/rich-scenarios.json` live with the sourcebook overlay and the shared canonical cache; record in `verification.md` the canonical hash before and after, each case's execution outcome apart from its visual result, the comparer's completeness, the bindings the inventory proved, fixture-tested scope apart from live evidence, and what remains unverified.
-- [ ] 4.2 Archive the change with `openspec archive add-rich-scenarios`. Evidence: `npm run openspec:validate` passes after the archive.
+- [x] 4.2 Archive the change with `openspec archive add-rich-scenarios`. Evidence: `npm run openspec:validate` passes after the archive.
