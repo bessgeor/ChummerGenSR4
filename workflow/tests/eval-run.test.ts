@@ -232,7 +232,9 @@ test("the paired comparison gives the t interval and verdict, and refuses runs i
   writeRun(join(root, "gold-a"), {}, [true, null, null, null, null]);
   writeRun(join(root, "gold-b"), {}, [false, true, null, null, null]);
   const one = compareRuns(join(root, "gold-a"), join(root, "gold-b"), "rootCause", new Date());
-  deepStrictEqual([one.pairs, one.verdict, one.interval], [1, "too-few-pairs", null]);
+  deepStrictEqual([one.pairs, one.verdict, one.interval, one.unpaired], [1, "too-few-pairs", null, 0]);
+  // An item the baseline has a value on and the candidate has none is in no pair, and is counted.
+  equal(compareRuns(join(root, "gold-b"), join(root, "gold-a"), "rootCause", new Date()).unpaired, 1);
 
   writeRun(join(root, "other-dataset"), { dataset: { folder: "e", name: "e", version: 1, hash: "other" } }, [true, true, true, true, true]);
   writeRun(join(root, "development"), { partition: "development" }, [true, true, true, true, true]);

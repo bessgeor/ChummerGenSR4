@@ -99,6 +99,12 @@ export function readRun(folder: string): { settings: RunSettings; samples: Sampl
   return { settings, samples };
 }
 
+/** The planned samples of a run that have not finished: a run with none missing is complete. */
+export function missingSamples(settings: RunSettings, samples: readonly Sample[]): string[] {
+  const finished = new Set(samples.map((sample) => sample.key));
+  return settings.samples.filter((key) => !finished.has(key));
+}
+
 /**
  * A loaded dataset of any evaluated job kind: its identity, its items, how one of its samples runs, the prompt an
  * item's job gets with a configuration, and what an item's answers are scored against.
@@ -109,7 +115,8 @@ export type RunnableDataset = {
   readonly version: number;
   readonly hash: string;
   readonly folder: string;
-  readonly items: readonly { readonly itemId: string; readonly partition: Partition }[];
+  /** `partitionKey` is what decides an item's partition (a discrepancy cluster, a discovery target): the same in every dataset that holds the item. */
+  readonly items: readonly { readonly itemId: string; readonly partition: Partition; readonly partitionKey: string }[];
   readonly run: (context: SampleContext, itemId: string, repetition: number) => Promise<Sample>;
   /** The prompt with the item's compiled folders, as a job sees it in the given folders. */
   readonly prompt: (itemId: string, folders: Pick<PromptPaths, "contextFolder" | "snapshotFolder">, tuning: Tuning | null) => string;
@@ -156,7 +163,8 @@ export async function loadRunnable(folder: string): Promise<RunnableDataset> {
     const { dataset, contexts } = await loadDiscoveryDataset(folder);
     const item = (itemId: string) => dataset.items.find((entry) => entry.itemId === itemId)!;
     return {
-      jobKind: dataset.jobKind, name: dataset.name, version: dataset.version, hash: dataset.datasetHash, folder, items: dataset.items,
+      jobKind: dataset.jobKind, name: dataset.name, version: dataset.version, hash: dataset.datasetHash, folder,
+      items: dataset.items.map((entry) => ({ itemId: entry.itemId, partition: entry.partition, partitionKey: entry.key })),
       run: (context, itemId, repetition) => runDiscoverySample(context, item(itemId), contexts.get(itemId)!, repetition),
       prompt: (itemId, folders, tuning) => discoveryPrompt(contexts.get(itemId)!, { ...folders, compiledFolders: compiledFoldersIn(datasetFolders(folder).source(item(itemId).sourceIdentity)) }, tuning),
       reference: (itemId) => ({ gold: item(itemId).gold }),
@@ -165,7 +173,8 @@ export async function loadRunnable(folder: string): Promise<RunnableDataset> {
   const { dataset, manifests } = await loadDataset(folder);
   const item = (itemId: string) => dataset.items.find((entry) => entry.itemId === itemId)!;
   return {
-    jobKind: dataset.jobKind, name: dataset.name, version: dataset.version, hash: dataset.datasetHash, folder, items: dataset.items,
+    jobKind: dataset.jobKind, name: dataset.name, version: dataset.version, hash: dataset.datasetHash, folder,
+    items: dataset.items.map((entry) => ({ itemId: entry.itemId, partition: entry.partition, partitionKey: entry.clusterId })),
     run: (context, itemId, repetition) => diagnosisSample(context, item(itemId), manifests.get(itemId)!, repetition),
     prompt: (itemId, folders, tuning) => {
       const paths = { ...folders, compiledFolders: compiledFoldersIn(datasetFolders(folder).source(item(itemId).sourceIdentity)) };

@@ -14,6 +14,8 @@ export const ComparisonSummarySchema = z.strictObject({
   candidate: z.string().min(1),
   metric: z.enum(metrics),
   pairs: z.number().int().nonnegative(),
+  /** Items the baseline has a value on and the candidate has none: a candidate that abstains where the baseline answered is not better. */
+  unpaired: z.number().int().nonnegative(),
   meanDifference: z.number().nullable(),
   interval: z.strictObject({ low: z.number(), high: z.number() }).nullable(),
   verdict: z.enum(["improved", "worse", "no-difference", "too-few-pairs"]),

@@ -1,7 +1,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { compareRuns, type Comparison } from "../evals/comparison.js";
-import { readRun, runFolders, RunSettingsSchema, type RunSettings } from "../evals/eval-run.js";
+import { missingSamples, readRun, runFolders, RunSettingsSchema, type RunSettings } from "../evals/eval-run.js";
 import type { Metric } from "../evals/metrics.js";
 import { SetupError } from "../host/setup-error.js";
 import { readDocument } from "../steps/read-document.js";
@@ -11,23 +11,33 @@ import { tuningId } from "./tuning.js";
 /** What tuning keeps of a paired comparison. */
 export function comparisonSummary(comparison: Comparison): ComparisonSummary {
   return {
-    baseline: comparison.baseline, candidate: comparison.candidate, metric: comparison.metric, pairs: comparison.pairs, meanDifference: comparison.meanDifference,
+    baseline: comparison.baseline, candidate: comparison.candidate, metric: comparison.metric, pairs: comparison.pairs, unpaired: comparison.unpaired, meanDifference: comparison.meanDifference,
     interval: comparison.interval, verdict: comparison.verdict, modelTimeMeanDifferenceMs: comparison.modelTime.meanDifferenceMs,
   };
 }
 
-/** The development gate: a higher mean of the metric, or the same mean in less model time. */
+/** Means of shares of repetitions (thirds, for three) differ by rounding noise of this size when they are equal: a smaller difference is none. */
+export const differenceTolerance = 1e-9;
+
+/** The development gate: a higher mean of the metric, or the same mean in less model time, with a value on every item the baseline has one on. */
 export function passesDevelopmentGate(summary: ComparisonSummary): boolean {
-  if (summary.meanDifference === null) return false;
-  return summary.meanDifference > 0 || (summary.meanDifference === 0 && summary.modelTimeMeanDifferenceMs !== null && summary.modelTimeMeanDifferenceMs < 0);
+  if (summary.meanDifference === null || summary.unpaired > 0) return false;
+  if (summary.meanDifference > differenceTolerance) return true;
+  return Math.abs(summary.meanDifference) <= differenceTolerance && summary.modelTimeMeanDifferenceMs !== null && summary.modelTimeMeanDifferenceMs < 0;
+}
+
+/** Orders candidates that passed the gate: the higher mean difference first, then the lower model time difference. */
+export function compareCandidates(left: ComparisonSummary, right: ComparisonSummary): number {
+  const byMean = right.meanDifference! - left.meanDifference!;
+  if (Math.abs(byMean) > differenceTolerance) return byMean;
+  return (left.modelTimeMeanDifferenceMs ?? 0) - (right.modelTimeMeanDifferenceMs ?? 0);
 }
 
 /** A run's settings and whether every planned sample finished. */
 export function runState(folder: string): { settings: RunSettings; complete: boolean } {
   if (!existsSync(runFolders(folder).settings)) throw new SetupError(`There is no eval run in ${folder}.`);
   const { settings, samples } = readRun(folder);
-  const finished = new Set(samples.map((sample) => sample.key));
-  return { settings, complete: settings.samples.every((key) => finished.has(key)) };
+  return { settings, complete: missingSamples(settings, samples).length === 0 };
 }
 
 /** Why two runs cannot be a paired baseline and candidate of tuning, besides what `compareRuns` checks: another agent choice. */

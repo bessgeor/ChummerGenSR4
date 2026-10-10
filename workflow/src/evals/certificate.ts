@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { efforts, providers, type JobKind } from "../agents/agent-job.js";
 import type { AgentSettings } from "../agents/agent-settings.js";
+import { SetupError } from "../host/setup-error.js";
 import type { RunOptions } from "../options/run-options.js";
 import { dispatchedJobKinds, tunedPromptVersion, tuningOf, type DispatchedTuning } from "../tuning/tuning.js";
 import { metrics, requireMetric, type Metric } from "./metrics.js";
@@ -37,6 +38,34 @@ export function certificatePath(folder: string, jobKind: JobKind): string {
 
 /** Issues a certificate from a complete test-partition run that meets the thresholds, or returns every reason it does not. */
 export function certify(runFolder: string, thresholds: Thresholds, certificatesFolder: string, now: Date): { certificate: Certificate } | { refused: string[] } {
+  const outcome = certificateFor(runFolder, thresholds, now);
+  if ("refused" in outcome) return outcome;
+  writeCertificate(certificatesFolder, outcome.certificate);
+  return outcome;
+}
+
+/** The job kind's certificate in the folder, or null without one; an unreadable or invalid file is a setup error. */
+export function readCertificate(certificatesFolder: string, jobKind: EvaluatedJobKind): Certificate | null {
+  const path = certificatePath(certificatesFolder, jobKind);
+  if (!existsSync(path)) return null;
+  let parsed;
+  try {
+    parsed = CertificateSchema.safeParse(JSON.parse(readFileSync(path, "utf8")));
+  } catch (error) {
+    throw new SetupError(`The certificate ${path} cannot be read: ${(error as Error).message}`);
+  }
+  if (!parsed.success || parsed.data.jobKind !== jobKind) throw new SetupError(`The certificate ${path} is not a valid ${jobKind} certificate.`);
+  return parsed.data;
+}
+
+/** Writes a certificate over its job kind's earlier one. */
+export function writeCertificate(certificatesFolder: string, certificate: Certificate): void {
+  mkdirSync(certificatesFolder, { recursive: true });
+  writeFileSync(certificatePath(certificatesFolder, certificate.jobKind), `${JSON.stringify(CertificateSchema.parse(certificate), null, 2)}\n`);
+}
+
+/** The certificate a complete test-partition run that meets the thresholds earns, or every reason it does not; nothing is written. */
+export function certificateFor(runFolder: string, thresholds: Thresholds, now: Date): { certificate: Certificate } | { refused: string[] } {
   const { settings, samples } = readRun(runFolder);
   requireMetric(settings.jobKind, thresholds.metric);
   const summary = summarize(settings.runId, settings.jobKind, samples, now);
@@ -63,8 +92,6 @@ export function certify(runFolder: string, thresholds: Thresholds, certificatesF
     metric: thresholds.metric, items: metric.count, passes: metric.passes, rate: metric.rate, interval: metric.interval,
     thresholds: { minPass: thresholds.minPass, maxMeanCostUsd: thresholds.maxMeanCostUsd }, meanCostUsd, issuedUtc: now.toISOString(),
   });
-  mkdirSync(certificatesFolder, { recursive: true });
-  writeFileSync(certificatePath(certificatesFolder, settings.jobKind), `${JSON.stringify(certificate, null, 2)}\n`);
   return { certificate };
 }
 

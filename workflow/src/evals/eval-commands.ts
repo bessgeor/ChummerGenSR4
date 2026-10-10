@@ -20,6 +20,7 @@ import { snapshotBaseCheck } from "./snapshot-base.js";
 import { compareThreads, threadComparisonLines, threadMeasures } from "./thread-comparison.js";
 import { defaultQueueOptions, queueLines, reviewQueue } from "./review-queue.js";
 import { requireNoHoldoutExposure, selectedTuning } from "../tuning/run-tuning.js";
+import { activeOf, measuredOf } from "../tuning/holdout.js";
 import { runTuneCommand, tuneUsage } from "../tuning/tune-commands.js";
 
 export const evalUsage = `Usage: npm run eval -- <command> [options]
@@ -221,6 +222,13 @@ const certify: Command = async (args, context) => {
   options.required("metric");
   options.required("min-pass");
   const folder = context.certificatesFolder();
+  // A job kind's certificate covers what it dispatches: a candidate is certified by tune activate, and nothing else while a configuration is active.
+  const { settings } = readRun(join(context.paths.evalsFolder, "runs", options.required("run")));
+  const active = activeOf(context.tuningFolder(), settings.jobKind);
+  if (measuredOf(settings) !== active) {
+    context.log(`Certificate refused:\n  the run measured ${measuredOf(settings)}, but ${active} is active for ${settings.jobKind}; a candidate is certified by tune activate`);
+    return 1;
+  }
   const outcome = issueCertificate(join(context.paths.evalsFolder, "runs", options.required("run")), {
     metric: options.choice("metric", metrics, "prediction"), minPass: options.number("min-pass", 0, 0, 1),
     maxMeanCostUsd: options.text("max-mean-cost-usd") === null ? null : options.number("max-mean-cost-usd", 0, Number.MIN_VALUE, Number.MAX_VALUE),

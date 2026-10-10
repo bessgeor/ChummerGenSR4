@@ -1,5 +1,5 @@
 import { SetupError } from "../host/setup-error.js";
-import { itemShares, readRun, type RunSettings, type Sample } from "./eval-run.js";
+import { itemShares, missingSamples, readRun, type RunSettings, type Sample } from "./eval-run.js";
 import { requireMetric, type Metric } from "./metrics.js";
 import { mean, pairedStatistics, type Interval } from "./statistics.js";
 
@@ -28,6 +28,8 @@ export type Comparison = {
   readonly metric: Metric;
   /** Items where both runs have a value of the metric; repetitions of an item are one pair. */
   readonly pairs: number;
+  /** Items the baseline has a value of the metric on and the candidate has none (an abstention or a failure): they are in no pair. */
+  readonly unpaired: number;
   readonly baselineRate: number | null;
   readonly candidateRate: number | null;
   readonly meanDifference: number | null;
@@ -44,7 +46,7 @@ export type Comparison = {
 function completeRun(folder: string): { settings: RunSettings; samples: Map<string, Sample> } {
   const { settings, samples } = readRun(folder);
   const byKey = new Map(samples.map((sample) => [sample.key, sample]));
-  const missing = settings.samples.filter((key) => !byKey.has(key));
+  const missing = missingSamples(settings, samples);
   if (missing.length > 0) throw new SetupError(`Eval run ${settings.runId} is not complete: ${missing.length} samples are missing; resume it first.`);
   return { settings, samples: byKey };
 }
@@ -75,6 +77,7 @@ export function compareRuns(baselineFolder: string, candidateFolder: string, met
     candidate: itemShares([...candidate.samples.values()], (sample) => sample[metric]),
   };
   const valued = [...shares.baseline].filter(([itemId]) => shares.candidate.has(itemId)).map(([itemId, share]) => ({ baseline: share, candidate: shares.candidate.get(itemId)! }));
+  const unpaired = [...shares.baseline.keys()].filter((itemId) => !shares.candidate.has(itemId)).length;
   const rate = (side: "baseline" | "candidate") => mean(valued.map((pair) => pair[side]));
   const statistics = pairedStatistics(valued.map((pair) => pair.candidate - pair.baseline));
   const verdict = verdictOf(statistics.interval);
@@ -84,7 +87,7 @@ export function compareRuns(baselineFolder: string, candidateFolder: string, met
   return {
     schemaVersion: 1, baseline: baseline.settings.runId, candidate: candidate.settings.runId,
     dataset: { name: baseline.settings.dataset.name, version: baseline.settings.dataset.version, hash: baseline.settings.dataset.hash },
-    jobKind: baseline.settings.jobKind, partition: baseline.settings.partition, metric, pairs: statistics.count,
+    jobKind: baseline.settings.jobKind, partition: baseline.settings.partition, metric, pairs: statistics.count, unpaired,
     baselineRate: rate("baseline"), candidateRate: rate("candidate"), meanDifference: statistics.mean, standardError: statistics.standardError,
     interval: statistics.interval, verdict,
     modelTime: { meanDifferenceMs: mean(pairs.map((pair) => pair.candidate.durationMs - pair.baseline.durationMs)) },
