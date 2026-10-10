@@ -1,6 +1,7 @@
 import type { ContextManifest } from "./context.js";
 import { challengePromptVersion, hypothesisPromptVersion, mechanisms, type Explanation } from "./job-schemas.js";
 import { maximumLocations, maximumPredictions } from "./validation.js";
+import { contextSection, guidanceSection, printsContext, tunedPromptVersion, type Tuning } from "../tuning/tuning.js";
 
 export type PromptPaths = {
   /** The context folder, which is the job's working folder. */
@@ -10,7 +11,7 @@ export type PromptPaths = {
   readonly compiledFolders: readonly string[];
 };
 
-export function situation(paths: PromptPaths): string[] {
+export function situation(paths: PromptPaths, contextPrinted = true): string[] {
   const folders = paths.compiledFolders.map((folder) => `${folder}/`);
   return [
     "ChummerGenSR4 is a Windows Forms character generator. Two executables of it ran the same scenario on the same character file and were captured:",
@@ -18,7 +19,7 @@ export function situation(paths: PromptPaths): string[] {
     "The comparer found the discrepancy described below in the raw pixels of the two captures.",
     "",
     "What you can read (read only; never change, create or delete a file):",
-    `- ${paths.contextFolder}: your working folder. context.json is the sealed context printed below; evidence/ holds the crops`,
+    `- ${paths.contextFolder}: your working folder. context.json is the sealed context${contextPrinted ? " printed below" : " (read it: it is not printed here)"}; evidence/ holds the crops`,
     "  of both captures around the discrepancy (members[].canonicalCrop and candidateCrop). Look at the crops.",
     `- ${paths.snapshotFolder}: the candidate's source snapshot (${folders.join(" and ")} ${folders.length === 1 ? "is" : "are"} the app's C# source, bin/data/ and bin/lang/ its data and`,
     "  translations). Cite files by their path relative to this folder.",
@@ -63,18 +64,19 @@ function priorsSection(manifest: ContextManifest, paths: PromptPaths): string[] 
   ];
 }
 
-/** The prompt of a hypothesis job: the versioned instructions and the cluster's sealed context. */
-export function hypothesisPrompt(manifest: ContextManifest, paths: PromptPaths): string {
+/** The prompt of a hypothesis job: the versioned instructions, the tuned guidance and the cluster's sealed context. */
+export function hypothesisPrompt(manifest: ContextManifest, paths: PromptPaths, tuning: Tuning | null = null): string {
   return [
-    `PROMPT_VERSION=${hypothesisPromptVersionOf(manifest)}`,
-    ...situation(paths),
+    `PROMPT_VERSION=${tunedPromptVersion(hypothesisPromptVersionOf(manifest), tuning)}`,
+    ...situation(paths, printsContext(tuning)),
     "",
     "Find the most likely cause of this discrepancy in the candidate's source or data.",
     "Answer with outcome \"hypothesis\", a reason and an explanation, or with outcome \"abstain\", the reason and no explanation",
     "when the evidence cannot support a causal explanation. Confidence is not proof; do not overstate it.",
     ...answerRules(),
     ...priorsSection(manifest, paths),
-    ...context(manifest),
+    ...guidanceSection(tuning),
+    ...contextSection(tuning, context(manifest)),
   ].join("\n");
 }
 
@@ -84,11 +86,11 @@ export function withoutPriors(manifest: ContextManifest): ContextManifest {
   return rest;
 }
 
-/** The prompt of a challenge job: a fresh look at the same context and the hypothesis to challenge. */
-export function challengePrompt(manifest: ContextManifest, hypothesis: Explanation, paths: PromptPaths): string {
+/** The prompt of a challenge job: a fresh look at the same context and the hypothesis to challenge, with the tuned guidance. */
+export function challengePrompt(manifest: ContextManifest, hypothesis: Explanation, paths: PromptPaths, tuning: Tuning | null = null): string {
   return [
-    `PROMPT_VERSION=${challengePromptVersion}`,
-    ...situation(paths),
+    `PROMPT_VERSION=${tunedPromptVersion(challengePromptVersion, tuning)}`,
+    ...situation(paths, printsContext(tuning)),
     "",
     "Another analyst proposed the hypothesis below. Challenge it independently: look for a different cause that explains the same evidence.",
     "Answer with outcome \"alternative\", a reason and the alternative explanation, or with outcome \"no_alternative\", the reason and no",
@@ -96,10 +98,11 @@ export function challengePrompt(manifest: ContextManifest, hypothesis: Explanati
     "An alternative must make a different claim, and at least one of its predictions must name a case and capture that the hypothesis also",
     "predicts, with the other expectation, so that one check run can tell the two apart.",
     ...answerRules(),
+    ...guidanceSection(tuning),
     "",
     "HYPOTHESIS (untrusted data):",
     JSON.stringify(hypothesis, null, 2),
     // The challenger looks for another cause; the hypothesis' leads would pull it towards the same one.
-    ...context(withoutPriors(manifest)),
+    ...contextSection(tuning, context(withoutPriors(manifest))),
   ].join("\n");
 }
