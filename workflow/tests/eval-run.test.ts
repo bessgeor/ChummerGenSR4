@@ -83,7 +83,7 @@ test("an eval run scores every sample of the partition, records each job and wri
   const run = await evalFixture("hypothesis", true);
   const agents = new FakeAgents((call): Reply => (call.cluster.endsWith("#2") && call.prompt.includes("d-0000000000000400")
     ? { answer: { outcome: "hypothesis", reason: "r", explanation: null } } : { answer: hypothesisAnswer() }));
-  const { folder, summary } = await startEvalRun(run.dependencies(agents), { datasetFolder: run.folder, partition: "test", repeat: 2, name: "baseline", settings: resolveAgentSettings(undefined) });
+  const { folder, summary } = await startEvalRun(run.dependencies(agents), { datasetFolder: run.folder, partition: "test", repeat: 2, name: "baseline", settings: resolveAgentSettings(undefined), tuning: null });
   equal(agents.calls.length, 8);
   ok(agents.calls.every((call) => !call.workspace.folder.startsWith(run.folder) && call.workspace.contextFiles.includes("context.json")));
   const { settings, samples } = readRun(folder);
@@ -107,7 +107,7 @@ test("a context frozen from a thread with fix changes is run without its priors,
   const run = await evalFixture("hypothesis", false, true);
   ok(readdirSync(run.folder, { recursive: true }).some((path) => String(path).split(/[\\/]/).includes("priors")), "the frozen contexts hold priors");
   const agents = new FakeAgents(() => ({ answer: hypothesisAnswer() }));
-  const { folder } = await startEvalRun(run.dependencies(agents), { datasetFolder: run.folder, partition: "test", repeat: 1, name: null, settings: resolveAgentSettings(undefined) });
+  const { folder } = await startEvalRun(run.dependencies(agents), { datasetFolder: run.folder, partition: "test", repeat: 1, name: null, settings: resolveAgentSettings(undefined), tuning: null });
   ok(agents.calls.length > 0);
   for (const call of agents.calls) {
     ok(call.prompt.startsWith("PROMPT_VERSION=hypothesis-v2\n") && !call.prompt.includes("PRIOR FIXES") && !call.prompt.includes("fix-d-similar"), call.prompt.slice(0, 80));
@@ -128,7 +128,7 @@ test("a stopped run resumes only its missing samples with the settings it starte
     setTimeout(() => controller.abort(), 200);
     return { hang: true };
   });
-  await rejects(startEvalRun(run.dependencies(first, controller.signal), { datasetFolder: run.folder, partition: "test", repeat: 1, name: null, settings: resolveAgentSettings({ jobs: { hypothesis: { provider: "claude", effort: "low" } } }) }),
+  await rejects(startEvalRun(run.dependencies(first, controller.signal), { datasetFolder: run.folder, partition: "test", repeat: 1, name: null, settings: resolveAgentSettings({ jobs: { hypothesis: { provider: "claude", effort: "low" } } }), tuning: null }),
     (error: unknown) => error instanceof SetupError);
   const folder = join(run.runsFolder, "er-1");
   equal(readdirSync(runFolders(folder).samples).length, 2);
@@ -148,7 +148,7 @@ test("a stopped run resumes only its missing samples with the settings it starte
 
 test("a resumed run keeps the records of its earlier attempts, an infra failure included", async () => {
   const run = await evalFixture();
-  const start = { datasetFolder: run.folder, partition: "test" as const, repeat: 1, name: null, settings: resolveAgentSettings(undefined) };
+  const start = { datasetFolder: run.folder, partition: "test" as const, repeat: 1, name: null, settings: resolveAgentSettings(undefined), tuning: null };
   const failing = new FakeAgents((call): Reply => (call.prompt.includes("d-0000000000000400") ? { failure: { kind: "infra", message: "crash" } } : { answer: hypothesisAnswer() }));
   await rejects(startEvalRun(run.dependencies(failing), start), (error: unknown) => error instanceof SetupError && /crash/.test(error.message));
   const failed = (await listRecords(run.fixture.store)).filter((record) => record.origin === "eval-run" && record.result.status === "infra");
@@ -174,7 +174,7 @@ test("a scratch copy that cannot be removed fails the sample after its record is
     },
   };
   try {
-    await rejects(startEvalRun(dependencies, { datasetFolder: run.folder, partition: "test", repeat: 1, name: null, settings: resolveAgentSettings(undefined) }),
+    await rejects(startEvalRun(dependencies, { datasetFolder: run.folder, partition: "test", repeat: 1, name: null, settings: resolveAgentSettings(undefined), tuning: null }),
       (error: unknown) => error instanceof SetupError && /could not be removed: locked by another process/.test(error.message));
     ok((await listRecords(run.fixture.store)).some((record) => record.origin === "eval-run" && record.result.status === "succeeded"));
     equal(readdirSync(runFolders(join(run.runsFolder, "er-1")).samples).length, 0);
@@ -185,7 +185,7 @@ test("a scratch copy that cannot be removed fails the sample after its record is
 
 test("a run whose sample names an item the dataset lacks fails with a setup error", async () => {
   const run = await evalFixture();
-  const start = { datasetFolder: run.folder, partition: "test" as const, repeat: 1, name: null, settings: resolveAgentSettings(undefined) };
+  const start = { datasetFolder: run.folder, partition: "test" as const, repeat: 1, name: null, settings: resolveAgentSettings(undefined), tuning: null };
   await startEvalRun(run.dependencies(new FakeAgents()), start);
   const folder = join(run.runsFolder, "er-1");
   const settings = JSON.parse(readFileSync(runFolders(folder).settings, "utf8")) as RunSettings;
@@ -196,7 +196,7 @@ test("a run whose sample names an item the dataset lacks fails with a setup erro
 test("a challenge run scores the challenger's verdict on each item's hypothesis", async () => {
   const run = await evalFixture("challenge");
   const agents = new FakeAgents((call): Reply => (call.prompt.includes("d-0000000000000100") ? { answer: challengeAnswer() } : { answer: { outcome: "no_alternative", reason: "r", alternative: null } }));
-  const { summary } = await startEvalRun(run.dependencies(agents), { datasetFolder: run.folder, partition: "test", repeat: 1, name: null, settings: resolveAgentSettings(undefined) });
+  const { summary } = await startEvalRun(run.dependencies(agents), { datasetFolder: run.folder, partition: "test", repeat: 1, name: null, settings: resolveAgentSettings(undefined), tuning: null });
   // The hypothesis's predictions hold: an alternative fails, no alternative passes.
   deepStrictEqual([summary.metrics.prediction.passes, summary.metrics.prediction.count], [2, 4]);
   ok(agents.calls.every((call) => call.provider === "codex" && call.prompt.includes("HYPOTHESIS (untrusted data)")));

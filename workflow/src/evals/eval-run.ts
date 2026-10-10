@@ -9,12 +9,14 @@ import { challengePrompt, hypothesisPrompt, withoutPriors } from "../diagnosis/p
 import { validateChallenge, validateHypothesis } from "../diagnosis/validation.js";
 import { SetupError } from "../host/setup-error.js";
 import { readDocument } from "../steps/read-document.js";
+import { requireCurrent, tunedPromptVersion, tuningId, type Tuning } from "../tuning/tuning.js";
 import { datasetFolders, loadDataset, type DatasetItem, type Partition } from "./dataset.js";
 import { loadDiscoveryDataset } from "./discovery-dataset.js";
 import { runDiscoverySample } from "./discovery-eval-run.js";
 import { runEvalSample, verdictText, type EvalJob, type SampleScores } from "./eval-job.js";
 import {
-  evaluatedJobKinds, promptVersions, RunSettingsSchema, SampleSchema, type EvalRunDependencies, type RunPartition, type RunSettings, type Sample, type SampleContext,
+  evaluatedJobKinds, promptVersions, RunSettingsSchema, SampleSchema, type EvalRunDependencies, type EvaluatedJobKind, type RunPartition, type RunSettings, type Sample,
+  type SampleContext,
 } from "./eval-sample.js";
 import { metrics, metricsOfJobKind, type Metric } from "./metrics.js";
 import { failedScores, scoreChallenge, scoreHypothesis, type Scores } from "./scoring.js";
@@ -108,13 +110,13 @@ function diagnosisSample(context: SampleContext, item: DatasetItem, manifest: Co
   };
   if (context.settings.jobKind === "hypothesis") {
     const job: EvalJob<HypothesisOutput> = {
-      ...common, prompt: (paths) => hypothesisPrompt(withoutPriors(manifest), paths), schema: HypothesisOutputSchema,
+      ...common, prompt: (paths) => hypothesisPrompt(withoutPriors(manifest), paths, context.settings.tuning), schema: HypothesisOutputSchema,
       validate: (output) => validateHypothesis(output, manifest, sourceCopy), score: (output) => diagnosisScores(scoreHypothesis(output, item)),
     };
     return runEvalSample(context, job, repetition);
   }
   const job: EvalJob<ChallengeOutput> = {
-    ...common, prompt: (paths) => challengePrompt(manifest, item.hypothesis!, paths), schema: ChallengeOutputSchema,
+    ...common, prompt: (paths) => challengePrompt(manifest, item.hypothesis!, paths, context.settings.tuning), schema: ChallengeOutputSchema,
     validate: (output) => validateChallenge(output, item.hypothesis!, manifest, sourceCopy), score: (output) => diagnosisScores(scoreChallenge(output, item)),
   };
   return runEvalSample(context, job, repetition);
@@ -122,7 +124,7 @@ function diagnosisSample(context: SampleContext, item: DatasetItem, manifest: Co
 
 /** Loads a dataset of any job kind, verifying its hash and copies. */
 async function loadRunnable(folder: string): Promise<RunnableDataset> {
-  const { jobKind } = readDocument(join(folder, "dataset.json"), z.looseObject({ jobKind: z.enum(evaluatedJobKinds) }));
+  const jobKind = datasetJobKind(folder);
   if (jobKind === "rank" || jobKind === "scenario") {
     const { dataset, contexts } = await loadDiscoveryDataset(folder);
     return {
@@ -137,11 +139,24 @@ async function loadRunnable(folder: string): Promise<RunnableDataset> {
   };
 }
 
-export type StartRun = { readonly datasetFolder: string; readonly partition: RunPartition; readonly repeat: number; readonly name: string | null; readonly settings: AgentSettings };
+/** How a run starts: `tuning` is the configuration it measures, or null for the code's prompt. */
+export type StartRun = {
+  readonly datasetFolder: string; readonly partition: RunPartition; readonly repeat: number; readonly name: string | null; readonly settings: AgentSettings;
+  readonly tuning: Tuning | null;
+};
+
+/** The job kind of a dataset folder, read before the dataset is loaded. */
+export function datasetJobKind(folder: string): EvaluatedJobKind {
+  return readDocument(join(folder, "dataset.json"), z.looseObject({ jobKind: z.enum(evaluatedJobKinds) })).jobKind;
+}
 
 /** Starts an eval run of the dataset's job kind with the given agent settings, and runs every sample. */
 export async function startEvalRun(dependencies: EvalRunDependencies, start: StartRun): Promise<{ folder: string; summary: RunSummary }> {
   const dataset = await loadRunnable(start.datasetFolder);
+  if (start.tuning !== null) {
+    if (start.tuning.jobKind !== dataset.jobKind) throw new SetupError(`The tuning configuration ${tuningId(start.tuning)} is for ${start.tuning.jobKind}, the dataset for ${dataset.jobKind}.`);
+    requireCurrent(start.tuning, `The tuning configuration ${tuningId(start.tuning)}`);
+  }
   const items = dataset.items.filter((item) => start.partition === "all" || item.partition === start.partition);
   if (items.length === 0) throw new SetupError(`The dataset ${start.datasetFolder} has no item in the ${start.partition} partition.`);
   const runId = dependencies.newRunId();
@@ -149,7 +164,7 @@ export async function startEvalRun(dependencies: EvalRunDependencies, start: Sta
   const settings = RunSettingsSchema.parse({
     schemaVersion: 1, runId, name: start.name, dataset: { folder: start.datasetFolder, name: dataset.name, version: dataset.version, hash: dataset.hash },
     jobKind: dataset.jobKind, partition: start.partition, repeat: start.repeat, choice: start.settings.jobs[dataset.jobKind],
-    promptVersion: promptVersions[dataset.jobKind], modelPool: start.settings.modelPool, executables: start.settings.executables,
+    promptVersion: tunedPromptVersion(promptVersions[dataset.jobKind], start.tuning), tuning: start.tuning, modelPool: start.settings.modelPool, executables: start.settings.executables,
     samples: items.flatMap((item) => Array.from({ length: start.repeat }, (_, index) => `${item.itemId}-${index + 1}`)),
     startedUtc: dependencies.now().toISOString(),
   });
@@ -163,8 +178,10 @@ export async function resumeEvalRun(dependencies: EvalRunDependencies, runId: st
   const folder = join(dependencies.runsFolder, runId);
   if (!existsSync(runFolders(folder).settings)) throw new SetupError(`There is no eval run ${runId} in ${dependencies.runsFolder}.`);
   const { settings } = readRun(folder);
-  if (settings.promptVersion !== promptVersions[settings.jobKind]) {
-    throw new SetupError(`Eval run ${runId} used prompt ${settings.promptVersion}; the code now has ${promptVersions[settings.jobKind]}. Start a new run.`);
+  if (settings.tuning !== null) requireCurrent(settings.tuning, `Eval run ${runId}`);
+  const current = tunedPromptVersion(promptVersions[settings.jobKind], settings.tuning);
+  if (settings.promptVersion !== current) {
+    throw new SetupError(`Eval run ${runId} used prompt ${settings.promptVersion}; the code now has ${current}. Start a new run.`);
   }
   const dataset = await loadRunnable(settings.dataset.folder);
   if (dataset.hash !== settings.dataset.hash) throw new SetupError(`The dataset ${settings.dataset.folder} is not the one eval run ${runId} started with.`);

@@ -26,14 +26,14 @@ export function runDiscoverySample(context: SampleContext, item: DiscoveryDatase
   };
   if (frozen.kind === "rank") {
     const job: EvalJob<RankOutput> = {
-      ...common, subject: { kind: "discovery-thread", id: item.key }, prompt: (paths) => rankPrompt(frozen, paths), schema: RankOutputSchema,
+      ...common, subject: { kind: "discovery-thread", id: item.key }, prompt: (paths) => rankPrompt(frozen, paths, context.settings.tuning), schema: RankOutputSchema,
       validate: (output) => validateRank(output, frozen), score: (output) => scores(scoreRank(output, item)),
     };
     return runEvalSample(context, job, repetition);
   }
   const labels = readLabels(copies.context(item.contextHash), frozen);
   const job: EvalJob<ScenarioOutput> = {
-    ...common, subject: { kind: "discovery-target", id: item.key }, prompt: (paths) => scenarioPrompt(frozen, paths), schema: ScenarioOutputSchema,
+    ...common, subject: { kind: "discovery-target", id: item.key }, prompt: (paths) => scenarioPrompt(frozen, paths, context.settings.tuning), schema: ScenarioOutputSchema,
     validate: (output) => validateScenario(output, frozen), score: (output) => scores(scoreScenario(output, item, frozen, labels)),
   };
   return runEvalSample(context, job, repetition);

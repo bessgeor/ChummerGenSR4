@@ -25,7 +25,7 @@ async function gradedThread(reply: (attempt: number) => Reply) {
   const paths = { ...workflowPaths(harness.root), threadFolder: (id: string) => join(harness.root, "threads", id) };
   const context: EvalContext = {
     paths, store: harness.store, git: () => "", now: () => new Date("2026-10-02T09:00:00Z"), log: (line) => lines.push(line),
-    agentSettings: () => resolveAgentSettings(undefined), agents: () => grader, certificatesFolder: () => join(harness.root, "certificates"),
+    agentSettings: () => resolveAgentSettings(undefined), agents: () => grader, certificatesFolder: () => join(harness.root, "certificates"), tuningFolder: () => join(harness.root, "tuning"),
     quota: new QuotaWaiter("p", async (milliseconds) => {
       sleeps.push(milliseconds);
     }), createScratchFolder,

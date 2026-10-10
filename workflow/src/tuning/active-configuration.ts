@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { CertificateSchema } from "../evals/certificate.js";
-import { evaluatedJobKinds, type EvaluatedJobKind } from "../evals/eval-sample.js";
+import { evaluatedJobKinds, type EvaluatedJobKind } from "../evals/evaluated-job-kinds.js";
 import { metrics } from "../evals/metrics.js";
 import { SetupError } from "../host/setup-error.js";
 import { readDocument } from "../steps/read-document.js";

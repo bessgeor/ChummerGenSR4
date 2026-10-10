@@ -11,6 +11,7 @@ import { processGit } from "../diagnosis/source-snapshot.js";
 import { createScratchFolder } from "../host/scratch-folder.js";
 import { SetupError } from "../host/setup-error.js";
 import { loadProfile } from "../options/profile.js";
+import { tuningFolder } from "../options/run-options.js";
 import { workflowPaths } from "../paths.js";
 import { SqliteStore } from "../store/sqlite-store.js";
 import { runEvalCommand } from "./eval-commands.js";
@@ -35,6 +36,7 @@ async function main(): Promise<number> {
       paths, store, git: processGit(repositoryRoot), now: () => new Date(), log,
       agentSettings: () => resolveAgentSettings(loadProfile(process.env).agents),
       certificatesFolder: () => resolve(repositoryRoot, loadProfile(process.env).certificates ?? paths.certificates),
+      tuningFolder: () => tuningFolder(loadProfile(process.env), repositoryRoot),
       agents: agentRunners(process.env), quota: new QuotaWaiter(randomBytes(8).toString("hex"), undefined, log),
       createScratchFolder, signal: interruptSignal(),
     });

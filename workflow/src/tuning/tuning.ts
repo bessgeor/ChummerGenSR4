@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { canonicalJson } from "../diagnosis/context.js";
-import { evaluatedJobKinds, promptVersions, type EvaluatedJobKind } from "../evals/eval-sample.js";
+import { evaluatedJobKinds, promptVersions, type EvaluatedJobKind } from "../evals/evaluated-job-kinds.js";
 import { SetupError } from "../host/setup-error.js";
 
 export const maximumGuidanceLines = 6;

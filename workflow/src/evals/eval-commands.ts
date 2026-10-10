@@ -18,13 +18,14 @@ import { comparisonLines, compareRuns, metrics } from "./comparison.js";
 import { metricsOfJobKind } from "./metrics.js";
 import { freezeDataset } from "./dataset.js";
 import { freezeDiscoveryDataset } from "./discovery-dataset.js";
-import { readRun, resumeEvalRun, runPartitions, startEvalRun, summaryLines } from "./eval-run.js";
+import { datasetJobKind, readRun, resumeEvalRun, runPartitions, startEvalRun, summaryLines, type StartRun } from "./eval-run.js";
 import { gradeRecords } from "./grader.js";
 import { labelHindsight } from "./hindsight.js";
 import { recordSummary } from "./record-summary.js";
 import { snapshotBaseCheck } from "./snapshot-base.js";
 import { compareThreads, threadComparisonLines, threadMeasures } from "./thread-comparison.js";
 import { defaultQueueOptions, queueLines, reviewQueue } from "./review-queue.js";
+import { requireNoHoldoutExposure, selectedTuning } from "../tuning/run-tuning.js";
 
 export const evalUsage = `Usage: npm run eval -- <command> [options]
 
@@ -39,8 +40,9 @@ export const evalUsage = `Usage: npm run eval -- <command> [options]
                                   print the review queue (npm run review shows it)
   freeze --job <hypothesis|challenge|rank|scenario> --name <name> [--seed <text>] [--test-percent <0-100>] [--reason <text>]
                                   freeze the next version of a dataset under out/evals/datasets/<name>/
-  run --dataset <folder> [--partition test|development|all] [--repeat <n>] [--name <text>]
-                                  run the current prompt with the profile's agent choice on a dataset (out/evals/runs/<run>/)
+  run --dataset <folder> [--partition test|development|all] [--repeat <n>] [--name <text>] [--tuning active|none|<candidate>]
+                                  run the current prompt with the profile's agent choice on a dataset (out/evals/runs/<run>/),
+                                  with the active tuning configuration (default), the code's prompt or a candidate (not on test)
   run --resume <run>              finish a stopped eval run with its stored settings
   compare --baseline <run> --candidate <run> [--metric prediction|rootCause|valid|reached]  (default: prediction, or valid for rank and scenario runs)
                                   paired comparison of two eval runs with a 95% confidence interval
@@ -63,6 +65,8 @@ export type EvalContext = {
   readonly agentSettings: () => AgentSettings;
   /** The certificates folder of the local profile, or the repository's. */
   readonly certificatesFolder: () => string;
+  /** The tuning folder of the local profile, or the repository's. */
+  readonly tuningFolder: () => string;
   readonly agents: AgentRunners;
   readonly quota: QuotaWaiter;
   readonly createScratchFolder: (prefix: string) => ScratchFolder;
@@ -180,20 +184,27 @@ function runDependencies(context: EvalContext) {
   };
 }
 
+/** How `run` starts: the dataset, partition and repetitions, and the configuration `--tuning` names (a candidate never on the holdout). */
+function runStart(options: CommandOptions, context: EvalContext): StartRun {
+  const datasetFolder = resolve(options.required("dataset"));
+  const partition = options.choice("partition", runPartitions, "test");
+  const jobKind = datasetJobKind(datasetFolder);
+  const tuning = selectedTuning(options.text("tuning") ?? "active", jobKind, { tuningFolder: context.tuningFolder(), evalsFolder: context.paths.evalsFolder });
+  requireNoHoldoutExposure(tuning, jobKind, partition, context.tuningFolder());
+  return { datasetFolder, partition, repeat: options.number("repeat", 1, 1, 100, true), name: options.text("name"), settings: context.agentSettings(), tuning };
+}
+
 const run: Command = async (args, context) => {
-  const options = CommandOptions.parse("run", args, ["dataset", "partition", "repeat", "name", "resume"]);
+  const options = CommandOptions.parse("run", args, ["dataset", "partition", "repeat", "name", "resume", "tuning"]);
   const resumed = options.text("resume");
   if (resumed !== null) {
-    for (const other of ["dataset", "partition", "repeat", "name"]) {
+    for (const other of ["dataset", "partition", "repeat", "name", "tuning"]) {
       if (options.text(other) !== null) throw new SetupError(`--resume takes no --${other}: a run keeps the settings it started with.`);
     }
   }
   const { folder, summary } = resumed !== null
     ? await resumeEvalRun(runDependencies(context), resumed)
-    : await startEvalRun(runDependencies(context), {
-      datasetFolder: resolve(options.required("dataset")), partition: options.choice("partition", runPartitions, "test"),
-      repeat: options.number("repeat", 1, 1, 100, true), name: options.text("name"), settings: context.agentSettings(),
-    });
+    : await startEvalRun(runDependencies(context), runStart(options, context));
   for (const line of summaryLines(summary)) context.log(line);
   context.log(`Run folder: ${folder}`);
   return 0;

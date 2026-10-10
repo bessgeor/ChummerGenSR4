@@ -127,7 +127,7 @@ test("an eval run on a scenario dataset scores valid and reached and records its
   const { summary } = await startEvalRun({
     store: harness.store, agents: () => agents, quota: new QuotaWaiter("p", async () => undefined), runsFolder: join(harness.out, "runs-eval"),
     createScratchFolder, now: () => new Date("2026-10-03T14:00:00Z"), log: (line) => lines.push(line), newRunId: () => "er-scenario",
-  }, { datasetFolder: folder, partition: "all", repeat: 2, name: null, settings: resolveAgentSettings(undefined) });
+  }, { datasetFolder: folder, partition: "all", repeat: 2, name: null, settings: resolveAgentSettings(undefined), tuning: null });
   deepStrictEqual([summary.jobKind, summary.samples, summary.metrics.valid.passes, summary.metrics.reached.passes, summary.metrics.prediction.count], ["scenario", 2, 1, 1, 0]);
   const printed = summaryLines(summary);
   ok(printed.some((line) => line.startsWith("  valid: 1/1 items")) && printed.some((line) => line.startsWith("  reached: 1/1 items")), printed.join("\n"));
