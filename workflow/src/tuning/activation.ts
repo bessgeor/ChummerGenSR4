@@ -30,11 +30,14 @@ function codeEntry(certificate: Certificate | null): Entry {
 export function activate(folders: ActivationFolders, request: ActivationRequest, now: Date): ActivationOutcome {
   const runs = join(folders.evalsFolder, "runs");
   const candidate = runState(join(runs, request.run));
-  // Activated by this run already (stopped before its certificate was written): the certificate is written again.
+  // Activated by this run already, on this request (stopped before its certificate was written): the certificate is written again.
+  // Another baseline, metric or threshold is another claim and goes through the checks below.
   const done = readActiveFile(folders.tuningFolder, candidate.settings.jobKind)?.active;
-  if (done !== undefined && done.evidence?.test.candidate === request.run && done.certificate !== null) {
+  const { evidence } = done ?? { evidence: null };
+  if (done !== undefined && evidence !== null && done.certificate !== null && evidence.test.candidate === request.run && evidence.test.baseline === request.baseline
+    && evidence.test.metric === request.thresholds.metric && evidence.minPass === request.thresholds.minPass && evidence.maxMeanCostUsd === request.thresholds.maxMeanCostUsd) {
     writeCertificate(folders.certificatesFolder, done.certificate);
-    return { activated: done, comparison: done.evidence.test, certificate: done.certificate };
+    return { activated: done, comparison: evidence.test, certificate: done.certificate };
   }
   const baseline = runState(join(runs, request.baseline));
   const jobKind = candidate.settings.jobKind;
@@ -60,7 +63,7 @@ export function activate(folders: ActivationFolders, request: ActivationRequest,
   if (pairing.length === 0 && candidate.complete && baseline.complete) {
     comparison = comparisonSummary(compareRuns(join(runs, request.baseline), join(runs, request.run), request.thresholds.metric, now));
     if (comparison.unpaired > 0) {
-      reasons.push(`the candidate has no value of ${request.thresholds.metric} on ${comparison.unpaired} items the active configuration has one on`);
+      reasons.push(`on ${comparison.unpaired} items the candidate has a value of ${request.thresholds.metric} on fewer repetitions than the active configuration`);
     }
     if (comparison.verdict === "worse") {
       reasons.push(`the candidate is worse than the active configuration on the test partition: mean difference ${comparison.meanDifference}, 95% interval `

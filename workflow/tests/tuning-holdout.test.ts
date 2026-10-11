@@ -180,6 +180,12 @@ test("a killed holdout run keeps its exposure and resumes; activation is certifi
   rmSync(certificatePath(certificates, "hypothesis"));
   equal(await activate(killed, "0.3"), 0);
   equal(JSON.parse(readFileSync(certificatePath(certificates, "hypothesis"), "utf8")).promptVersion, `hypothesis-v2+${tuningId(allRight)}`);
+  // Another threshold is another claim: it is checked, not answered from the stored activation, and the certificate stays as it is.
+  rmSync(certificatePath(certificates, "hypothesis"));
+  equal(await activate(killed, "0.2"), 1);
+  ok(resumed.lines.some((line) => line.includes(`${tuningId(allRight)} is already active`)), resumed.lines.join("\n"));
+  equal(existsSync(certificatePath(certificates, "hypothesis")), false);
+  equal(await activate(killed, "0.3"), 0);
   // While the configuration is active, a run of the code's prompt is not certified.
   equal(await runEvalCommand(["certify", "--run", testBaseline, "--metric", "prediction", "--min-pass", "0"], resumed), 1);
 
