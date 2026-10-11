@@ -6,7 +6,7 @@
 
 ## 2. Lane agent
 
-- [x] 2.1 Add the lane agent (`npm run lane-agent`) and the workflow's dispatch to it, with hand-over files under `out/workflow/lane-scratch/` and the stop of stray apps limited to the current session. Evidence: workflow tests with a real agent loop on a temporary folder for a request's output and status, a cancel, a restart with an unfinished request, a missing working folder, a silent agent and a second agent on a busy folder.
+- [x] 2.1 Add the lane agent (`npm run lane-agent`) and the workflow's dispatch to it, with hand-over files under `out/workflow/lane-scratch/` and the stop of stray apps limited to the current session. Evidence: workflow tests with a real agent loop on a temporary folder for a request's output and status, a cancel, a restart with an unfinished request, a missing working folder, a silent agent, a change seen after a long gap and a second agent on a busy folder.
 
 ## 3. Distinct lanes, one environment
 
@@ -14,7 +14,7 @@
 
 ## 4. Sharded capture
 
-- [x] 4.1 Route capture and compare through `route_cases`, capturing one case per lane per step. Evidence: graph tests for one lane (the existing pipeline tests), three cases on two lanes, `--only capture`, a failing capture beside another and a resumed thread.
+- [x] 4.1 Route capture and compare through `route_cases`, capturing one case per lane per step. Evidence: graph tests for one lane (the existing pipeline tests), three cases on two lanes, `--only capture`, a failing capture beside another and a resumed thread, and threads in the older checkpoint format (refused before triage, resumed after it).
 
 ## 5. Rider dispatch adapter
 
@@ -27,4 +27,4 @@
 ## 7. Verification and archive
 
 - [x] 7.1 Run `npm start` live on the default lane and live with an agent lane serving the captures, with a deliberate kill and resume; record in `verification.md` the canonical hash before and after, execution outcomes apart from visual results, which sides came from the cache, fixture-tested scope apart from live evidence, and what remains unverified.
-- [ ] 7.2 Archive the change with `openspec archive add-host-lane-sharding`. Evidence: `npm run openspec:validate` passes after the archive.
+- [x] 7.2 Archive the change with `openspec archive add-host-lane-sharding`. Evidence: `npm run openspec:validate` passes after the archive.

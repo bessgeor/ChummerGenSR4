@@ -1,4 +1,9 @@
-## ADDED Requirements
+# desktop-lanes Specification
+
+## Purpose
+Defines the desktop lanes captures run on: this machine's interactive desktop and lanes in other Windows sessions or machines served by a lane agent through a shared folder, how a desktop command takes a free lane, how lanes are kept distinct and in one capture environment, how cases are captured on every lane at once, and how Rider can start a lane's agent.
+
+## Requirements
 
 ### Requirement: The profile declares the desktop lanes
 The local workflow profile MAY declare `lanes`, a list of 1 to 8 lanes, each with a unique `name` of lower-case letters, digits and hyphens, an optional `agent` folder and an optional `rider` entry (`endpoint`, `rootFolder`, `configuration`). A lane without `agent` SHALL be this machine's interactive desktop, locked by `%LOCALAPPDATA%\ChummerGenSR4\desktop-lane.lock`; a lane with `agent` SHALL be served by a lane agent watching that folder and locked by `lane.lock` in it. Without `lanes` the workflow SHALL use one lane, `desktop`, on this machine's desktop. A profile with two lanes without `agent`, two lanes with the same name or the same agent folder, or `rider` without `agent` SHALL be invalid, which is a setup error.
@@ -64,7 +69,7 @@ Before its first command on any lane, the workflow SHALL check that no two lanes
 - **THEN** the run ends with status 3 listing both lanes' fingerprints, and no capture step is keyed or recorded
 
 ### Requirement: Cases are captured on every lane at once
-After the build, the graph SHALL send a capture for each of the next uncaptured planned cases, as many as there are lanes, and with them a compare for every captured case not yet compared, until every case is captured and compared; then triage runs as before. A thread stored before this SHALL resume with its recorded captures and compares and capture only the rest.
+After the build, the graph SHALL send a capture for each of the next uncaptured planned cases, as many as there are lanes, and with them a compare for every captured case not yet compared, until every case is captured and compared; then triage runs as before. A thread whose stored state holds the `lastCaptured` field (the checkpoint format of an older version of the workflow) and whose triage had not finished SHALL NOT be resumed: resuming it SHALL be a setup error that tells to start a new run with the same options, which reuses the steps the thread recorded. A thread stored after its triage SHALL resume as before.
 
 #### Scenario: Three cases on two lanes
 - **WHEN** `npm start` runs three cases with two lanes
@@ -73,6 +78,10 @@ After the build, the graph SHALL send a capture for each of the next uncaptured 
 #### Scenario: One lane
 - **WHEN** `npm start` runs three cases with one lane
 - **THEN** case 1 is compared while case 2 is captured, and case 2 while case 3 is captured
+
+#### Scenario: Thread stored in the older checkpoint format
+- **WHEN** `--resume` names a thread whose stored state holds `lastCaptured` and whose triage had not finished
+- **THEN** the run ends with status 3 saying to start a new run with the same options, and no step runs
 
 ### Requirement: Rider starts a lane agent through a run configuration
 When a lane with a `rider` entry is needed and its agent is not running, the workflow SHALL open a session with the Rider MCP endpoint and call `execute_run_configuration` with the entry's `configuration` and `rootFolder`, `waitForExit: false` and the environment variable `LANE_AGENT_FOLDER` set to the lane's folder, then wait up to 180 seconds for the agent's heartbeat. An unreachable endpoint, a tool error, an unreadable response, a result with an exit code, or an agent that does not start in time SHALL be a setup error with what Rider returned. The repository SHALL hold a `Lane agent` run configuration that runs `npm run lane-agent`.
