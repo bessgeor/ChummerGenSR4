@@ -19,7 +19,7 @@ export function comparisonSummary(comparison: Comparison): ComparisonSummary {
 /** Means of shares of repetitions (thirds, for three) differ by rounding noise of this size when they are equal: a smaller difference is none. */
 export const differenceTolerance = 1e-9;
 
-/** The development gate: a higher mean of the metric, or the same mean in less model time, with a value on every item the baseline has one on. */
+/** The development gate: a higher mean of the metric, or the same mean in less model time, with a value on every repetition of every item the baseline has one on. */
 export function passesDevelopmentGate(summary: ComparisonSummary): boolean {
   if (summary.meanDifference === null || summary.unpaired > 0) return false;
   if (summary.meanDifference > differenceTolerance) return true;

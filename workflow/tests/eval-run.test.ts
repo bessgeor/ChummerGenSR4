@@ -5,7 +5,7 @@ import { test } from "node:test";
 import { resolveAgentSettings } from "../src/agents/agent-settings.js";
 import type { ChallengeOutput } from "../src/diagnosis/job-schemas.js";
 import { QuotaWaiter } from "../src/diagnosis/quota-waiter.js";
-import { compareRuns } from "../src/evals/comparison.js";
+import { compareRuns, comparisonLines } from "../src/evals/comparison.js";
 import { freezeDataset, type DatasetItem } from "../src/evals/dataset.js";
 import { listRecords } from "../src/evals/eval-record.js";
 import { readRun, resumeEvalRun, runFolders, startEvalRun, type EvalRunDependencies, type RunSettings } from "../src/evals/eval-run.js";
@@ -235,6 +235,17 @@ test("the paired comparison gives the t interval and verdict, and refuses runs i
   deepStrictEqual([one.pairs, one.verdict, one.interval, one.unpaired], [1, "too-few-pairs", null, 0]);
   // An item the baseline has a value on and the candidate has none is in no pair, and is counted.
   equal(compareRuns(join(root, "gold-b"), join(root, "gold-a"), "rootCause", new Date()).unpaired, 1);
+
+  // An item the candidate has a value on for fewer repetitions than the baseline is counted too: its remaining repetitions do not stand for it.
+  writeRun(join(root, "rep-a"), { repeat: 3 }, [true, true], 3);
+  writeRun(join(root, "rep-b"), { repeat: 3 }, [true, true], 3);
+  for (const key of ["i0-2", "i0-3"]) {
+    const path = runFolders(join(root, "rep-b")).sample(key);
+    writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, "utf8")), rootCause: null }));
+  }
+  const partial = compareRuns(join(root, "rep-a"), join(root, "rep-b"), "rootCause", new Date());
+  deepStrictEqual([partial.pairs, partial.unpaired], [2, 1]);
+  equal(comparisonLines(partial)[1]!.startsWith("  2 item pairs (1 items on which the candidate has a value on fewer repetitions than the baseline);"), true);
 
   writeRun(join(root, "other-dataset"), { dataset: { folder: "e", name: "e", version: 1, hash: "other" } }, [true, true, true, true, true]);
   writeRun(join(root, "development"), { partition: "development" }, [true, true, true, true, true]);
