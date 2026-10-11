@@ -38,6 +38,7 @@ async function main(): Promise<number> {
   const agent = new LaneAgent({
     folder, host: hostname(), user: userInfo().username, processId: process.pid,
     pollMilliseconds: 200, heartbeatMilliseconds: agentHeartbeatMilliseconds, staleAfterMilliseconds: agentStaleAfterMilliseconds,
+    answeredRetentionMilliseconds: 10 * 60_000,
     sessionLane: new DesktopLane(defaultLaneSettings("of this session", join(localDataFolder(process.env), "desktop-lane.lock"), log)),
     spawnProcess: spawn, stopApps: stopAppsUnder, log,
   });

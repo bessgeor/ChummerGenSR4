@@ -6,13 +6,14 @@ import {
   agentStaleAfterMilliseconds, newRequestId, readAgent, readExit, requestFiles, requestsFolder, writeAtomically,
   type AgentDocument, type LaneExit, type LaneRequest,
 } from "./agent-protocol.js";
+import { AgentWatch } from "./agent-watch.js";
 import type { LaneCommand, LaneIdentity, RemoteLane } from "./remote-lane.js";
 
 export type AgentLaneSettings = {
   readonly name: string;
   readonly folder: string;
   readonly pollMilliseconds: number;
-  /** An agent whose file is older than this counts as not running. */
+  /** An agent whose file this process has not seen change for this long counts as not running. */
   readonly staleAfterMilliseconds: number;
   /** How long a stopped request may take to confirm its stop. */
   readonly cancelWaitMilliseconds: number;
@@ -36,8 +37,13 @@ const sleep = (milliseconds: number) => new Promise((resolve) => setTimeout(reso
 export class AgentLane implements RemoteLane {
   /** The agent's host and user when they were first read; a later agent with others is a setup error. */
   private identified: LaneIdentity | null = null;
+  private readonly watch: AgentWatch;
+  /** The start that is under way, which every command that needs the agent meanwhile joins. */
+  private starting: Promise<AgentDocument> | null = null;
 
-  constructor(private readonly settings: AgentLaneSettings) {}
+  constructor(private readonly settings: AgentLaneSettings) {
+    this.watch = new AgentWatch(settings.folder, settings.staleAfterMilliseconds, settings.pollMilliseconds);
+  }
 
   async identity(signal?: AbortSignal): Promise<LaneIdentity> {
     const agent = await this.runningAgent(signal);
@@ -152,18 +158,29 @@ export class AgentLane implements RemoteLane {
 
   /** The folder's running agent; starts it when the lane says how and it is not running. */
   private async runningAgent(signal: AbortSignal | undefined): Promise<AgentDocument> {
-    const running = await this.freshAgent();
+    const running = await this.freshAgent(signal);
     if (running !== null) return running;
     const { name, folder, startAgent } = this.settings;
     if (startAgent === null) {
       throw new SetupError(`The lane agent of desktop lane ${name} is not running; start \`npm run lane-agent -- --folder "${folder}"\` in that lane's session.`);
     }
+    // Commands that find the agent missing together share one start: a second agent would take its folder over.
+    if (this.starting === null) {
+      const starting = this.startAndAwait(startAgent, signal).finally(() => {
+        if (this.starting === starting) this.starting = null;
+      });
+      this.starting = starting;
+    }
+    return this.starting;
+  }
+
+  private async startAndAwait(startAgent: (signal?: AbortSignal) => Promise<void>, signal: AbortSignal | undefined): Promise<AgentDocument> {
+    const { name } = this.settings;
     await startAgent(signal);
     const deadline = Date.now() + this.settings.startWaitMilliseconds;
     for (;;) {
-      const started = await this.freshAgent();
+      const started = await this.freshAgent(signal);
       if (started !== null) return started;
-      if (signal?.aborted === true) throw new SetupError(`The lane agent of desktop lane ${name} was not awaited because the run was stopped.`);
       if (Date.now() > deadline) {
         throw new SetupError(`The lane agent of desktop lane ${name} did not start within ${Math.round(this.settings.startWaitMilliseconds / 1000)} s of being started; check that lane's session.`);
       }
@@ -171,10 +188,10 @@ export class AgentLane implements RemoteLane {
     }
   }
 
-  private async freshAgent(): Promise<AgentDocument | null> {
-    const agent = await readAgent(this.settings.folder);
-    if (agent === "absent") return null;
-    if (agent === "unreadable") throw new SetupError(`The lane agent file of desktop lane ${this.settings.name} in ${this.settings.folder} cannot be read.`);
-    return Date.now() - agent.refreshedMilliseconds > this.settings.staleAfterMilliseconds ? null : agent.document;
+  private async freshAgent(signal: AbortSignal | undefined): Promise<AgentDocument | null> {
+    const look = await this.watch.look(signal);
+    if (look === "unreadable") throw new SetupError(`The lane agent file of desktop lane ${this.settings.name} in ${this.settings.folder} cannot be read.`);
+    if (signal?.aborted === true) throw new SetupError(`The lane agent of desktop lane ${this.settings.name} was not awaited because the run was stopped.`);
+    return look === "not-running" ? null : look.running;
   }
 }

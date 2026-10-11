@@ -10,6 +10,7 @@ import {
   agentFile, LaneRequestSchema, readAgent, requestFiles, requestIdOf, requestsFolder, writeAtomically,
   type AgentDocument, type LaneExit, type LaneRequest,
 } from "./agent-protocol.js";
+import { AgentWatch } from "./agent-watch.js";
 
 export type LaneAgentSettings = {
   readonly folder: string;
@@ -18,8 +19,10 @@ export type LaneAgentSettings = {
   readonly processId: number;
   readonly pollMilliseconds: number;
   readonly heartbeatMilliseconds: number;
-  /** An `agent.json` refreshed within this time belongs to a running agent. */
+  /** An `agent.json` seen to change within this time belongs to a running agent. */
   readonly staleAfterMilliseconds: number;
+  /** How long the files of an answered request stay when no workflow collects them. */
+  readonly answeredRetentionMilliseconds: number;
   /** The desktop lock of the agent's own session, held while a desktop request runs. */
   readonly sessionLane: DesktopLane;
   readonly spawnProcess: typeof spawn;
@@ -39,6 +42,9 @@ type Running = {
 
 const sleep = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
+/** Heartbeats in a row at which an unreadable `agent.json` stops the agent. */
+const maximumUnreadableBeats = 3;
+
 /**
  * Serves a lane folder in this session: runs each request side by side in its working folder, a desktop request under
  * the session's desktop lock, writes its output to the request's log and then its exit, and stops a request whose
@@ -46,10 +52,14 @@ const sleep = (milliseconds: number) => new Promise((resolve) => setTimeout(reso
  */
 export class LaneAgent {
   private readonly running = new Map<string, { readonly run: Running; readonly done: Promise<void> }>();
-  /** Requests that have an exit, until the workflow removes their files. */
-  private readonly answered = new Set<string>();
+  /** Requests that have an exit, with when this agent saw it, until their files are removed. */
+  private readonly answered = new Map<string, number>();
   private readonly token = randomUUID();
   private heartbeat: NodeJS.Timeout | null = null;
+  /** The latest heartbeat refresh, which a stop awaits before it removes the file. */
+  private beating: Promise<void> | null = null;
+  private beatRunning = false;
+  private unreadableBeats = 0;
   private serving: Promise<void> | null = null;
   private stopped = false;
   private stopping: Promise<void> | null = null;
@@ -61,22 +71,31 @@ export class LaneAgent {
   async start(): Promise<AgentDocument> {
     const { folder } = this.settings;
     await mkdir(requestsFolder(folder), { recursive: true });
-    const current = await readAgent(folder);
-    if (typeof current === "object" && Date.now() - current.refreshedMilliseconds <= this.settings.staleAfterMilliseconds) {
-      const other = current.document;
+    // Another agent may refresh the file from another machine's clock, so only a change seen here counts.
+    const current = await new AgentWatch(folder, this.settings.staleAfterMilliseconds, this.settings.pollMilliseconds).look();
+    if (current === "unreadable") throw new SetupError(`${agentFile(folder)} cannot be read; check which agent serves ${folder} and remove it.`);
+    if (current !== "not-running") {
+      const other = current.running;
       throw new SetupError(`Another lane agent (process ${other.processId} of ${other.user} on ${other.host}, started ${other.startedUtc}) serves ${folder}; stop it first.`);
     }
     const document: AgentDocument = {
       host: this.settings.host, user: this.settings.user, processId: this.settings.processId, startedUtc: new Date().toISOString(), token: this.token,
     };
     for (const id of await this.requestIds()) {
-      if (existsSync(requestFiles(folder, id).exit)) continue;
-      await this.answer(id, { kind: "failed", message: "The lane agent was not running when this request was sent, or stopped while it ran it." });
+      if (existsSync(requestFiles(folder, id).exit)) this.answered.set(id, Date.now());
+      else await this.answer(id, { kind: "failed", message: "The lane agent was not running when this request was sent, or stopped while it ran it." });
     }
     // Publish the heartbeat only after stale requests have been answered. Otherwise a workflow can see this
     // agent, submit a new request, and have the startup scan incorrectly fail it as an old request.
     await writeAtomically(agentFile(folder), `${JSON.stringify(document, null, 2)}\n`);
-    this.heartbeat = setInterval(() => void this.beat(), this.settings.heartbeatMilliseconds);
+    this.heartbeat = setInterval(() => {
+      // A refresh that still waits on a slow share is not started again, so a stop has one refresh to await.
+      if (this.beatRunning) return;
+      this.beatRunning = true;
+      this.beating = this.beat().finally(() => {
+        this.beatRunning = false;
+      });
+    }, this.settings.heartbeatMilliseconds);
     this.serving = this.serve();
     return document;
   }
@@ -100,6 +119,8 @@ export class LaneAgent {
     await Promise.all([...this.running.values()].map((entry) => entry.done));
     await this.serving;
     if (this.heartbeat !== null) clearInterval(this.heartbeat);
+    // A refresh that runs now would find the file gone and report a failure of the stop itself.
+    await this.beating;
     const current = await readAgent(this.settings.folder);
     if (typeof current === "object" && current.document.token === this.token) await rm(agentFile(this.settings.folder), { force: true });
   }
@@ -108,9 +129,15 @@ export class LaneAgent {
   private async beat(): Promise<void> {
     try {
       const current = await readAgent(this.settings.folder);
-      if (typeof current !== "object" || current.document.token !== this.token) {
-        throw new SetupError(`${agentFile(this.settings.folder)} no longer belongs to this agent; another agent took the folder over.`);
+      if (current === "unreadable" && ++this.unreadableBeats < maximumUnreadableBeats) {
+        // A read that fails now and then (a share, a scanner holding the file) is not another agent.
+        this.settings.log(`${agentFile(this.settings.folder)} could not be read; trying again at the next heartbeat.`);
+        return;
       }
+      if (typeof current !== "object" || current.document.token !== this.token) {
+        throw new SetupError(`${agentFile(this.settings.folder)} no longer belongs to this agent; another agent took the folder over, or it cannot be read.`);
+      }
+      this.unreadableBeats = 0;
       const now = new Date();
       await utimes(agentFile(this.settings.folder), now, now);
     } catch (error) {
@@ -148,13 +175,34 @@ export class LaneAgent {
     const ids = new Set(await this.requestIds());
     for (const id of ids) {
       if (this.stopped) return;
-      if (this.running.has(id) || this.answered.has(id) || existsSync(requestFiles(folder, id).exit)) continue;
+      if (this.running.has(id) || this.answered.has(id)) continue;
+      if (existsSync(requestFiles(folder, id).exit)) {
+        this.answered.set(id, Date.now());
+        continue;
+      }
       this.begin(id);
     }
     for (const { run } of this.running.values()) {
       if (run.stopping === null && existsSync(requestFiles(folder, run.id).cancel)) this.cancel(run, "cancel");
     }
-    for (const id of this.answered) if (!ids.has(id)) this.answered.delete(id);
+    for (const [id, since] of this.answered) {
+      if (!ids.has(id)) this.answered.delete(id);
+      else if (Date.now() - since > this.settings.answeredRetentionMilliseconds) await this.forget(id);
+    }
+  }
+
+  /** Removes the files of a request whose workflow never collected its exit: that workflow was killed or gave up. */
+  private async forget(id: string): Promise<void> {
+    try {
+      await Promise.all(Object.values(requestFiles(this.settings.folder, id)).map((path) => rm(path, { force: true })));
+    } catch (error) {
+      // A file someone still holds open is removed on a later scan.
+      this.answered.set(id, Date.now());
+      this.settings.log(`${id}: its files could not be removed yet: ${(error as Error).message}`);
+      return;
+    }
+    this.answered.delete(id);
+    this.settings.log(`${id}: removed, its exit was not collected within ${Math.round(this.settings.answeredRetentionMilliseconds / 60_000)} min.`);
   }
 
   private begin(id: string): void {
@@ -169,7 +217,7 @@ export class LaneAgent {
 
   private async answer(id: string, exit: LaneExit): Promise<void> {
     await writeAtomically(requestFiles(this.settings.folder, id).exit, `${JSON.stringify(exit)}\n`);
-    this.answered.add(id);
+    this.answered.set(id, Date.now());
     this.settings.log(`${id}: ${exit.kind === "exited" ? `exited with ${exit.status}` : exit.kind === "failed" ? `failed: ${exit.message}` : exit.kind}`);
   }
 
@@ -211,7 +259,16 @@ export class LaneAgent {
   private spawnRequest(run: Running, request: LaneRequest, logPath: string): Promise<LaneExit> {
     return new Promise((resolve) => {
       const log = createWriteStream(logPath, { flags: "a" });
-      const settle = (exit: LaneExit) => log.end(() => resolve(exit));
+      let logError: Error | null = null;
+      // A log that cannot be written fails the request: the workflow would not see the command's output.
+      const settle = (exit: LaneExit) => log.end((error?: Error | null) => {
+        const failure = logError ?? error ?? null;
+        resolve(failure === null ? exit : { kind: "failed", message: `The log ${logPath} could not be written: ${failure.message}` });
+      });
+      log.on("error", (error) => {
+        logError ??= error;
+        if (run.child !== null) killTree(run.child);
+      });
       let child: ChildProcess;
       try {
         child = this.settings.spawnProcess(request.command, request.args, { cwd: request.cwd, stdio: ["ignore", "pipe", "pipe"] });
@@ -238,7 +295,9 @@ export class LaneAgent {
   private cancel(run: Running, why: "cancel" | "agent"): void {
     run.stopping = why;
     run.controller.abort();
-    if (run.child !== null) killTree(run.child);
+    if (run.child === null) return;
+    killTree(run.child);
+    // A desktop request still waiting for the session's lock started no app; the apps there belong to the holder.
     if (run.request?.desktop === true) {
       try {
         this.settings.stopApps(join(run.request.cwd, "out", "runs"));
