@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SetupError } from "./setup-error.js";
@@ -9,8 +9,10 @@ export type ScratchFolder = {
   remove(): void;
 };
 
-export function createScratchFolder(prefix: string): ScratchFolder {
-  const path = mkdtempSync(join(tmpdir(), prefix));
+/** A new scratch folder in the parent folder, by default the system's temporary folder. */
+export function createScratchFolder(prefix: string, parent: string = tmpdir()): ScratchFolder {
+  mkdirSync(parent, { recursive: true });
+  const path = mkdtempSync(join(parent, prefix));
   // A process a job left behind may still hold the folder for a moment (Windows), so removing it retries.
   return { path, remove: () => rmSync(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }) };
 }
