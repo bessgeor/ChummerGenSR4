@@ -30,8 +30,12 @@ export class HostSteps implements WorkflowSteps {
     private readonly compareStep: CompareStep,
     private readonly stepStore: StepStore,
     private readonly now: () => Date,
-    private readonly createScratchFolder: (prefix: string) => ScratchFolder,
+    private readonly createScratchFolder: (prefix: string, parent?: string) => ScratchFolder,
   ) {}
+
+  get captureLanes(): number {
+    return this.host.lanes.length;
+  }
 
   async build(options: RunOptions, buildCandidate: boolean, signal?: AbortSignal): Promise<InputFingerprints> {
     // The candidate and the tools share no project, so they build side by side in the CPU pool.

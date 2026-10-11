@@ -77,6 +77,7 @@ test("the candidate build records the compiled source it started from, only when
   let status = 1;
   let builds = 0;
   const host: HostRunner = {
+    lanes: ["desktop"],
     async run() {
       mkdirSync(paths.candidateApp, { recursive: true });
       writeFileSync(join(paths.candidateApp, "ChummerGenSR4.exe"), `build ${builds + 1}`);

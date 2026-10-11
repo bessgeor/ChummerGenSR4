@@ -44,7 +44,7 @@ export type NarrowCheckRequest = {
 export type NarrowCheck = (request: NarrowCheckRequest) => Promise<{ readonly status: 0 | 1 | 2; readonly runFolder: string }>;
 
 /** The narrow check on the desktop lane: one capture runner call made like the capture step's, never a recorded step. */
-export function hostNarrowCheck(paths: WorkflowPaths, host: HostRunner, createScratchFolder: (prefix: string) => ScratchFolder): NarrowCheck {
+export function hostNarrowCheck(paths: WorkflowPaths, host: HostRunner, createScratchFolder: (prefix: string, parent?: string) => ScratchFolder): NarrowCheck {
   return (request) => runCaptureRunner({
     paths, host, createScratchFolder, options: request.options, selection: { cases: request.cases, captures: request.captures },
     candidateExecutable: request.candidateExecutable, subject: request.label, ...(request.signal === undefined ? {} : { signal: request.signal }),

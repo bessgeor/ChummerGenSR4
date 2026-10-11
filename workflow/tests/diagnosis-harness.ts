@@ -201,6 +201,7 @@ export function diagnosisHarness(options: HarnessOptions) {
   const lines: string[] = [];
   const log = (line: string) => lines.push(line);
   const steps: WorkflowSteps = {
+    captureLanes: 1,
     // The build records the compiled source it started from; by default that is the fixture repository as it is now.
     build: async () => fingerprints(options.candidateSource ?? await compiledSourceIdentity(sourceRepository, processGit(sourceRepository))),
     capture: async (_context, item): Promise<StepOutcome> => ({ case: item.name, status: 1, runFolder: folders[item.name] ?? join(root, "runs", item.name), key: "k", reusedFrom: null }),

@@ -35,6 +35,8 @@ export type InventoryInput = {
 
 /** The host work behind the graph's nodes. */
 export interface WorkflowSteps {
+  /** How many cases a step captures at once: one per desktop lane. */
+  readonly captureLanes: number;
   build(options: RunOptions, buildCandidate: boolean, signal?: AbortSignal): Promise<InputFingerprints>;
   capture(context: StepContext, item: PlannedCase): Promise<StepOutcome>;
   compare(context: StepContext, capture: StepOutcome): Promise<StepOutcome>;
@@ -144,6 +146,27 @@ function applyWidening(step: WideningStep) {
   return { widenings: { [step.update.clusterId]: step.update }, ...(step.accepted === null ? {} : { accepted: step.accepted }) };
 }
 
+/**
+ * After the build and after each step of captures and compares: a compare for every captured case not yet compared
+ * (unless compare is skipped) and a capture for each of the next uncaptured cases, one per lane; triage once every
+ * case is compared, or nothing when triage is skipped and nothing is left.
+ */
+function caseRoute(state: WorkflowStateValue, lanes: number): Send[] | "triage" {
+  const comparing = nodeMode("compare", state.options.only) !== "skip";
+  const sends: Send[] = [];
+  let capturing = 0;
+  state.plan.forEach((item, index) => {
+    if (state.captures[item.name] === undefined) {
+      if (capturing < lanes) sends.push(new Send("capture", { ...state, index }));
+      capturing++;
+    } else if (comparing && state.compares[item.name] === undefined) {
+      sends.push(new Send("compare", { ...state, index }));
+    }
+  });
+  if (sends.length > 0) return sends;
+  return comparing && nodeMode("triage", state.options.only) !== "skip" ? "triage" : [];
+}
+
 /** After the last widening (or repair, when widening is off): the next attempts when a cluster may have one, else the conclusion. */
 function loopRoute(state: WorkflowStateValue): "retry_repair" | "conclude" {
   const plan = retryPlan(state.repairs, state.widenings, retryLimits(state.options, state.agentMilliseconds));
@@ -161,8 +184,9 @@ function repairInput(state: ClusterTask, config: LangGraphRunnableConfig): Repai
 }
 
 /**
- * build → capture(case k) → compare(case k) ∥ capture(case k+1) → … → triage → inventory → diagnosis. `Send` addresses each
- * case, so compare k and capture k+1 run in the same super-step and both are checkpointed. Diagnosis seals a
+ * build → capture(cases k…k+n-1) → compare(cases k…k+n-1) ∥ capture(cases k+n…k+2n-1) → … → triage → inventory → diagnosis,
+ * with n the number of desktop lanes. `route_cases` sends each case to its node, so the compares of one step and the
+ * captures of the next run in the same super-step and each is checkpointed. Diagnosis seals a
  * context per cluster, then `route_diagnosis` sends one job per cluster (hypotheses, then challenges) and waits
  * for quota when a job hit a usage limit; each job is one task, so a resumed thread repeats only unfinished jobs.
  * Repair then sends one attempt per confirmed cluster the same way, and waits for quota the same way. Widening
@@ -179,7 +203,7 @@ export function buildWorkflowGraph(steps: WorkflowSteps, diagnosis: DiagnosisSte
     })
     .addNode("capture", async (state: CaseTask, config: LangGraphRunnableConfig) => {
       const outcome = await steps.capture(context(state, "capture", config.signal), caseAt(state));
-      return { captures: { [outcome.case]: outcome }, lastCaptured: state.index };
+      return { captures: { [outcome.case]: outcome } };
     })
     .addNode("compare", async (state: CaseTask, config: LangGraphRunnableConfig) => {
       const item = caseAt(state);
@@ -188,6 +212,7 @@ export function buildWorkflowGraph(steps: WorkflowSteps, diagnosis: DiagnosisSte
       const outcome = await steps.compare(context(state, "compare", config.signal), captured);
       return { compares: { [outcome.case]: outcome } };
     })
+    .addNode("route_cases", () => ({}))
     .addNode("triage", async (state: WorkflowStateValue, config: LangGraphRunnableConfig) => {
       const summary = await steps.triage({ threadId: state.threadId, plan: state.plan, captures: state.captures, compares: state.compares }, requireStore(config));
       return { triageSummary: summary };
@@ -270,20 +295,12 @@ export function buildWorkflowGraph(steps: WorkflowSteps, diagnosis: DiagnosisSte
     .addEdge(START, "build")
     .addConditionalEdges("build", (state: WorkflowStateValue) => {
       if (state.plan.length === 0) throw new SetupError("No case is planned, so nothing can be captured.");
-      return [new Send("capture", { ...state, index: 0 })];
-    }, ["capture"])
-    // An edge sees the graph's state with its own node's writes, not the node's Send payload.
-    .addConditionalEdges("capture", (state: WorkflowStateValue) => {
-      const index = state.lastCaptured;
-      const sends: Send[] = [];
-      if (nodeMode("compare", state.options.only) !== "skip") sends.push(new Send("compare", { ...state, index }));
-      if (index + 1 < state.plan.length) sends.push(new Send("capture", { ...state, index: index + 1 }));
-      return sends;
-    }, ["capture", "compare"])
-    .addConditionalEdges("compare", (state: WorkflowStateValue) => {
-      const done = state.plan.every((item) => state.compares[item.name] !== undefined);
-      return done && nodeMode("triage", state.options.only) !== "skip" ? ["triage"] : [];
-    }, ["triage"])
+      return "route_cases";
+    }, ["route_cases"])
+    // Plain edges: the router runs once after every capture and compare of the step finished, and sees all their writes.
+    .addEdge("capture", "route_cases")
+    .addEdge("compare", "route_cases")
+    .addConditionalEdges("route_cases", (state: WorkflowStateValue) => caseRoute(state, steps.captureLanes), ["capture", "compare", "triage"])
     // The inventory reads the same capture runs as triage, so it runs whenever triage does.
     .addEdge("triage", "inventory")
     .addConditionalEdges("inventory", (state: WorkflowStateValue) =>

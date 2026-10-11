@@ -17,8 +17,10 @@ import { buildWorkflowGraph } from "./graph/workflow-graph.js";
 import { runWorkflow, setupErrorStatus } from "./graph/run-workflow.js";
 import { HostSteps } from "./host-steps.js";
 import { CpuPool, defaultCpuPoolSize } from "./host/cpu-pool.js";
-import { defaultLaneSettings, DesktopLane } from "./host/desktop-lane.js";
 import { ProcessHostRunner } from "./host/host-runner.js";
+import { hostLanePool } from "./lanes/host-lanes.js";
+import { laneDefinitions } from "./lanes/lane-settings.js";
+import { startAgentWithRider } from "./lanes/rider-dispatch.js";
 import { interruptSignal } from "./host/interrupt-signal.js";
 import { createScratchFolder } from "./host/scratch-folder.js";
 import { SetupError } from "./host/setup-error.js";
@@ -68,8 +70,8 @@ async function main(): Promise<number> {
   const paths = workflowPaths(repositoryRoot);
   mkdirSync(paths.workflowFolder, { recursive: true });
   const now = () => new Date();
-  const lane = new DesktopLane(defaultLaneSettings(join(localDataFolder(process.env), "desktop-lane.lock"), log));
-  const host = new ProcessHostRunner(repositoryRoot, lane, new CpuPool(profile.cpuPool ?? defaultCpuPoolSize()),
+  const lanes = hostLanePool(laneDefinitions(profile.lanes), localDataFolder(process.env), log, startAgentWithRider);
+  const host = new ProcessHostRunner(repositoryRoot, lanes, new CpuPool(profile.cpuPool ?? defaultCpuPoolSize()),
     (text) => process.stdout.write(text));
   const stepStore = new StepStore(paths.steps);
   const steps = new HostSteps(paths, host,

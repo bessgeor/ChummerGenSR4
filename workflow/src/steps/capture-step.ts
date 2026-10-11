@@ -23,7 +23,7 @@ export type CaptureDependencies = {
   readonly store: StepStore;
   readonly log: (line: string) => void;
   readonly now: () => Date;
-  readonly createScratchFolder: (prefix: string) => ScratchFolder;
+  readonly createScratchFolder: (prefix: string, parent?: string) => ScratchFolder;
   /** Checks the inputs again, so a thread never mixes candidates or tools; replaceable in tests. */
   readonly changedInputs: typeof changedInputs;
 };
@@ -55,7 +55,8 @@ export function captureArguments(
 export type CaptureRunRequest = {
   readonly paths: WorkflowPaths;
   readonly host: HostRunner;
-  readonly createScratchFolder: (prefix: string) => ScratchFolder;
+  /** Creates the folder of the run folder file, in the parent it is given. */
+  readonly createScratchFolder: (prefix: string, parent?: string) => ScratchFolder;
   readonly options: RunOptions;
   readonly selection: CaptureSelection;
   /** Names the run in the host's progress lines and its errors, for example `capture alpha`. */
@@ -72,7 +73,8 @@ export type CaptureRunRequest = {
  * that reports no folder, or one without its summary, results and coverage is a setup error.
  */
 export async function runCaptureRunner(request: CaptureRunRequest): Promise<{ readonly status: 0 | 1 | 2; readonly runFolder: string }> {
-  const scratch = request.createScratchFolder("workflow-capture-");
+  // The capture may run on another lane's machine, which sees the repository at the same path.
+  const scratch = request.createScratchFolder("workflow-capture-", request.paths.laneScratch);
   try {
     const runFolderFile = join(scratch.path, "run-folder.txt");
     const exit = await request.host.run({
@@ -99,9 +101,22 @@ function filesUnder(runFolder: string, folder: string): string[] {
 
 /** Captures one case on the desktop lane, or reuses a completed capture with the same inputs. */
 export class CaptureStep {
+  /** The captures that are running, and the environment reading they share until the last of them ends. */
+  private running = 0;
+  private reading: Promise<string> | null = null;
+
   constructor(private readonly dependencies: CaptureDependencies) {}
 
   async run(context: StepContext, item: PlannedCase): Promise<StepOutcome> {
+    this.running++;
+    try {
+      return await this.capture(context, item);
+    } finally {
+      if (--this.running === 0) this.reading = null;
+    }
+  }
+
+  private async capture(context: StepContext, item: PlannedCase): Promise<StepOutcome> {
     const { paths, store, log } = this.dependencies;
     const changed = await this.dependencies.changedInputs(paths, context.options, context.fingerprints, captureInputs);
     if (changed.length > 0) {
@@ -139,26 +154,49 @@ export class CaptureStep {
     return { case: item.name, status, runFolder, key: stepKey.key, reusedFrom: null };
   }
 
+  /**
+   * The captures of one step run together and the next step starts when they all ended; they share one reading of
+   * the lanes' environments, taken before any of them drives a lane, instead of reading each lane once per capture.
+   * A capture that starts while another still runs gets that reading, so no lane is read while an app runs in it.
+   */
   private readEnvironment(context: StepContext, item: PlannedCase): Promise<string> {
-    return readEnvironmentFingerprint(this.dependencies.paths, this.dependencies.host, this.dependencies.createScratchFolder, `environment ${item.name}`, context.signal);
+    this.reading ??= readEnvironmentFingerprint(
+      this.dependencies.paths, this.dependencies.host, this.dependencies.createScratchFolder, `environment ${item.name}`, context.signal,
+    );
+    return this.reading;
   }
 }
 
-/** The capture runner's fingerprint of the machine and app environment, which decides the pixels. */
+/**
+ * The capture runner's fingerprint of the machine and app environment, which decides the pixels, read on every desktop
+ * lane side by side; lanes whose fingerprints differ would capture pixels that no step key or cache entry may mix.
+ */
 export async function readEnvironmentFingerprint(
-  paths: WorkflowPaths, host: HostRunner, createScratchFolder: (prefix: string) => ScratchFolder, label: string, signal?: AbortSignal,
+  paths: WorkflowPaths, host: HostRunner, createScratchFolder: (prefix: string, parent?: string) => ScratchFolder, label: string, signal?: AbortSignal,
 ): Promise<string> {
-  const scratch = createScratchFolder("workflow-environment-");
+  // A lane on another machine writes the file, so it lies where every lane sees it at the same path.
+  const scratch = createScratchFolder("workflow-environment-", paths.laneScratch);
   try {
-    const file = join(scratch.path, "environment.txt");
-    const exit = await host.run({
-      resource: "cpu", label, command: "dotnet", args: [join(paths.captureTools, "Parity.Capture.dll"), "--environment-fingerprint-file", file],
-      ...(signal === undefined ? {} : { signal }),
-    });
-    if (exit !== 0 || !existsSync(file)) throw new SetupError(`The capture runner could not fingerprint the environment (exit ${exit}).`);
-    const fingerprint = readFileSync(file, "utf8").trim();
-    if (!/^[0-9a-f]{64}$/.test(fingerprint)) throw new SetupError(`The capture runner wrote an environment fingerprint that is not a SHA-256: '${fingerprint}'.`);
-    return fingerprint;
+    const read = async (lane: string, index: number) => {
+      const file = join(scratch.path, `environment-${index}.txt`);
+      const exit = await host.run({
+        resource: "cpu", lane, label: host.lanes.length === 1 ? label : `${label} on ${lane}`, command: "dotnet",
+        args: [join(paths.captureTools, "Parity.Capture.dll"), "--environment-fingerprint-file", file], ...(signal === undefined ? {} : { signal }),
+      });
+      if (exit !== 0 || !existsSync(file)) throw new SetupError(`The capture runner could not fingerprint the environment of desktop lane ${lane} (exit ${exit}).`);
+      const fingerprint = readFileSync(file, "utf8").trim();
+      if (!/^[0-9a-f]{64}$/.test(fingerprint)) throw new SetupError(`The capture runner wrote an environment fingerprint that is not a SHA-256 on desktop lane ${lane}: '${fingerprint}'.`);
+      return { lane, fingerprint };
+    };
+    // Every reading ends before the folder is removed, also when one fails.
+    const settled = await Promise.allSettled(host.lanes.map(read));
+    const failed = settled.find((result) => result.status === "rejected");
+    if (failed !== undefined) throw failed.reason;
+    const readings = settled.flatMap((result) => (result.status === "fulfilled" ? [result.value] : []));
+    if (new Set(readings.map((reading) => reading.fingerprint)).size > 1) {
+      throw new SetupError(`The desktop lanes capture in different environments (${readings.map((reading) => `${reading.lane} ${reading.fingerprint}`).join(", ")}); give every lane the same screens, scale, Windows build, colour and text settings and app options.`);
+    }
+    return readings[0]!.fingerprint;
   } finally {
     scratch.remove();
   }

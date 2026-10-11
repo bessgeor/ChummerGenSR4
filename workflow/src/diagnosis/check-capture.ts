@@ -18,7 +18,7 @@ export type CheckCapture = (request: CheckCaptureRequest) => Promise<{ readonly 
  * The check capture on the desktop lane: one capture runner call with the thread's case file, overlay, threshold
  * and canonical cache, made like the capture step's. It never reuses a recorded capture step.
  */
-export function hostCheckCapture(paths: WorkflowPaths, host: HostRunner, createScratchFolder: (prefix: string) => ScratchFolder): CheckCapture {
+export function hostCheckCapture(paths: WorkflowPaths, host: HostRunner, createScratchFolder: (prefix: string, parent?: string) => ScratchFolder): CheckCapture {
   return (request) => runCaptureRunner({
     paths, host, createScratchFolder, options: request.options, selection: { cases: request.cases, captures: request.captures },
     subject: "diagnosis check capture", ...(request.signal === undefined ? {} : { signal: request.signal }),

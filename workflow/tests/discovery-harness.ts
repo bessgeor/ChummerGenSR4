@@ -110,7 +110,7 @@ export async function discoveryRepository(): Promise<{ root: string; paths: Work
   git("add", "-A");
   git("commit", "-q", "-m", "initial");
   const paths = {
-    repositoryRoot: root, workflowFolder: join(out, "workflow"), checkpoints: join(out, "checkpoints.sqlite"), store: join(out, "store.sqlite"), steps: join(out, "steps"),
+    repositoryRoot: root, workflowFolder: join(out, "workflow"), checkpoints: join(out, "checkpoints.sqlite"), store: join(out, "store.sqlite"), steps: join(out, "steps"), laneScratch: join(out, "lane-scratch"),
     canonicalApp: join(root, "bin"), candidateApp: join(out, "candidate", "bin"), captureTools: join(out, "tools"), compareTools: join(out, "tools"),
     evalsFolder: join(out, "evals"), benchmark: join(out, "benchmark"), certificates: join(out, "certificates"), threadFolder: (id: string) => join(out, "threads", id),
   } satisfies WorkflowPaths;
