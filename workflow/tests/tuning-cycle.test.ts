@@ -1,12 +1,12 @@
 import { deepStrictEqual, equal, ok, rejects } from "node:assert/strict";
-import { existsSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { freezeDataset, partitionOf } from "../src/evals/dataset.js";
 import { runEvalCommand, type EvalContext } from "../src/evals/eval-commands.js";
 import { readRun } from "../src/evals/eval-run.js";
 import { SetupError } from "../src/host/setup-error.js";
-import { readActiveFile } from "../src/tuning/active-configuration.js";
+import { readActiveFile, tuningFiles } from "../src/tuning/active-configuration.js";
 import { readCycle } from "../src/tuning/cycle.js";
 import { readLedger } from "../src/tuning/holdout.js";
 import { tuningId } from "../src/tuning/tuning.js";
@@ -71,6 +71,18 @@ test("a cycle stopped after its activation and resumed after a rollback does not
   equal(await runEvalCommand(["tune", "cycle", "--resume", done.cycleId], context), 0);
   deepStrictEqual([readCycle(context.paths.evalsFolder, done.cycleId).outcome, readCycle(context.paths.evalsFolder, done.cycleId).reasons], ["activated", ["it has been rolled back since"]]);
   equal(readActiveFile(context.tuningFolder(), "hypothesis")!.active.tuning, null);
+});
+
+test("a cycle stopped after its activation and resumed after another activation replaced it says so", async () => {
+  const fake = agents([proposal("Cite the capture.")], "test", { "Cite the capture.": "all" });
+  const { context, cycle: done } = await cycle(fake);
+  // As if another activation had replaced the cycle's: its entry is in the history, not among the rolled-back ones.
+  const activePath = tuningFiles(context.tuningFolder()).active("hypothesis");
+  const file = JSON.parse(readFileSync(activePath, "utf8"));
+  writeFileSync(activePath, JSON.stringify({ ...file, active: file.history[0], history: [...file.history, file.active] }));
+  writeFileSync(join(context.paths.evalsFolder, "tuning", "cycles", done.cycleId, "cycle.json"), JSON.stringify({ ...done, outcome: "running", activation: null, reasons: [], finishedUtc: null }));
+  equal(await runEvalCommand(["tune", "cycle", "--resume", done.cycleId], context), 0);
+  deepStrictEqual(readCycle(context.paths.evalsFolder, done.cycleId).reasons, ["it has been replaced since"]);
 });
 
 test("a cycle resumed after a holdout stopped before its run was created follows the exposure the ledger holds", async () => {

@@ -132,12 +132,16 @@ async function continueCycle(dependencies: CycleDependencies, start: Cycle): Pro
   const { options, jobKind } = cycle;
   const active = activeTuning(dependencies.tuningFolder, jobKind);
   // A cycle stopped after its activation was written, before it was recorded, finds the activation by its holdout run, also
-  // when it has been rolled back since: it is never activated a second time.
+  // when it has been rolled back or replaced since: it is never activated a second time.
   const file = readActiveFile(dependencies.tuningFolder, jobKind);
-  const entries = file === null ? [] : [file.active, ...file.history, ...file.rolledBack];
-  if (cycle.holdout !== null && entries.some((entry) => entry.evidence?.test.candidate === cycle.holdout!.run)) {
-    if (file!.active.evidence?.test.candidate === cycle.holdout.run) activate(folders(dependencies), { run: cycle.holdout.run, baseline: cycle.testBaseline!, thresholds: thresholds(options) }, dependencies.run.now());
-    return finish(dependencies, cycle, "activated", file!.active.evidence?.test.candidate === cycle.holdout.run ? [] : ["it has been rolled back since"]);
+  const activatedRun = cycle.holdout?.run;
+  const activatedBy = (entry: { readonly evidence: { readonly test: { readonly candidate: string } } | null }) => entry.evidence?.test.candidate === activatedRun;
+  if (file !== null && activatedRun !== undefined && [file.active, ...file.history, ...file.rolledBack].some(activatedBy)) {
+    if (activatedBy(file.active)) {
+      activate(folders(dependencies), { run: activatedRun, baseline: cycle.testBaseline!, thresholds: thresholds(options) }, dependencies.run.now());
+      return finish(dependencies, cycle, "activated", []);
+    }
+    return finish(dependencies, cycle, "activated", [file.rolledBack.some(activatedBy) ? "it has been rolled back since" : "it has been replaced since"]);
   }
   const activeNow = activeOf(dependencies.tuningFolder, jobKind);
   if (activeNow !== cycle.active) throw new SetupError(`The active ${jobKind} configuration changed from ${cycle.active} to ${activeNow} during tuning cycle ${cycle.cycleId}.`);
