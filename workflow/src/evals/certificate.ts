@@ -8,7 +8,7 @@ import type { RunOptions } from "../options/run-options.js";
 import { writeDocument } from "../steps/write-document.js";
 import { dispatchedJobKinds, tunedPromptVersion, tuningOf, type DispatchedTuning } from "../tuning/tuning.js";
 import { metrics, requireMetric, type Metric } from "./metrics.js";
-import { evaluatedJobKinds, promptVersions, readRun, summarize, type EvaluatedJobKind } from "./eval-run.js";
+import { evaluatedJobKinds, missingSamples, promptVersions, readRun, summarize, type EvaluatedJobKind } from "./eval-run.js";
 
 /** A job kind's configuration, certified by an eval run on a test partition for unattended runs. */
 export const CertificateSchema = z.strictObject({
@@ -70,7 +70,7 @@ export function certificateFor(runFolder: string, thresholds: Thresholds, now: D
   requireMetric(settings.jobKind, thresholds.metric);
   const summary = summarize(settings.runId, settings.jobKind, samples, now);
   const reasons: string[] = [];
-  const missing = settings.samples.filter((key) => !samples.some((sample) => sample.key === key)).length;
+  const missing = missingSamples(settings, samples).length;
   if (missing > 0) reasons.push(`the run is not complete: ${missing} samples are missing`);
   if (settings.partition !== "test") reasons.push(`the run used the ${settings.partition} partition, not test`);
   const metric = summary.metrics[thresholds.metric];
