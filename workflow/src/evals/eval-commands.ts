@@ -1,17 +1,11 @@
-import type { BaseStore } from "@langchain/langgraph-checkpoint";
 import { randomBytes } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import type { AgentSettings } from "../agents/agent-settings.js";
-import type { AgentRunners } from "../agents/agent-runners.js";
-import type { QuotaWaiter } from "../diagnosis/quota-waiter.js";
-import type { Git } from "../diagnosis/source-snapshot.js";
-import type { ScratchFolder } from "../host/scratch-folder.js";
 import { discoveryPaths } from "../discovery/discovery-paths.js";
 import { SetupError } from "../host/setup-error.js";
-import type { WorkflowPaths } from "../paths.js";
 import { addBenchmarkItem, checkBenchmarkItem, readBenchmark } from "./benchmark.js";
 import { CommandOptions } from "./command-options.js";
+import { runDependencies, type EvalContext } from "./eval-context.js";
 import { listRecords } from "./eval-record.js";
 import { certify as issueCertificate } from "./certificate.js";
 import { comparisonLines, compareRuns, metrics } from "./comparison.js";
@@ -56,24 +50,7 @@ ${tuneUsage}
 
 Exit status: 0 done, 1 certificate, holdout or activation refused, 2 a grader or tune job failed, 3 setup error.`;
 
-/** What the evaluation commands use; the composition root makes the real ones. */
-export type EvalContext = {
-  readonly paths: WorkflowPaths;
-  readonly store: BaseStore;
-  readonly git: Git;
-  readonly now: () => Date;
-  readonly log: (line: string) => void;
-  /** The agent settings of the local profile, read when a command needs them. */
-  readonly agentSettings: () => AgentSettings;
-  /** The certificates folder of the local profile, or the repository's. */
-  readonly certificatesFolder: () => string;
-  /** The tuning folder of the local profile, or the repository's. */
-  readonly tuningFolder: () => string;
-  readonly agents: AgentRunners;
-  readonly quota: QuotaWaiter;
-  readonly createScratchFolder: (prefix: string) => ScratchFolder;
-  readonly signal?: AbortSignal;
-};
+export type { EvalContext } from "./eval-context.js";
 
 type Command = (args: readonly string[], context: EvalContext) => Promise<number>;
 
@@ -175,15 +152,6 @@ async function freezeDiscovery(options: CommandOptions, jobKind: "rank" | "scena
   context.log(`Dataset ${dataset.name} v${dataset.version} (${jobKind}): ${dataset.items.length} items, ${count("test")} test and ${count("development")} development, `
     + `${dataset.items.filter((item) => item.gold !== null).length} with gold; hash ${dataset.datasetHash}; ${folder}`);
   return 0;
-}
-
-function runDependencies(context: EvalContext) {
-  return {
-    store: context.store, agents: context.agents, quota: context.quota, runsFolder: join(context.paths.evalsFolder, "runs"),
-    createScratchFolder: context.createScratchFolder, now: context.now, log: context.log,
-    newRunId: () => `er-${context.now().toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "")}-${randomBytes(4).toString("hex")}`,
-    ...(context.signal === undefined ? {} : { signal: context.signal }),
-  };
 }
 
 /** How `run` starts: the dataset, partition and repetitions, and the configuration `--tuning` names (a candidate never on the holdout). */

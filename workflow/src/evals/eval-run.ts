@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
@@ -42,6 +43,19 @@ export type RunSummary = {
   readonly unknownCosts: number;
   readonly finishedUtc: string;
 };
+
+/** Agent settings that run every job kind with a run's stored choice, pool and executables. */
+export function agentSettingsOf(settings: RunSettings): AgentSettings {
+  return {
+    jobs: Object.fromEntries(jobKinds.map((kind) => [kind, settings.choice])) as Record<JobKind, AgentChoice>, modelPool: settings.modelPool,
+    runBudgetMinutes: 0, executables: settings.executables,
+  };
+}
+
+/** A new eval run's ID: `er-<UTC time>-<8 hex digits>`. */
+export function newEvalRunId(now: Date): string {
+  return `er-${now.toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "")}-${randomBytes(4).toString("hex")}`;
+}
 
 export function runFolders(folder: string) {
   return { settings: join(folder, "run.json"), samples: join(folder, "samples"), sample: (key: string) => join(folder, "samples", `${key}.json`), summary: join(folder, "summary.json") };
@@ -215,11 +229,7 @@ async function runSamples(dependencies: EvalRunDependencies, folder: string, set
   const missing = settings.samples.filter((key) => !existsSync(paths.sample(key)));
   dependencies.log(`Eval run ${settings.runId}: ${settings.jobKind} on ${dataset.name} v${dataset.version} (${settings.partition}), ${settings.choice.provider} `
     + `(${settings.choice.model ?? "default model"}, effort ${settings.choice.effort}); ${missing.length} of ${settings.samples.length} samples to run.`);
-  const agentSettings: AgentSettings = {
-    jobs: Object.fromEntries(jobKinds.map((kind) => [kind, settings.choice])) as Record<JobKind, AgentChoice>, modelPool: settings.modelPool,
-    runBudgetMinutes: 0, executables: settings.executables,
-  };
-  const runner = dependencies.agents(agentSettings);
+  const runner = dependencies.agents(agentSettingsOf(settings));
   // An infra failure stops the jobs still running beside it before the run ends.
   const stop = new AbortController();
   const stopOnSignal = () => stop.abort();
