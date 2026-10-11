@@ -17,6 +17,8 @@ type Lock = z.infer<typeof LockSchema>;
 type Owner = { readonly lock: Lock; readonly refreshedMilliseconds: number };
 
 export type DesktopLaneSettings = {
+  /** The lane's name in progress lines. */
+  readonly name: string;
   readonly lockPath: string;
   readonly pollMilliseconds: number;
   readonly unreadableTimeoutMilliseconds: number;
@@ -40,9 +42,9 @@ export function isProcessRunning(processId: number): boolean {
   }
 }
 
-export function defaultLaneSettings(lockPath: string, log: (line: string) => void): DesktopLaneSettings {
+export function defaultLaneSettings(name: string, lockPath: string, log: (line: string) => void): DesktopLaneSettings {
   return {
-    lockPath, pollMilliseconds: 2000, unreadableTimeoutMilliseconds: 10_000, heartbeatMilliseconds: 10_000,
+    name, lockPath, pollMilliseconds: 2000, unreadableTimeoutMilliseconds: 10_000, heartbeatMilliseconds: 10_000,
     staleAfterMilliseconds: 90_000, host: hostname(), processId: process.pid, isRunning: isProcessRunning, log,
   };
 }
@@ -50,7 +52,7 @@ export function defaultLaneSettings(lockPath: string, log: (line: string) => voi
 const stopped = () => new SetupError("The desktop lane was not acquired because the run was stopped.");
 
 /** Resolves after the delay, or rejects when the signal aborts first. */
-function delay(milliseconds: number, signal: AbortSignal | undefined): Promise<void> {
+export function delay(milliseconds: number, signal: AbortSignal | undefined): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted === true) {
       reject(stopped());
@@ -76,49 +78,73 @@ function delay(milliseconds: number, signal: AbortSignal | undefined): Promise<v
 export class DesktopLane {
   constructor(private readonly settings: DesktopLaneSettings) {}
 
+  get name(): string {
+    return this.settings.name;
+  }
+
+  get pollMilliseconds(): number {
+    return this.settings.pollMilliseconds;
+  }
+
   /** Waits for the lane (until the signal aborts) and returns the function that releases it. */
   async acquire(signal?: AbortSignal): Promise<() => Promise<void>> {
-    const { lockPath } = this.settings;
-    await mkdir(dirname(lockPath), { recursive: true });
+    const attempts = this.attempts();
+    for (;;) {
+      const release = await attempts.next(signal);
+      if (release !== null) return release;
+      await delay(this.settings.pollMilliseconds, signal);
+    }
+  }
+
+  /**
+   * One caller's attempts at the lane, each without waiting: an attempt returns the function that releases the lane,
+   * or null while another owner holds it. The attempts remember since when the lock has been unreadable and whether
+   * the wait was announced, so a caller that tries several lanes in turn keeps both rules per lane.
+   */
+  attempts(): { next(signal?: AbortSignal): Promise<(() => Promise<void>) | null> } {
     const lock: Lock = {
       host: this.settings.host, processId: this.settings.processId,
       startedUtc: new Date().toISOString(), token: randomUUID(),
     };
     let unreadableSince: number | null = null;
     let announced = false;
-    for (;;) {
-      if (signal?.aborted === true) throw stopped();
-      if (await this.tryCreate(lock)) {
-        const heartbeat = this.startHeartbeat();
-        return () => {
-          clearInterval(heartbeat);
-          return this.release(lock.token);
-        };
-      }
-      const owner = await this.readOwner();
-      if (owner === null) {
-        // Between another process's create and its write the file is empty; only a lasting state is an error.
-        unreadableSince ??= Date.now();
-        if (Date.now() - unreadableSince >= this.settings.unreadableTimeoutMilliseconds) {
-          throw new SetupError(`The desktop lane lock ${lockPath} cannot be read; check who holds the desktop and remove it.`);
+    return {
+      next: async (signal) => {
+        const { lockPath } = this.settings;
+        await mkdir(dirname(lockPath), { recursive: true });
+        for (;;) {
+          if (signal?.aborted === true) throw stopped();
+          if (await this.tryCreate(lock)) {
+            const heartbeat = this.startHeartbeat();
+            return () => {
+              clearInterval(heartbeat);
+              return this.release(lock.token);
+            };
+          }
+          const owner = await this.readOwner();
+          if (owner === null) {
+            // Between another process's create and its write the file is empty; only a lasting state is an error.
+            unreadableSince ??= Date.now();
+            if (Date.now() - unreadableSince >= this.settings.unreadableTimeoutMilliseconds) {
+              throw new SetupError(`The desktop lane lock ${lockPath} cannot be read; check who holds the desktop and remove it.`);
+            }
+            return null;
+          }
+          unreadableSince = null;
+          if (owner === "gone") continue;
+          const reason = this.abandonedReason(owner);
+          if (reason !== null) {
+            await this.takeOver(owner.lock, reason, signal);
+            continue;
+          }
+          if (!announced) {
+            this.settings.log(`Waiting for desktop lane ${this.settings.name}, held by process ${owner.lock.processId} on ${owner.lock.host} since ${owner.lock.startedUtc}.`);
+            announced = true;
+          }
+          return null;
         }
-      } else if (owner === "gone") {
-        unreadableSince = null;
-        continue;
-      } else {
-        unreadableSince = null;
-        const reason = this.abandonedReason(owner);
-        if (reason !== null) {
-          await this.takeOver(owner.lock, reason, signal);
-          continue;
-        }
-        if (!announced) {
-          this.settings.log(`Waiting for the desktop lane, held by process ${owner.lock.processId} on ${owner.lock.host} since ${owner.lock.startedUtc}.`);
-          announced = true;
-        }
-      }
-      await delay(this.settings.pollMilliseconds, signal);
-    }
+      },
+    };
   }
 
   /** Why the owner counts as gone, or null when it may still be running. */
@@ -157,7 +183,7 @@ export class DesktopLane {
     try {
       const current = await this.readOwner();
       if (current !== null && current !== "gone" && current.lock.token === abandoned.token) {
-        this.settings.log(`Taking over the desktop lane from ${reason}.`);
+        this.settings.log(`Taking over desktop lane ${this.settings.name} from ${reason}.`);
         await unlink(lockPath);
       }
     } finally {

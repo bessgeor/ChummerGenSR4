@@ -11,14 +11,20 @@ import { DesktopLane, type DesktopLaneSettings } from "../src/host/desktop-lane.
 import { ProcessHostRunner } from "../src/host/host-runner.js";
 import { SetupError } from "../src/host/setup-error.js";
 import { stopAppsUnder } from "../src/host/stray-apps.js";
+import { LanePool } from "../src/lanes/lane-pool.js";
 
 function laneSettings(lockPath: string, overrides: Partial<DesktopLaneSettings> = {}): DesktopLaneSettings & { lines: string[] } {
   const lines: string[] = [];
   return {
-    lockPath, pollMilliseconds: 10, unreadableTimeoutMilliseconds: 100, heartbeatMilliseconds: 20, staleAfterMilliseconds: 60_000,
+    name: "desktop", lockPath, pollMilliseconds: 10, unreadableTimeoutMilliseconds: 100, heartbeatMilliseconds: 20, staleAfterMilliseconds: 60_000,
     host: "this-host", processId: 1000,
     isRunning: () => true, log: (line) => lines.push(line), lines, ...overrides,
   };
+}
+
+/** One local lane with the lock. */
+function poolOf(lock: DesktopLane): LanePool {
+  return new LanePool([{ name: "desktop", lock, remote: null }], 10, { host: "this-host", user: "me" });
 }
 
 function lockFolder(): string {
@@ -107,7 +113,7 @@ test("the CPU pool never runs more than its size at once", async () => {
 
 function runner(output: string[]) {
   const lane = new DesktopLane(laneSettings(join(lockFolder(), "lane.lock")));
-  return new ProcessHostRunner(process.cwd(), lane, new CpuPool(1), (text) => output.push(text));
+  return new ProcessHostRunner(process.cwd(), poolOf(lane), new CpuPool(1), (text) => output.push(text));
 }
 
 test("children report their status with prefixed output, on either resource", async () => {
@@ -115,12 +121,12 @@ test("children report their status with prefixed output, on either resource", as
   const host = runner(output);
   equal(await host.run({ resource: "cpu", label: "one", command: process.execPath, args: ["-e", "console.log('a\\nb'); process.exit(2)"] }), 2);
   equal(await host.run({ resource: "desktop", label: "two", command: process.execPath, args: ["-e", "console.error('c')"] }), 0);
-  deepStrictEqual(output, ["[one] a\n", "[one] b\n", "[two] c\n"]);
+  deepStrictEqual(output, ["[one] a\n", "[one] b\n", "[two] on desktop lane desktop\n", "[two] c\n"]);
 });
 
 test("a child that cannot start is a setup error and the lane is released", async () => {
   const lockPath = join(lockFolder(), "lane.lock");
-  const host = new ProcessHostRunner(process.cwd(), new DesktopLane(laneSettings(lockPath)), new CpuPool(1), () => {});
+  const host = new ProcessHostRunner(process.cwd(), poolOf(new DesktopLane(laneSettings(lockPath))), new CpuPool(1), () => {});
   await rejects(host.run({ resource: "cpu", label: "x", command: join(lockFolder(), "missing.exe"), args: [] }), SetupError);
   await rejects(host.run({ resource: "desktop", label: "y", command: join(lockFolder(), "missing.exe"), args: [] }), SetupError);
   equal(existsSync(lockPath), false);
@@ -134,7 +140,7 @@ test("a child that ends from a signal is a setup error and the lane is released"
     setImmediate(() => child.emit("close", null, "SIGTERM"));
     return child;
   }) as unknown as typeof spawn;
-  const host = new ProcessHostRunner(process.cwd(), new DesktopLane(laneSettings(lockPath)), new CpuPool(1), () => {}, signalled);
+  const host = new ProcessHostRunner(process.cwd(), poolOf(new DesktopLane(laneSettings(lockPath))), new CpuPool(1), () => {}, signalled);
   await rejects(host.run({ resource: "desktop", label: "z", command: "tool", args: [] }),
     (error: Error) => error instanceof SetupError && error.message.includes("SIGTERM"));
   equal(existsSync(lockPath), false);
@@ -142,7 +148,7 @@ test("a child that ends from a signal is a setup error and the lane is released"
 
 test("an aborted run stops its child, starts no later one, and releases the lane", async () => {
   const lockPath = join(lockFolder(), "lane.lock");
-  const host = new ProcessHostRunner(lockFolder(), new DesktopLane(laneSettings(lockPath)), new CpuPool(1), () => {});
+  const host = new ProcessHostRunner(lockFolder(), poolOf(new DesktopLane(laneSettings(lockPath))), new CpuPool(1), () => {});
   const controller = new AbortController();
   const started = Date.now();
   const running = host.run({
@@ -236,7 +242,7 @@ test("a lock problem at release does not replace the child's own failure", async
     });
     return child;
   }) as unknown as typeof spawn;
-  const host = new ProcessHostRunner(process.cwd(), new DesktopLane(laneSettings(lockPath)), new CpuPool(1), (text) => output.push(text), failing);
+  const host = new ProcessHostRunner(process.cwd(), poolOf(new DesktopLane(laneSettings(lockPath))), new CpuPool(1), (text) => output.push(text), failing);
   await rejects(host.run({ resource: "desktop", label: "w", command: "dotnet", args: [] }),
     (error: Error) => error instanceof SetupError && error.message.includes("could not be started"));
   ok(output.some((line) => line.includes("no longer belongs to this run")), output.join(""));
@@ -245,7 +251,7 @@ test("stopping a desktop command also stops the apps started from the run folder
   const root = lockFolder();
   const stopped: string[] = [];
   const output: string[] = [];
-  const host = new ProcessHostRunner(root, new DesktopLane(laneSettings(join(root, "lane.lock"))), new CpuPool(1), (text) => output.push(text), spawn,
+  const host = new ProcessHostRunner(root, poolOf(new DesktopLane(laneSettings(join(root, "lane.lock")))), new CpuPool(1), (text) => output.push(text), spawn,
     (folder) => stopped.push(folder));
   for (const resource of ["desktop", "cpu"] as const) {
     const controller = new AbortController();
@@ -255,7 +261,7 @@ test("stopping a desktop command also stops the apps started from the run folder
   }
   deepStrictEqual(stopped, [join(root, "out", "runs")]);
 
-  const failing = new ProcessHostRunner(root, new DesktopLane(laneSettings(join(root, "lane2.lock"))), new CpuPool(1), (text) => output.push(text), spawn,
+  const failing = new ProcessHostRunner(root, poolOf(new DesktopLane(laneSettings(join(root, "lane2.lock")))), new CpuPool(1), (text) => output.push(text), spawn,
     () => {
       throw new Error("powershell is missing");
     });
