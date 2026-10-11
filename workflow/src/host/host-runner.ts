@@ -32,7 +32,11 @@ export interface HostRunner {
 export function killTree(child: ChildProcess): void {
   if (child.pid === undefined) return;
   if (process.platform === "win32") {
-    spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore" }).on("error", () => child.kill());
+    try {
+      spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore" }).on("error", () => child.kill());
+    } catch {
+      child.kill();
+    }
   } else {
     child.kill("SIGKILL");
   }

@@ -169,6 +169,9 @@ test("an agent that stops answering fails the request after the stale time, and 
   await rejects(remote.run(node("process.exit(0)"), setup.workingFolder, () => {}),
     (error: Error) => error instanceof SetupError && /stopped answering/.test(error.message) && /may still be running/.test(error.message));
   ok(Date.now() - started >= 500);
+  const request = readdirSync(requestsFolder(setup.laneFolder)).find((name) => name.endsWith(".json") && !name.endsWith(".exit.json"));
+  ok(request !== undefined);
+  ok(existsSync(requestFiles(setup.laneFolder, request.slice(0, -5)).cancel), "leave the cancel for an agent that resumes answering");
 });
 
 test("a lane that says how starts its agent and waits for it; one that never starts is a setup error", async () => {

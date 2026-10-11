@@ -69,12 +69,14 @@ export class LaneAgent {
     const document: AgentDocument = {
       host: this.settings.host, user: this.settings.user, processId: this.settings.processId, startedUtc: new Date().toISOString(), token: this.token,
     };
-    await writeAtomically(agentFile(folder), `${JSON.stringify(document, null, 2)}\n`);
-    this.heartbeat = setInterval(() => void this.beat(), this.settings.heartbeatMilliseconds);
     for (const id of await this.requestIds()) {
       if (existsSync(requestFiles(folder, id).exit)) continue;
       await this.answer(id, { kind: "failed", message: "The lane agent was not running when this request was sent, or stopped while it ran it." });
     }
+    // Publish the heartbeat only after stale requests have been answered. Otherwise a workflow can see this
+    // agent, submit a new request, and have the startup scan incorrectly fail it as an old request.
+    await writeAtomically(agentFile(folder), `${JSON.stringify(document, null, 2)}\n`);
+    this.heartbeat = setInterval(() => void this.beat(), this.settings.heartbeatMilliseconds);
     this.serving = this.serve();
     return document;
   }
