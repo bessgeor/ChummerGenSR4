@@ -165,6 +165,9 @@ test("a killed holdout run keeps its exposure and resumes; activation is certifi
   ok(resumed.lines.some((line) => /certificate: the lower bound .* is below 0.9/.test(line)));
   equal(await activate(testBaseline, "0"), 1);
   ok(resumed.lines.some((line) => line.includes(`the run ${testBaseline} is not the test run of a holdout exposure`)));
+  // The candidate is activated on the metric it was gated on, not another one.
+  equal(await runEvalCommand(["tune", "activate", "--run", killed, "--baseline", testBaseline, "--metric", "rootCause", "--min-pass", "0"], resumed), 1);
+  ok(resumed.lines.some((line) => line.includes("the candidate was gated on development by prediction, not rootCause")), resumed.lines.join("\n"));
   equal(readActiveFile(resumed.tuningFolder(), "hypothesis"), null);
   equal(readFileSync(certificatePath(certificates, "hypothesis"), "utf8"), `${original}\n`);
 

@@ -29,19 +29,23 @@ function codeEntry(certificate: Certificate | null): Entry {
  */
 export function activate(folders: ActivationFolders, request: ActivationRequest, now: Date): ActivationOutcome {
   const runs = join(folders.evalsFolder, "runs");
+  const candidate = runState(join(runs, request.run));
   // Activated by this run already (stopped before its certificate was written): the certificate is written again.
-  const done = readActiveFile(folders.tuningFolder, runState(join(runs, request.run)).settings.jobKind)?.active;
+  const done = readActiveFile(folders.tuningFolder, candidate.settings.jobKind)?.active;
   if (done !== undefined && done.evidence?.test.candidate === request.run && done.certificate !== null) {
     writeCertificate(folders.certificatesFolder, done.certificate);
     return { activated: done, comparison: done.evidence.test, certificate: done.certificate };
   }
-  const candidate = runState(join(runs, request.run));
   const baseline = runState(join(runs, request.baseline));
   const jobKind = candidate.settings.jobKind;
   const exposure = exposureOf(readLedger(folders.tuningFolder), request.run);
   const reasons: string[] = [];
   if (exposure === undefined) reasons.push(`the run ${request.run} is not the test run of a holdout exposure`);
   else if (measuredOf(candidate.settings) !== exposure.candidate) reasons.push(`the run ${request.run} measured ${measuredOf(candidate.settings)}, not ${exposure.candidate}`);
+  // The candidate is activated on the metric it was gated on: another one is a different claim.
+  if (exposure !== undefined && exposure.development.metric !== request.thresholds.metric) {
+    reasons.push(`the candidate was gated on development by ${exposure.development.metric}, not ${request.thresholds.metric}`);
+  }
   if (candidate.settings.tuning === null) reasons.push(`the run ${request.run} measured the code's prompt, not a candidate`);
   else requireCurrent(candidate.settings.tuning, `The candidate of run ${request.run}`);
   if (!candidate.complete) reasons.push(`the run ${request.run} is not complete; resume it first`);
