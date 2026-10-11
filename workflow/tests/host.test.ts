@@ -174,7 +174,11 @@ test("a waiter that judged a lock abandoned never removes a live lock created si
     },
   });
   const acquired = new DesktopLane(settings).acquire();
-  await new Promise((resolve) => setTimeout(resolve, 80));
+  // The waiter announces its wait only after the takeover attempt released its guard.
+  for (let waited = 0; !settings.lines.some((line) => line.startsWith("Waiting for desktop lane")); waited += 10) {
+    ok(waited < 10_000, "the waiter never announced its wait");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
   equal(JSON.parse(readFileSync(path, "utf8")).token, "live");
   equal(existsSync(`${path}.takeover`), false);
   (await import("node:fs")).unlinkSync(path);
