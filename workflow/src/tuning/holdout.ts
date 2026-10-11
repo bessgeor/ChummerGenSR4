@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { compareRuns } from "../evals/comparison.js";
@@ -78,7 +78,40 @@ export type HoldoutRequest = {
   readonly onExposure?: (exposure: Exposure) => void;
 };
 
-export type HoldoutDependencies = EvalRunDependencies & { readonly evalsFolder: string; readonly tuningFolder: string };
+export type HoldoutDependencies = EvalRunDependencies & {
+  readonly evalsFolder: string;
+  readonly tuningFolder: string;
+  /** How long a command waits for another one that holds the ledger; default 10 s. */
+  readonly ledgerLockWaitMs?: number;
+};
+
+/**
+ * Runs a synchronous step holding the ledger's lock, a folder only one command can create, so commands in two processes
+ * do not both pass the exposure limit. The step awaits nothing, so the lock is held for milliseconds; a command that
+ * cannot get it in time fails and names the folder.
+ */
+function withLedgerLock<T>(dependencies: HoldoutDependencies, step: () => T): T {
+  const lock = `${tuningFiles(dependencies.tuningFolder).holdout}.lock`;
+  mkdirSync(dependencies.tuningFolder, { recursive: true });
+  const deadline = Date.now() + (dependencies.ledgerLockWaitMs ?? 10_000);
+  for (;;) {
+    try {
+      mkdirSync(lock);
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      if (Date.now() >= deadline) {
+        throw new SetupError(`The holdout ledger is locked by ${lock}: another tune command holds it, or one was killed while it updated the ledger; remove the folder when none runs.`);
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+    }
+  }
+  try {
+    return step();
+  } finally {
+    rmSync(lock, { recursive: true, force: true });
+  }
+}
 
 /**
  * Opens the test partition to a candidate that beat the active configuration on development: records the exposure,
@@ -109,42 +142,47 @@ export async function openHoldout(dependencies: HoldoutDependencies, request: Ho
   if (dataset.hash !== hash) throw new SetupError(`The dataset ${measured.settings.dataset.folder} is not the one the development runs ran on.`);
   const testItems = [...new Set(dataset.items.filter((item) => item.partition === "test").map((item) => item.partitionKey))].sort();
   if (testItems.length === 0) throw new SetupError(`The dataset ${measured.settings.dataset.folder} has no item in the test partition.`);
-  // From here to the ledger's write nothing awaits: two commands cannot both pass the limit on the same ledger.
-  const ledger = readLedger(dependencies.tuningFolder);
-  // Another name, version or seed does not make an item new: an exposure counts against every dataset whose test partition holds one of its items.
-  const exposed = ledger.exposures.filter((exposure) => exposure.jobKind === jobKind && exposure.testItems.some((item) => testItems.includes(item)));
   const where = `${dataset.name} v${dataset.version}`;
-  // An exposure whose run was never created (stopped between the ledger and the run) starts its run now, under its recorded ID.
-  const unstarted = exposed.find((exposure) => exposure.candidate === candidate.id && !existsSync(runFolders(join(runs, exposure.testRun)).settings));
-  if (unstarted !== undefined) {
-    dependencies.log(`Holdout: ${candidate.id} was shown the test partition as run ${unstarted.testRun}, which was not started; starting it.`);
+  // The ledger is read, checked and written under its lock with nothing awaited in between: two commands cannot both pass the limit.
+  const opening = withLedgerLock(dependencies, (): { refused: string[] } | { unstarted: Exposure } | { recorded: Exposure; count: number } => {
+    const ledger = readLedger(dependencies.tuningFolder);
+    // Another name, version or seed does not make an item new: an exposure counts against every dataset whose test partition holds one of its items.
+    const exposed = ledger.exposures.filter((exposure) => exposure.jobKind === jobKind && exposure.testItems.some((item) => testItems.includes(item)));
+    // An exposure whose run was never created (stopped between the ledger and the run) starts its run now, under its recorded ID.
+    const unstarted = exposed.find((exposure) => exposure.candidate === candidate.id && !existsSync(runFolders(join(runs, exposure.testRun)).settings));
+    if (unstarted !== undefined) return { unstarted };
+    const refused: string[] = [];
+    if (development.unpaired > 0) {
+      refused.push(`on ${development.unpaired} items the candidate has a value of ${metric} on fewer repetitions than the active configuration; an abstention or a failure is not an improvement`);
+    } else if (!passesDevelopmentGate(development)) {
+      refused.push(`the candidate did not beat the active configuration on development: mean difference of ${metric} ${development.meanDifference ?? "n/a"} `
+        + `over ${development.pairs} pairs, model time ${development.modelTimeMeanDifferenceMs ?? "n/a"} ms`);
+    }
+    if (exposed.some((exposure) => exposure.candidate === candidate.id)) refused.push(`the candidate ${candidate.id} has already seen test items of ${where}`);
+    if (exposed.length >= request.maxExposures) {
+      refused.push(`the test items of ${where} have been shown to ${exposed.length} candidates (at most ${request.maxExposures}); `
+        + "a dataset with test items that no candidate has seen is needed: another seed moves the items between partitions and does not make them new");
+    }
+    if (refused.length > 0) return { refused };
+    const exposure: Exposure = {
+      testItems, datasetHash: hash, dataset: { name: measured.settings.dataset.name, version: measured.settings.dataset.version }, jobKind, candidate: candidate.id, tuning,
+      development, testRun: dependencies.newRunId(), exposedUtc: dependencies.now().toISOString(),
+    };
+    // The exposure is recorded first: a run stopped later still counts, and resumes with eval run --resume (or, not yet created, starts with tune holdout).
+    writeLedger(dependencies.tuningFolder, { ...ledger, exposures: [...ledger.exposures, exposure] });
+    return { recorded: exposure, count: exposed.length + 1 };
+  });
+  if ("refused" in opening) return opening;
+  if ("unstarted" in opening) {
+    const { unstarted } = opening;
+    dependencies.log(`Holdout: ${candidate.id} was shown the test items of ${unstarted.dataset.name} v${unstarted.dataset.version} as run ${unstarted.testRun}, which was not started; `
+      + "starting that run with its own development runs.");
     request.onExposure?.(unstarted);
     return { exposure: unstarted, ...await startHoldoutRun(dependencies, unstarted, runState(join(runs, unstarted.development.candidate)).settings) };
   }
-  const refused: string[] = [];
-  if (development.unpaired > 0) {
-    refused.push(`the candidate has no value of ${metric} on ${development.unpaired} items the active configuration has one on; an abstention or a failure is not an improvement`);
-  } else if (!passesDevelopmentGate(development)) {
-    refused.push(`the candidate did not beat the active configuration on development: mean difference of ${metric} ${development.meanDifference ?? "n/a"} `
-      + `over ${development.pairs} pairs, model time ${development.modelTimeMeanDifferenceMs ?? "n/a"} ms`);
-  }
-  if (exposed.some((exposure) => exposure.candidate === candidate.id)) refused.push(`the candidate ${candidate.id} has already seen test items of ${where}`);
-  if (exposed.length >= request.maxExposures) {
-    refused.push(`the test items of ${where} have been shown to ${exposed.length} candidates (at most ${request.maxExposures}); `
-      + "a dataset with test items that no candidate has seen is needed: another seed moves the items between partitions and does not make them new");
-  }
-  if (refused.length > 0) return { refused };
-
-  const testRun = dependencies.newRunId();
-  const exposure: Exposure = {
-    testItems, datasetHash: hash, dataset: { name: measured.settings.dataset.name, version: measured.settings.dataset.version }, jobKind, candidate: candidate.id, tuning,
-    development, testRun, exposedUtc: dependencies.now().toISOString(),
-  };
-  // The exposure is recorded first: a run stopped later still counts, and resumes with eval run --resume (or, not yet created, starts with tune holdout).
-  writeLedger(dependencies.tuningFolder, { ...ledger, exposures: [...ledger.exposures, exposure] });
-  request.onExposure?.(exposure);
-  dependencies.log(`Holdout: ${candidate.id} is shown the test items of ${where} as run ${testRun} (${exposed.length + 1} of at most ${request.maxExposures} candidates).`);
-  return { exposure, ...await startHoldoutRun(dependencies, exposure, measured.settings) };
+  request.onExposure?.(opening.recorded);
+  dependencies.log(`Holdout: ${candidate.id} is shown the test items of ${where} as run ${opening.recorded.testRun} (${opening.count} of at most ${request.maxExposures} candidates).`);
+  return { exposure: opening.recorded, ...await startHoldoutRun(dependencies, opening.recorded, measured.settings) };
 }
 
 /** Starts an exposure's test run under its recorded ID with the candidate development run's repetitions, agent choice, pool and executables. */

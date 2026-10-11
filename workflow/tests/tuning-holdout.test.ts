@@ -5,12 +5,13 @@ import { test } from "node:test";
 import { certificatePath } from "../src/evals/certificate.js";
 import { freezeDataset, partitionOf } from "../src/evals/dataset.js";
 import { runEvalCommand, type EvalContext } from "../src/evals/eval-commands.js";
+import { runDependencies } from "../src/evals/eval-context.js";
 import { readRun } from "../src/evals/eval-run.js";
 import { SetupError } from "../src/host/setup-error.js";
 import { readActiveFile, tuningFiles } from "../src/tuning/active-configuration.js";
 import { candidatesFolder, storeCandidate } from "../src/tuning/candidates.js";
 import { passesDevelopmentGate } from "../src/tuning/development.js";
-import { readLedger } from "../src/tuning/holdout.js";
+import { openHoldout, readLedger } from "../src/tuning/holdout.js";
 import { tuningId, type Tuning } from "../src/tuning/tuning.js";
 import { FakeAgents, hypothesisAnswer, type JobCall, type Reply } from "./diagnosis-harness.js";
 import { tuningFixture } from "./tuning-eval-fixtures.js";
@@ -230,4 +231,30 @@ test("rollback to an entry without a certificate removes the job kind's certific
   equal(existsSync(certificatePath(context.certificatesFolder(), "hypothesis")), false);
   deepStrictEqual(readActiveFile(context.tuningFolder(), "hypothesis")!.rolledBack[0]!.certificate, issued);
   ok(context.lines.some((line) => line === "Rolled back hypothesis to the code's prompt, without a certificate."));
+});
+
+test("a held ledger lock stops the holdout, which writes nothing and leaves that lock alone; the lock is released after an exposure and after a refusal", async () => {
+  const fixture = await tuningFixture(50, seed);
+  const context: EvalContext & { lines: string[] } = { ...fixture.context, agents: () => new FakeAgents(reply) };
+  const dataset = ["--dataset", fixture.dataset];
+  const baseline = (await command(context, ["run", ...dataset, "--partition", "development", "--tuning", "none"])).run!;
+  const run = (await command(context, ["run", ...dataset, "--partition", "development", "--tuning", add(context, allRight)])).run!;
+  const lock = `${tuningFiles(context.tuningFolder()).holdout}.lock`;
+  const request = { candidate: tuningId(allRight), baselineRun: baseline, candidateRun: run, metric: null, maxExposures: 3 };
+  const dependencies = { ...runDependencies(context), evalsFolder: context.paths.evalsFolder, tuningFolder: context.tuningFolder(), ledgerLockWaitMs: 0 };
+
+  mkdirSync(lock, { recursive: true });
+  await rejects(openHoldout(dependencies, request), (error: unknown) => error instanceof SetupError && error.message.includes(lock));
+  equal(existsSync(tuningFiles(context.tuningFolder()).holdout), false);
+  ok(existsSync(lock), "a lock that is not ours is left alone");
+
+  rmSync(lock, { recursive: true });
+  const opened = await openHoldout(dependencies, request);
+  ok("exposure" in opened);
+  equal(readLedger(context.tuningFolder()).exposures.length, 1);
+  equal(existsSync(lock), false);
+  // A refusal releases the lock too.
+  const refused = await openHoldout(dependencies, request);
+  ok("refused" in refused);
+  equal(existsSync(lock), false);
 });
