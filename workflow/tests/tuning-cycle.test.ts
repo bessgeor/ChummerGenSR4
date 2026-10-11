@@ -2,6 +2,7 @@ import { deepStrictEqual, equal, ok, rejects } from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { resolveAgentSettings } from "../src/agents/agent-settings.js";
 import { freezeDataset, partitionOf } from "../src/evals/dataset.js";
 import { runEvalCommand, type EvalContext } from "../src/evals/eval-commands.js";
 import { readRun } from "../src/evals/eval-run.js";
@@ -102,7 +103,7 @@ test("a cycle resumed after a holdout stopped before its run was created follows
   equal(readActiveFile(context.tuningFolder(), "hypothesis")!.active.tuning?.guidance[0], "Cite the capture.");
 });
 
-test("a cycle that meets an unstarted exposure on another version of its dataset runs both test runs on that version", async () => {
+test("a cycle that meets an unstarted exposure on another version of its dataset runs both test runs on that version and with that exposure's agent choice", async () => {
   const fixture = await tuningFixture(50, seed);
   const context = { ...fixture.context, agents: () => agents([proposal("Cite the capture.")], "test", { "Cite the capture.": "all" }) };
   equal(await runEvalCommand(["tune", "cycle", "--dataset", fixture.dataset, "--min-pass", "0.3"], context), 0, context.lines.join("\n"));
@@ -114,12 +115,15 @@ test("a cycle that meets an unstarted exposure on another version of its dataset
   // A new version of the dataset holds the same test items: the candidate's exposure counts, and its run starts on the first version.
   const { folder: next } = await freezeDataset(await fixture.threads.input({ name: "tune", testPercent: 50, seed }));
   const before = new Set(readdirSync(join(context.paths.evalsFolder, "tuning", "cycles")));
-  equal(await runEvalCommand(["tune", "cycle", "--dataset", next, "--min-pass", "0.3"], context), 0, context.lines.join("\n"));
+  // The cycle itself runs on another agent choice (more effort) than the exposure's development runs did.
+  const higher = { ...context, agentSettings: () => resolveAgentSettings({ jobs: { hypothesis: { provider: "claude", effort: "high" } } }) };
+  equal(await runEvalCommand(["tune", "cycle", "--dataset", next, "--min-pass", "0.3"], higher), 0, context.lines.join("\n"));
   const id = readdirSync(join(context.paths.evalsFolder, "tuning", "cycles")).find((name) => !before.has(name))!;
   const done = readCycle(context.paths.evalsFolder, id);
   deepStrictEqual([done.outcome, done.holdout?.run, readLedger(context.tuningFolder()).exposures.length], ["activated", exposure.testRun, 1]);
   const settings = (run: string) => readRun(join(context.paths.evalsFolder, "runs", run)).settings;
   deepStrictEqual([settings(done.holdout!.run).dataset.folder, settings(done.testBaseline!).dataset.folder], [fixture.dataset, fixture.dataset]);
+  deepStrictEqual([settings(done.baseline!).choice.effort, settings(done.holdout!.run).choice.effort, settings(done.testBaseline!).choice.effort], ["high", "medium", "medium"]);
 });
 
 test("a cycle without a better candidate ends no_improvement and changes nothing; an abstention ends the proposals", async () => {

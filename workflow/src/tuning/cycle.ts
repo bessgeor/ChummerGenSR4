@@ -149,13 +149,13 @@ async function continueCycle(dependencies: CycleDependencies, start: Cycle): Pro
   // Every run after the baseline uses the agent choice, pool and executables the baseline ran with.
   const settings = () => (cycle.baseline !== null && existsSync(runFolders(join(runs, cycle.baseline)).settings)
     ? agentSettingsOf(runState(join(runs, cycle.baseline)).settings) : dependencies.tune.settings);
-  const runStart = (partition: "development" | "test", tuning: Tuning | null, name: string, on = { datasetFolder: options.dataset, repeat: options.repeat }) => () => ({
-    datasetFolder: on.datasetFolder, partition, repeat: on.repeat, name, settings: settings(), tuning,
+  const runStart = (partition: "development" | "test", tuning: Tuning | null, name: string, on?: ReturnType<typeof onExposureOf>) => () => ({
+    datasetFolder: on?.datasetFolder ?? options.dataset, partition, repeat: on?.repeat ?? options.repeat, name, settings: on?.settings ?? settings(), tuning,
   });
-  // The dataset and repetitions of an exposure's test run: those of its own development runs.
+  // The dataset, repetitions and agent choice of an exposure's test run: those of its own development runs.
   const onExposureOf = (held: Exposure) => {
     const development = runState(join(runs, held.development.candidate)).settings;
-    return { datasetFolder: development.dataset.folder, repeat: development.repeat };
+    return { datasetFolder: development.dataset.folder, repeat: development.repeat, settings: agentSettingsOf(development) };
   };
 
   // 1. The development baseline of the active configuration.
@@ -224,7 +224,7 @@ async function continueCycle(dependencies: CycleDependencies, start: Cycle): Pro
   }
 
   // 4. The active configuration on the same test items, then the certified activation. An exposure the ledger already held
-  // (a dataset version with the same test items, other repetitions) decides the dataset and repetitions of both test runs.
+  // (a dataset version with the same test items, other repetitions or agent choice) decides the dataset, repetitions and agent choice of both test runs.
   if (cycle.testBaseline === null) cycle = save(dependencies.evalsFolder, { ...cycle, testBaseline: dependencies.newRunId() });
   const held = exposureOf(readLedger(dependencies.tuningFolder), holdoutRun)!;
   await ensureRun(dependencies, cycle.testBaseline!, runStart("test", active, `${cycle.cycleId} test baseline`, onExposureOf(held)));
