@@ -72,19 +72,13 @@ export function delay(milliseconds: number, signal: AbortSignal | undefined): Pr
 
 /**
  * The machine-wide desktop lane: a lock file created exclusively and refreshed by its owner while it runs. A lock
- * whose owner on this host is no longer running, or has not refreshed it for a long time, is taken over; any other
- * owner is waited for; a lock that stays unreadable is a setup error.
+ * whose owner on this host is no longer running, or has not refreshed it for a long time, is taken over, and so is a
+ * lock of another host that stayed unchanged that long; any other owner is waited for; a lock that stays unreadable
+ * is a setup error.
  */
 export class DesktopLane {
   constructor(private readonly settings: DesktopLaneSettings) {}
 
-  get name(): string {
-    return this.settings.name;
-  }
-
-  get pollMilliseconds(): number {
-    return this.settings.pollMilliseconds;
-  }
 
   /** Waits for the lane (until the signal aborts) and returns the function that releases it. */
   async acquire(signal?: AbortSignal): Promise<() => Promise<void>> {
@@ -108,6 +102,8 @@ export class DesktopLane {
     };
     let unreadableSince: number | null = null;
     let announced = false;
+    // An owner on another host may refresh the lock on another clock, so only a refresh seen here counts.
+    let watched: { readonly token: string; readonly modified: number; readonly since: number } | null = null;
     return {
       next: async (signal) => {
         const { lockPath } = this.settings;
@@ -132,12 +128,17 @@ export class DesktopLane {
           }
           unreadableSince = null;
           if (owner === "gone") continue;
-          const reason = this.abandonedReason(owner);
+          if (watched === null || watched.token !== owner.lock.token || watched.modified !== owner.refreshedMilliseconds) {
+            watched = { token: owner.lock.token, modified: owner.refreshedMilliseconds, since: Date.now() };
+          }
+          const reason = this.abandonedReason(owner, Date.now() - watched.since);
           if (reason !== null) {
             await this.takeOver(owner.lock, reason, signal);
             continue;
           }
-          if (!announced) {
+          const own = owner.lock.host === this.settings.host && owner.lock.processId === this.settings.processId;
+          // Another command of this run holding the lane is no contention worth announcing.
+          if (!announced && !own) {
             this.settings.log(`Waiting for desktop lane ${this.settings.name}, held by process ${owner.lock.processId} on ${owner.lock.host} since ${owner.lock.startedUtc}.`);
             announced = true;
           }
@@ -147,10 +148,17 @@ export class DesktopLane {
     };
   }
 
-  /** Why the owner counts as gone, or null when it may still be running. */
-  private abandonedReason(owner: Owner): string | null {
+  /**
+   * Why the owner counts as gone, or null when it may still be running. An owner on another host is judged only by
+   * how long this process has seen its lock unchanged, since neither its process nor its clock can be read here.
+   */
+  private abandonedReason(owner: Owner, unchangedMilliseconds: number): string | null {
     const { lock } = owner;
-    if (lock.host !== this.settings.host) return null;
+    if (lock.host !== this.settings.host) {
+      return unchangedMilliseconds > this.settings.staleAfterMilliseconds
+        ? `process ${lock.processId} on ${lock.host}, whose lock has not changed for ${Math.round(unchangedMilliseconds / 1000)} s`
+        : null;
+    }
     if (!this.settings.isRunning(lock.processId)) return `process ${lock.processId}, which is no longer running`;
     const silent = Date.now() - owner.refreshedMilliseconds;
     return silent > this.settings.staleAfterMilliseconds

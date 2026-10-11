@@ -1,5 +1,5 @@
 import { delay, type DesktopLane } from "../host/desktop-lane.js";
-import { SetupError } from "../host/setup-error.js";
+import { LaneConflict } from "./lane-conflict.js";
 import type { LaneIdentity, RemoteLane } from "./remote-lane.js";
 
 /** A desktop lane: its lock, and where its commands run: on this machine (no remote) or through its agent. */
@@ -32,7 +32,11 @@ export class LanePool {
    * a desktop session or the app's settings. A lane whose agent does not run fails the check.
    */
   check(signal?: AbortSignal): Promise<void> {
-    this.checked ??= this.compareIdentities(signal);
+    this.checked ??= this.compareIdentities(signal).catch((error: unknown) => {
+      // A conflict is final; a lane that could not be asked (its agent is not running, the run was stopped) is asked again.
+      if (!(error instanceof LaneConflict)) this.checked = null;
+      throw error;
+    });
     return this.checked;
   }
 
@@ -45,7 +49,7 @@ export class LanePool {
       const key = `${identity.user}@${identity.host}`.toLowerCase();
       const other = seen.get(key);
       if (other !== undefined) {
-        throw new SetupError(`Desktop lanes ${other} and ${lane} both run as ${identity.user} on ${identity.host}; one user on one host has one desktop session and one set of the app's settings, so give each lane its own user or machine.`);
+        throw new LaneConflict(`Desktop lanes ${other} and ${lane} both run as ${identity.user} on ${identity.host}; one user on one host has one desktop session and one set of the app's settings, so give each lane its own user or machine.`);
       }
       seen.set(key, lane);
     }

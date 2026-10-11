@@ -107,8 +107,8 @@ test("two desktop commands run on two lanes at the same time, and a third waits 
   });
   await new Promise((resolve) => setTimeout(resolve, 60));
   equal(third, null);
-  // Each lane's owner is announced once, however often the pool tries it.
-  deepStrictEqual(lines.map((line) => line.split(",")[0]), ["Waiting for desktop lane a", "Waiting for desktop lane b"]);
+  // Both lanes are held by this process's own commands, which is no contention worth announcing.
+  deepStrictEqual(lines, []);
   await held[1]!.release();
   const next = await waiting;
   equal(next.lane.name, "b");
@@ -165,6 +165,20 @@ test("two lanes of one user on one host are a setup error before any command, ch
 
   const down = new LanePool([{ name: "b", lock: lock("b", join(root, "e.lock")), remote: new FakeRemote(new SetupError("The lane agent of desktop lane b is not running")) }], 10, me);
   await rejects(down.check(), /not running/);
+
+  // A lane that could not be asked is asked again by the next check.
+  let answers = 0;
+  const flaky: RemoteLane = {
+    identity: async () => {
+      if (++answers === 1) throw new SetupError("The lane agent of desktop lane b is not running");
+      return { host: "vm", user: "me" };
+    },
+    run: async () => 0,
+  };
+  const later = new LanePool([{ name: "b", lock: lock("b", join(root, "f.lock")), remote: flaky }], 10, me);
+  await rejects(later.check(), /not running/);
+  await later.check();
+  equal(answers, 2);
 });
 
 /** A host whose lanes report scripted environment fingerprints. */

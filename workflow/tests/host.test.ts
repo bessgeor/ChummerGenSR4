@@ -70,15 +70,33 @@ test("a lock of a process on this host that is no longer running is taken over",
   await release();
 });
 
-test("a lock of another host is never taken over", async () => {
+test("a lock of another host is taken over only once this process saw it unchanged for the stale time", async () => {
   const path = join(lockFolder(), "lane.lock");
   writeLock(path, 42, "other-host");
-  const settings = laneSettings(path, { isRunning: () => false });
+  // The other host's clock is years behind, and its process ID means nothing here.
+  let behind = Date.UTC(2001, 0, 1) / 1000;
+  utimesSync(path, behind, behind);
+  const beating = setInterval(() => utimesSync(path, ++behind, behind), 30);
+  const settings = laneSettings(path, { isRunning: () => false, staleAfterMilliseconds: 300 });
   const acquired = new DesktopLane(settings).acquire();
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  equal(JSON.parse(readFileSync(path, "utf8")).host, "other-host");
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  clearInterval(beating);
+  equal(JSON.parse(readFileSync(path, "utf8")).host, "other-host", "a refreshed lock is waited for");
+  const release = await acquired;
+  equal(JSON.parse(readFileSync(path, "utf8")).processId, 1000);
+  ok(settings.lines.some((line) => line.includes("Taking over") && line.includes("has not changed")), settings.lines.join("\n"));
+  await release();
+});
+
+test("a lane held by another command of the same process is waited for without an announcement", async () => {
+  const path = join(lockFolder(), "lane.lock");
+  writeLock(path, 1000, "this-host");
+  const settings = laneSettings(path);
+  const acquired = new DesktopLane(settings).acquire();
+  await new Promise((resolve) => setTimeout(resolve, 60));
   (await import("node:fs")).unlinkSync(path);
   await (await acquired)();
+  deepStrictEqual(settings.lines, []);
 });
 
 test("a lock that stays unreadable is a setup error naming the file", async () => {
