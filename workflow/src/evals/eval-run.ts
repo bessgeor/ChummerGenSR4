@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { jobKinds, type AgentChoice, type JobKind } from "../agents/agent-job.js";
@@ -11,6 +11,7 @@ import { validateChallenge, validateHypothesis } from "../diagnosis/validation.j
 import { SetupError } from "../host/setup-error.js";
 import { compiledFoldersIn } from "../compiled-source.js";
 import { readDocument } from "../steps/read-document.js";
+import { writeDocument } from "../steps/write-document.js";
 import { requireCurrent, tunedPromptVersion, tuningId, type Tuning } from "../tuning/tuning.js";
 import { datasetFolders, loadDataset, type DatasetItem, type Partition } from "./dataset.js";
 import { loadDiscoveryDataset } from "./discovery-dataset.js";
@@ -214,7 +215,7 @@ export async function startEvalRun(dependencies: EvalRunDependencies, start: Sta
     startedUtc: dependencies.now().toISOString(),
   });
   mkdirSync(runFolders(folder).samples, { recursive: true });
-  writeFileSync(runFolders(folder).settings, `${JSON.stringify(settings, null, 2)}\n`);
+  writeDocument(runFolders(folder).settings, settings);
   return { folder, summary: await runSamples(dependencies, folder, settings, dataset) };
 }
 
@@ -252,7 +253,7 @@ async function runSamples(dependencies: EvalRunDependencies, folder: string, set
       const itemId = key.slice(0, separator);
       if (!dataset.items.some((entry) => entry.itemId === itemId)) throw new SetupError(`Eval run ${settings.runId} names sample ${key}, whose item the dataset does not have.`);
       const sample = await dataset.run(context, itemId, Number(key.slice(separator + 1)));
-      writeFileSync(paths.sample(key), `${JSON.stringify(sample, null, 2)}\n`);
+      writeDocument(paths.sample(key), sample);
     } catch (error) {
       firstError ??= error;
       stop.abort();
@@ -263,7 +264,7 @@ async function runSamples(dependencies: EvalRunDependencies, folder: string, set
   if (outcomes.some((outcome) => outcome.status === "rejected")) throw firstError;
   const { samples } = readRun(folder);
   const summary = summarize(settings.runId, settings.jobKind, samples, dependencies.now());
-  writeFileSync(paths.summary, `${JSON.stringify(summary, null, 2)}\n`);
+  writeDocument(paths.summary, summary);
   return summary;
 }
 

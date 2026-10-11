@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { z } from "zod";
 import { compareRuns } from "../evals/comparison.js";
 import { agentSettingsOf, loadRunnable, runFolders, startEvalRun, type EvalRunDependencies, type RunSettings, type RunSummary } from "../evals/eval-run.js";
@@ -7,6 +7,7 @@ import { evaluatedJobKinds } from "../evals/evaluated-job-kinds.js";
 import { metricsOfJobKind, requireMetric, type Metric } from "../evals/metrics.js";
 import { SetupError } from "../host/setup-error.js";
 import { readDocument } from "../steps/read-document.js";
+import { writeDocument } from "../steps/write-document.js";
 import { activeTuning, ComparisonSummarySchema, tuningFiles } from "./active-configuration.js";
 import { candidatesFolder, readCandidate } from "./candidates.js";
 import { choiceDifference, comparisonSummary, passesDevelopmentGate, runState } from "./development.js";
@@ -40,8 +41,7 @@ export function readLedger(tuningFolder: string): Ledger {
 
 function writeLedger(tuningFolder: string, ledger: Ledger): void {
   const path = tuningFiles(tuningFolder).holdout;
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(LedgerSchema.parse(ledger), null, 2)}\n`);
+  writeDocument(path, LedgerSchema.parse(ledger));
 }
 
 /** The configuration a run measured as an ID, the code's prompt as `none`. */

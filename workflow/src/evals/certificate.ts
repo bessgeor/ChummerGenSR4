@@ -1,10 +1,11 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { efforts, providers, type JobKind } from "../agents/agent-job.js";
 import type { AgentSettings } from "../agents/agent-settings.js";
 import { SetupError } from "../host/setup-error.js";
 import type { RunOptions } from "../options/run-options.js";
+import { writeDocument } from "../steps/write-document.js";
 import { dispatchedJobKinds, tunedPromptVersion, tuningOf, type DispatchedTuning } from "../tuning/tuning.js";
 import { metrics, requireMetric, type Metric } from "./metrics.js";
 import { evaluatedJobKinds, promptVersions, readRun, summarize, type EvaluatedJobKind } from "./eval-run.js";
@@ -60,8 +61,7 @@ export function readCertificate(certificatesFolder: string, jobKind: EvaluatedJo
 
 /** Writes a certificate over its job kind's earlier one. */
 export function writeCertificate(certificatesFolder: string, certificate: Certificate): void {
-  mkdirSync(certificatesFolder, { recursive: true });
-  writeFileSync(certificatePath(certificatesFolder, certificate.jobKind), `${JSON.stringify(CertificateSchema.parse(certificate), null, 2)}\n`);
+  writeDocument(certificatePath(certificatesFolder, certificate.jobKind), CertificateSchema.parse(certificate));
 }
 
 /** The certificate a complete test-partition run that meets the thresholds earns, or every reason it does not; nothing is written. */

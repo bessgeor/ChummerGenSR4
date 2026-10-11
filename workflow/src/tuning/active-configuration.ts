@@ -1,11 +1,12 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { z } from "zod";
 import { CertificateSchema } from "../evals/certificate.js";
 import { evaluatedJobKinds, type EvaluatedJobKind } from "../evals/evaluated-job-kinds.js";
 import { metrics } from "../evals/metrics.js";
 import { SetupError } from "../host/setup-error.js";
 import { readDocument } from "../steps/read-document.js";
+import { writeDocument } from "../steps/write-document.js";
 import { requireCurrent, TuningSchema, type DispatchedTuning } from "./tuning.js";
 
 /** A paired comparison as tuning keeps it: the metric's difference with its interval and verdict, and the model time's. */
@@ -73,8 +74,7 @@ export function readActiveFile(folder: string, jobKind: EvaluatedJobKind): Activ
 
 export function writeActiveFile(folder: string, file: ActiveFile): void {
   const path = tuningFiles(folder).active(file.jobKind);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(ActiveFileSchema.parse(file), null, 2)}\n`);
+  writeDocument(path, ActiveFileSchema.parse(file));
 }
 
 /** The active configuration of a job kind, or null for the code's prompt; a stale one is a setup error. */

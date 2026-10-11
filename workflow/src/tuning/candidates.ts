@@ -1,9 +1,10 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import type { EvaluatedJobKind } from "../evals/evaluated-job-kinds.js";
 import { SetupError } from "../host/setup-error.js";
 import { readDocument } from "../steps/read-document.js";
+import { writeDocument } from "../steps/write-document.js";
 import { tuningId, TuningSchema, type Tuning } from "./tuning.js";
 
 /** A configuration under evaluation: written by a person (`added`) or by a `tune` job (`proposed`) from a development run. */
@@ -46,8 +47,7 @@ export function storeCandidate(folder: string, candidate: Omit<Candidate, "id" |
   const id = tuningId(candidate.tuning);
   if (existsSync(join(folder, `${id}.json`))) return { candidate: readCandidate(folder, id), existed: true };
   const stored = CandidateSchema.parse({ schemaVersion: 1, id, ...candidate });
-  mkdirSync(folder, { recursive: true });
-  writeFileSync(join(folder, `${id}.json`), `${JSON.stringify(stored, null, 2)}\n`);
+  writeDocument(join(folder, `${id}.json`), stored);
   return { candidate: stored, existed: false };
 }
 

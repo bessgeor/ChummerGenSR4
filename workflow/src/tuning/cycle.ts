@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { compareRuns } from "../evals/comparison.js";
@@ -6,6 +6,7 @@ import { agentSettingsOf, datasetJobKind, resumeEvalRun, runFolders, startEvalRu
 import { metrics, metricsOfJobKind, requireMetric, type Metric } from "../evals/metrics.js";
 import { SetupError } from "../host/setup-error.js";
 import { readDocument } from "../steps/read-document.js";
+import { writeDocument } from "../steps/write-document.js";
 import { activeTuning, ComparisonSummarySchema, readActiveFile } from "./active-configuration.js";
 import { activate } from "./activation.js";
 import { candidatesFolder, readCandidate } from "./candidates.js";
@@ -74,8 +75,7 @@ export function readCycle(evalsFolder: string, cycleId: string): Cycle {
 }
 
 function save(evalsFolder: string, cycle: Cycle): Cycle {
-  mkdirSync(cycleFolder(evalsFolder, cycle.cycleId), { recursive: true });
-  writeFileSync(cyclePath(evalsFolder, cycle.cycleId), `${JSON.stringify(CycleSchema.parse(cycle), null, 2)}\n`);
+  writeDocument(cyclePath(evalsFolder, cycle.cycleId), CycleSchema.parse(cycle));
   return cycle;
 }
 
