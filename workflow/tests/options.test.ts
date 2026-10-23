@@ -19,7 +19,7 @@ test("capture, compare and workflow options are parsed", () => {
     "--threshold", "0.5", "--case-file", "f.json", "--no-ocr", "--tessdata", "t", "--only", "compare"]);
   deepStrictEqual(parsed, {
     cases: ["a", "b", "c"], captures: ["common"], settingsOverlay: "o", threshold: 0.5, caseFile: "f.json",
-    canonicalCache: null, liveCanonical: false, noOcr: true, tessdata: "t", only: "compare", recapture: false,
+    canonicalCache: null, liveCanonical: false, noOcr: true, tessdata: "t", only: "compare", recapture: false, noDiagnosis: false,
   });
 });
 
@@ -45,6 +45,16 @@ test("--recapture is a capture option and needs the capture node", () => {
   equal(start([]).recapture, false);
   throws(() => parseArguments(["--recapture", "--only", "compare"]), /needs the capture node/);
   throws(() => parseArguments(["--only", "triage", "--recapture"]), /needs the capture node/);
+});
+
+test("--no-diagnosis ends the run after triage and contradicts --only diagnose", () => {
+  equal(start(["--no-diagnosis"]).noDiagnosis, true);
+  equal(start(["--only", "diagnose"]).only, "diagnose");
+  throws(() => parseArguments(["--only", "diagnose", "--no-diagnosis"]), /contradict/);
+  throws(() => parseArguments(["--only", "diagnose", "--recapture"]), /needs the capture node/);
+  const root = scratch();
+  equal(resolveRunOptions(start(["--no-diagnosis"]), {}, { LOCALAPPDATA: root }, root).diagnosis, false);
+  equal(resolveRunOptions(start([]), {}, { LOCALAPPDATA: root }, root).diagnosis, true);
 });
 
 test("--resume takes a thread and nothing else", () => {

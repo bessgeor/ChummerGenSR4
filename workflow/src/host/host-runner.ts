@@ -39,7 +39,7 @@ function prefixLines(label: string, write: (text: string) => void) {
 }
 
 /** Ends a child and everything it started; a capture run owns Chummer processes that must not outlive it. */
-function killTree(child: ChildProcess): void {
+export function killTree(child: ChildProcess): void {
   if (child.pid === undefined) return;
   if (process.platform === "win32") {
     spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore" }).on("error", () => child.kill());

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
+import { AgentsProfileSchema } from "../agents/agent-settings.js";
 import { SetupError } from "../host/setup-error.js";
 
 /** The optional local workflow profile: machine-specific defaults, never committed. */
@@ -8,6 +9,7 @@ export const ProfileSchema = z.strictObject({
   canonicalCache: z.string().min(1).optional(),
   settingsOverlay: z.string().min(1).optional(),
   cpuPool: z.number().int().min(1).optional(),
+  agents: AgentsProfileSchema.optional(),
 });
 export type Profile = z.infer<typeof ProfileSchema>;
 

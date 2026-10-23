@@ -5,6 +5,7 @@ import type { Command } from "../options/arguments.js";
 import type { RunOptions } from "../options/run-options.js";
 import type { CaseDetails } from "../steps/case-details.js";
 import { describeCase } from "./case-report.js";
+import { describeDiagnosis, diagnosisStatus } from "./diagnosis-report.js";
 import type { buildWorkflowGraph } from "./workflow-graph.js";
 import type { WorkflowStateValue } from "./workflow-state.js";
 
@@ -30,18 +31,23 @@ export function newThreadId(now: Date): string {
   return `wf-${stamp}-${randomBytes(4).toString("hex")}`;
 }
 
-function config(threadId: string, cases: number, signal: AbortSignal | undefined) {
-  // build, one capture per case, the last compare and triage, with room to spare.
+/**
+ * LangGraph's limit on super-steps in one invocation. A quota wait costs about four of them every 15 minutes and
+ * must not end for lack of steps, so the limit is far beyond any wait a subscription's limit can last.
+ */
+export const recursionLimit = 1_000_000;
+
+function config(threadId: string, signal: AbortSignal | undefined) {
   return {
-    configurable: { thread_id: threadId }, recursionLimit: cases + 10, durability: "sync" as const,
+    configurable: { thread_id: threadId }, recursionLimit, durability: "sync" as const,
     ...(signal === undefined ? {} : { signal }),
   };
 }
 
-/** The highest finished status of every capture and compare, in plan order of severity. */
-export function exitStatus(state: Pick<WorkflowStateValue, "captures" | "compares">): number {
+/** The highest finished status of every capture and compare and of the diagnosis. */
+export function exitStatus(state: Pick<WorkflowStateValue, "captures" | "compares"> & Partial<Pick<WorkflowStateValue, "clusters" | "diagnosisCheck">>): number {
   const statuses = [...Object.values(state.captures), ...Object.values(state.compares)].map((outcome) => outcome.status);
-  return Math.max(0, ...statuses);
+  return Math.max(0, ...statuses, diagnosisStatus(state.clusters ?? {}, state.diagnosisCheck ?? null));
 }
 
 function report(state: WorkflowStateValue, readCase: RunDependencies["readCase"], log: (line: string) => void): void {
@@ -56,9 +62,11 @@ function report(state: WorkflowStateValue, readCase: RunDependencies["readCase"]
     log(`Triage: ${triage.discrepancies} discrepancies in ${triage.clusters} clusters (${triage.newClusters} new), `
       + `${triage.otherFindings} other findings; ${triage.path}`);
   }
+  // A thread checkpointed before diagnosis existed has no such fields at all.
+  for (const line of describeDiagnosis(state.clusters ?? {}, state.diagnosisCheck ?? null, state.diagnosisPath ?? null)) log(line);
 }
 
-async function start(command: Extract<Command, { kind: "start" }>, dependencies: RunDependencies): Promise<{ threadId: string; cases: number; input: WorkflowStateValue }> {
+async function start(command: Extract<Command, { kind: "start" }>, dependencies: RunDependencies): Promise<{ threadId: string; input: WorkflowStateValue }> {
   const options = dependencies.resolveOptions(command);
   const plan = dependencies.planCases(options);
   for (const name of plan.excluded) dependencies.log(`${name} is left out: none of the requested captures belongs to it.`);
@@ -67,11 +75,12 @@ async function start(command: Extract<Command, { kind: "start" }>, dependencies:
   dependencies.log(`Thread ${threadId}: ${plan.cases.length} cases, canonical cache ${cache}.`);
   const input: WorkflowStateValue = {
     threadId, options, plan: [...plan.cases], fingerprints: null, captures: {}, lastCaptured: -1, compares: {}, triageSummary: null,
+    clusters: {}, agentMilliseconds: 0, diagnosisCheck: null, diagnosisPath: null,
   };
-  return { threadId, cases: plan.cases.length, input };
+  return { threadId, input };
 }
 
-async function resume(threadId: string, graph: WorkflowGraph): Promise<number> {
+async function checkResumable(threadId: string, graph: WorkflowGraph): Promise<void> {
   const snapshot = await graph.getState({ configurable: { thread_id: threadId } });
   const values = snapshot.values as Partial<WorkflowStateValue>;
   if (snapshot.config.configurable?.["checkpoint_id"] === undefined || values.plan === undefined) {
@@ -80,7 +89,6 @@ async function resume(threadId: string, graph: WorkflowGraph): Promise<number> {
   if (snapshot.next.length === 0) {
     throw new SetupError(`Thread ${threadId} already finished; start a new run instead.`);
   }
-  return values.plan.length;
 }
 
 /** Reports a thread whose graph ran to its end; a result that cannot be read is a setup error, and the finished thread has nothing to resume. */
@@ -104,14 +112,14 @@ export async function runWorkflow(command: Exclude<Command, { kind: "help" }>, d
   try {
     let final: WorkflowStateValue;
     if (command.kind === "resume") {
-      const cases = await resume(command.threadId, graph);
+      await checkResumable(command.threadId, graph);
       log(`Resuming thread ${command.threadId}.`);
-      final = await graph.invoke(null, config(command.threadId, cases, dependencies.signal));
+      final = await graph.invoke(null, config(command.threadId, dependencies.signal));
     } else {
       const started = await start(command, dependencies);
       threadId = started.threadId;
       log(`Resume it after an interruption with: npm start -- --resume ${threadId}`);
-      final = await graph.invoke(started.input, config(threadId, started.cases, dependencies.signal));
+      final = await graph.invoke(started.input, config(threadId, dependencies.signal));
     }
     return finish(final, dependencies);
   } catch (error) {

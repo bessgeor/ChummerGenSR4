@@ -10,5 +10,6 @@ export type ScratchFolder = {
 
 export function createScratchFolder(prefix: string): ScratchFolder {
   const path = mkdtempSync(join(tmpdir(), prefix));
-  return { path, remove: () => rmSync(path, { recursive: true, force: true }) };
+  // A process a job left behind may still hold the folder for a moment (Windows), so removing it retries.
+  return { path, remove: () => rmSync(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }) };
 }

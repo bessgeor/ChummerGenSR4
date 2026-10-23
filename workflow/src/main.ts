@@ -1,10 +1,16 @@
 // Composition root of the parity workflow: `npm start -- <options>` runs or resumes a thread of the graph
-// build → capture → compare → triage and exits with 0, 1, 2 or 3 (see --help).
+// build → capture → compare → triage → diagnosis and exits with 0, 1, 2 or 3 (see --help).
+import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
+import { agentRunners } from "./agents/agent-runners.js";
 import { planCases } from "./cases/case-plan.js";
+import { hostCheckCapture } from "./diagnosis/check-capture.js";
+import { DiagnosisService } from "./diagnosis/diagnosis-service.js";
+import { QuotaWaiter } from "./diagnosis/quota-waiter.js";
+import { processGit } from "./diagnosis/source-snapshot.js";
 import { buildWorkflowGraph } from "./graph/workflow-graph.js";
 import { runWorkflow, setupErrorStatus } from "./graph/run-workflow.js";
 import { HostSteps } from "./host-steps.js";
@@ -18,8 +24,10 @@ import { loadProfile, localDataFolder } from "./options/profile.js";
 import { resolveRunOptions } from "./options/run-options.js";
 import { workflowPaths } from "./paths.js";
 import { CaptureStep } from "./steps/capture-step.js";
-import { CompareStep } from "./steps/compare-step.js";
+import { CompareStep, reportPath } from "./steps/compare-step.js";
 import { readCaseDetails } from "./steps/case-details.js";
+import { readDocument } from "./steps/read-document.js";
+import { CompareReportSchema } from "../../contracts/generated/typescript/parity-compare-report.js";
 import { changedInputs } from "./steps/input-fingerprints.js";
 import { StepStore } from "./steps/step-store.js";
 import { SqliteStore } from "./store/sqlite-store.js";
@@ -74,10 +82,17 @@ async function main(): Promise<number> {
     new CaptureStep({ paths, host, store: stepStore, log, now, createScratchFolder, changedInputs }),
     new CompareStep({ paths, host, store: stepStore, log, now, changedInputs }), stepStore, now);
 
+  const diagnosis = new DiagnosisService({
+    repositoryRoot, threadFolder: paths.threadFolder, agents: agentRunners(process.env), quota: new QuotaWaiter(randomBytes(8).toString("hex"), undefined, log),
+    git: processGit(repositoryRoot), allCases: (caseFile) => planCases(caseFile, [], []).cases,
+    readReport: (runFolder) => readDocument(join(runFolder, reportPath), CompareReportSchema),
+    checkCapture: hostCheckCapture(paths, host, createScratchFolder), createScratchFolder, now, log,
+  });
+
   const checkpointer = SqliteSaver.fromConnString(paths.checkpoints);
   const store = new SqliteStore(paths.store);
   try {
-    const graph = buildWorkflowGraph(steps).compile({ checkpointer, store });
+    const graph = buildWorkflowGraph(steps, diagnosis).compile({ checkpointer, store });
     return await runWorkflow(command, {
       graph,
       resolveOptions: (start) => resolveRunOptions(start.arguments, profile, process.env, repositoryRoot),

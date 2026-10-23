@@ -1,8 +1,9 @@
 import { deepStrictEqual, equal, ok } from "node:assert/strict";
 import { test } from "node:test";
 import { InMemoryStore, MemorySaver } from "@langchain/langgraph";
+import { resolveAgentSettings } from "../src/agents/agent-settings.js";
 import type { PlannedCase } from "../src/cases/case-plan.js";
-import { buildWorkflowGraph, nodeMode, type WorkflowSteps } from "../src/graph/workflow-graph.js";
+import { buildWorkflowGraph, nodeMode, type DiagnosisSteps, type WorkflowSteps } from "../src/graph/workflow-graph.js";
 import { exitStatus, runWorkflow, type RunDependencies } from "../src/graph/run-workflow.js";
 import { SetupError } from "../src/host/setup-error.js";
 import type { Arguments, NodeName } from "../src/options/arguments.js";
@@ -13,7 +14,7 @@ import type { InputFingerprints } from "../src/steps/input-fingerprints.js";
 import type { StepContext, StepOutcome } from "../src/steps/step-outcome.js";
 
 const fingerprints: InputFingerprints = {
-  canonicalExecutable: "e", canonicalSupport: "s", canonicalSupportStat: "ss", tessdata: "default", candidate: "c", overlay: "none", captureTools: "ct", compareTools: "mt",
+  canonicalExecutable: "e", canonicalSupport: "s", canonicalSupportStat: "ss", tessdata: "default", candidate: "c", overlay: "none", captureTools: "ct", compareTools: "mt", candidateSource: "src",
 };
 
 function plannedCase(name: string): PlannedCase {
@@ -81,13 +82,25 @@ function fakeDetails(runFolder: string, compared: boolean): CaseDetails {
   };
 }
 
+/** These runs turn diagnosis off; diagnosis is tested with its own harness. */
+const noDiagnosis: DiagnosisSteps = {
+  prepare: () => Promise.reject(new Error("diagnosis is off")),
+  hypothesize: () => Promise.reject(new Error("diagnosis is off")),
+  challenge: () => Promise.reject(new Error("diagnosis is off")),
+  waitForQuota: () => Promise.reject(new Error("diagnosis is off")),
+  check: () => Promise.reject(new Error("diagnosis is off")),
+  finish: () => {
+    throw new Error("diagnosis is off");
+  },
+};
+
 const baseArguments: Arguments = {
   cases: [], captures: [], settingsOverlay: null, threshold: null, caseFile: null, canonicalCache: null,
-  liveCanonical: false, noOcr: false, tessdata: null, only: null, recapture: false,
+  liveCanonical: false, noOcr: false, tessdata: null, only: null, recapture: false, noDiagnosis: false,
 };
 
 function harness(cases: string[], steps = new FakeSteps(), checkpointer = new MemorySaver(), signal?: AbortSignal) {
-  const graph = buildWorkflowGraph(steps).compile({ checkpointer, store: new InMemoryStore() });
+  const graph = buildWorkflowGraph(steps, noDiagnosis).compile({ checkpointer, store: new InMemoryStore() });
   const lines: string[] = [];
   const readCalls: [string, boolean][] = [];
   const dependencies: RunDependencies = {
@@ -95,6 +108,7 @@ function harness(cases: string[], steps = new FakeSteps(), checkpointer = new Me
     resolveOptions: (command) => ({
       caseFile: "cases.json", cases: [], captures: [], settingsOverlay: null, threshold: null, canonicalCache: "cache",
       canonicalCacheSource: "default", noOcr: false, tessdata: null, only: command.arguments.only, recapture: false,
+      diagnosis: false, agents: resolveAgentSettings(undefined),
     }),
     planCases: () => ({ cases: cases.map(plannedCase), excluded: [] }),
     readCase: (runFolder, compared) => {
