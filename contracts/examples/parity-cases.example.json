@@ -1,0 +1,29 @@
+{
+  "startupDelaySeconds": 3,
+  "settleMilliseconds": 300,
+  "sequences": {
+    "common": [
+      { "type": "capture", "name": "common" },
+      { "type": "selectTab", "name": "Skills" },
+      { "type": "waitFor", "label": "Active Skills" },
+      { "type": "capture", "name": "skills" }
+    ],
+    "optional-magic": [
+      { "type": "selectTab", "name": "Adept Powers", "optional": true },
+      { "type": "waitFor", "label": "Power Points:" },
+      { "type": "wait", "milliseconds": 100 },
+      { "type": "capture", "name": "adept-powers" }
+    ]
+  },
+  "buildActions": [
+    { "type": "include", "name": "common" },
+    { "type": "include", "name": "optional-magic" }
+  ],
+  "careerActions": [
+    { "type": "include", "name": "common" }
+  ],
+  "characters": [
+    { "path": "../fixtures/characters/example-build.chum", "mode": "build" },
+    { "path": "../fixtures/characters/example-career.chum", "mode": "career" }
+  ]
+}

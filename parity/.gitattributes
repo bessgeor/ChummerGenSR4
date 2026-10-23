@@ -1,0 +1,2 @@
+# Character saves are UTF-16 XML; keep them byte-exact.
+*.chum binary

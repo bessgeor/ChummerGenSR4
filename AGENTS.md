@@ -28,3 +28,22 @@
 - `bin/ChummerGenSR4.exe` is the canonical build and is immutable. Never rebuild, replace, copy over or edit it.
 - The app's Release configuration builds `ChummerGenSR4.exe` into `bin/`, so never build it with the default output path.
 - Before and after any run that launches it, record its SHA-256. Both must equal `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`.
+
+## Contracts
+
+- Data read or written by more than one language is defined by a JSON Schema in `contracts/schemas/`. Edit the schema, then run `npm run contracts:generate`; never edit `contracts/generated/` by hand.
+- Every schema needs an example in `contracts/examples/`. `npm run contracts:check` (drift), `npm run contracts:test` (TypeScript round-trip) and `npm run parity:test` (C# round-trip) must pass.
+
+## Visual parity capture
+
+- `npm run build:candidate` builds the app from the current source into `out/candidate/bin/`. Use it instead of building `Chummer/Chummer.csproj` yourself.
+- `npm run parity` captures every case in `parity/cases/characters.json` on the canonical and the candidate executable; `npm start` builds the candidate first. Pass options after `--`, for example `npm run parity -- --case Diego_v_alpha2_by_bessgeor --capture common`; `--help` lists them. In PowerShell, call `npm.cmd` instead of `npm`, because the `npm.ps1` shim drops the `--`.
+- A run writes only under `out/runs/<runId>/`: staged apps, fixture copies, `captures/`, `summary.json` and `results.json`. The exit status is 0 (all passed), 1 (visual differences), 2 (execution failures) or 3 (setup error). Read the summary's per-action outcomes for execution and `results.json` for visual pass/fail, and report them separately.
+- Run-specific settings go in a folder passed with `--settings-overlay`. Keep it outside the repository or under `out/`; never edit `bin/settings/` for a run.
+- The career fixture `Шпала - карьера.chum` uses a Street Magic tradition, and `bin/settings/default.xml` enables only the core book. With those settings both executables fail to open it, so the case fails at startup on both sides. To run it, pass an overlay holding `settings/default.xml`: a copy of `bin/settings/default.xml` (UTF-16) with `<book>SM</book>` added to `<books>`.
+- Add a fixture to `parity/fixtures/characters/` only after reviewing its content (names, notes, links, images), and declare its mode in the case file.
+
+## Desktop use
+
+- A capture run drives real windows. Only one live run may use the desktop at a time: never start a second run while one is active, and watch a slow run instead of restarting it.
+- Leave the mouse and keyboard alone during a run; another window taking the foreground fails the current action with a `window-activation` reason.

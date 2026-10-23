@@ -1,0 +1,82 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/bessgeor/ChummerGenSR4/contracts/parity-cases.schema.json",
+  "title": "ParityCases",
+  "description": "A capture case file: the character fixtures to run and the UI actions to perform on each.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["startupDelaySeconds", "settleMilliseconds", "sequences", "buildActions", "careerActions", "characters"],
+  "properties": {
+    "startupDelaySeconds": {
+      "description": "Extra wait after the main window first reaches stable bounds.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "settleMilliseconds": {
+      "description": "Paint interval after each navigation step and the bounds-stability window.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "sequences": {
+      "description": "Named action lists that other action lists can include.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "$ref": "#/definitions/CaseAction" }
+      }
+    },
+    "buildActions": {
+      "description": "Actions for characters in build (creation) mode.",
+      "type": "array",
+      "items": { "$ref": "#/definitions/CaseAction" }
+    },
+    "careerActions": {
+      "description": "Actions for characters in career mode.",
+      "type": "array",
+      "items": { "$ref": "#/definitions/CaseAction" }
+    },
+    "characters": {
+      "description": "Character fixtures, in run order.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/CharacterEntry" }
+    }
+  },
+  "definitions": {
+    "CharacterEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "mode"],
+      "properties": {
+        "path": {
+          "description": "Fixture path relative to the case file.",
+          "type": "string",
+          "minLength": 1
+        },
+        "mode": { "$ref": "#/definitions/CharacterMode" }
+      }
+    },
+    "CharacterMode": {
+      "description": "build: the character is still being created; career: <created> is True.",
+      "type": "string",
+      "enum": ["build", "career"]
+    },
+    "CaseAction": {
+      "description": "One UI action. selectTab and capture use name; include uses name (a sequence); waitFor uses label; wait uses milliseconds; optional applies to selectTab only.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "$ref": "#/definitions/CaseActionType" },
+        "name": { "type": "string", "minLength": 1 },
+        "label": { "type": "string", "minLength": 1 },
+        "milliseconds": { "type": "integer", "minimum": 0 },
+        "optional": { "type": "boolean" }
+      }
+    },
+    "CaseActionType": {
+      "type": "string",
+      "enum": ["selectTab", "waitFor", "wait", "capture", "include"]
+    }
+  }
+}

@@ -2,11 +2,24 @@
   "name": "chummergensr4",
   "private": true,
   "description": "Character generator for Shadowrun 4th Edition",
+  "type": "module",
   "scripts": {
-    "openspec:validate": "openspec validate --all --strict"
+    "start": "npm run build:candidate && npm run parity --",
+    "parity": "dotnet run --project parity/src/Parity.Capture -c Release --",
+    "build:candidate": "node parity/scripts/build-candidate.mjs",
+    "parity:test": "dotnet test parity/Parity.slnx",
+    "openspec:validate": "openspec validate --all --strict",
+    "contracts:generate": "node contracts/scripts/generate.mjs",
+    "contracts:check": "node contracts/scripts/generate.mjs --check",
+    "contracts:test": "tsc -p contracts && node --import tsx --test contracts/tests/round-trip.test.ts"
   },
   "devDependencies": {
-    "@fission-ai/openspec": "1.13.2"
+    "@fission-ai/openspec": "1.13.2",
+    "@types/node": "22.20.4",
+    "quicktype": "26.0.0",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "zod": "4.6.5"
   },
   "engines": {
     "node": ">=20.19.0"

@@ -1,0 +1,43 @@
+{
+  "runId": "20261001T120000Z-1a2b3c4d",
+  "threshold": 0.00004,
+  "results": [
+    {
+      "case": "build-example",
+      "characterFile": "example-build.chum",
+      "mode": "build",
+      "capture": "common",
+      "passed": true,
+      "reason": "within-threshold",
+      "difference": 0,
+      "canonicalCapture": "captures/build-example/canonical/common.png",
+      "candidateCapture": "captures/build-example/candidate/common.png",
+      "canonicalSize": { "width": 1920, "height": 1020 },
+      "candidateSize": { "width": 1920, "height": 1020 }
+    },
+    {
+      "case": "build-example",
+      "characterFile": "example-build.chum",
+      "mode": "build",
+      "capture": "skills",
+      "passed": false,
+      "reason": "visual-difference",
+      "difference": 0.00116,
+      "canonicalCapture": "captures/build-example/canonical/skills.png",
+      "candidateCapture": "captures/build-example/candidate/skills.png",
+      "canonicalSize": { "width": 1920, "height": 1020 },
+      "candidateSize": { "width": 1920, "height": 1020 }
+    },
+    {
+      "case": "build-example",
+      "characterFile": "example-build.chum",
+      "mode": "build",
+      "capture": "adept-powers",
+      "passed": false,
+      "reason": "missing-candidate",
+      "difference": 1,
+      "canonicalCapture": "captures/build-example/canonical/adept-powers.png",
+      "canonicalSize": { "width": 1920, "height": 1020 }
+    }
+  ]
+}
