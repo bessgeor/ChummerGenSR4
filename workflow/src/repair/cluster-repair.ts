@@ -34,11 +34,27 @@ export type RepairStatus =
   /** The run budget was spent before the model job could start. */
   | "budget_exhausted";
 
+/** A finished attempt of a cluster that was rejected and followed by a next attempt. */
+export type EarlierAttempt = {
+  readonly attempt: number;
+  readonly recordId: string;
+  /** The attempt's repair archive. */
+  readonly archive: string;
+  /** Whether repair (its guard, build or narrow check) or the widening of its passed patch rejected it. */
+  readonly rejectedBy: "repair" | "widening";
+  /** A repair stage, or a widening stage when widening rejected it. */
+  readonly stage: string;
+  readonly reason: string;
+};
+
 /** Where one confirmed cluster's repair stands; checkpointed with the thread. */
 export type ClusterRepair = {
   readonly clusterId: string;
   readonly status: RepairStatus;
+  /** The latest attempt, or null while the next one is pending. */
   readonly attempt: AttemptSummary | null;
+  /** The cluster's earlier attempts, oldest first; empty in a thread stored before they were kept. */
+  readonly earlier: readonly EarlierAttempt[];
   readonly waiting: QuotaWaitMark | null;
   /** The eval records of every repair job of the cluster, in order, usage-limit and interrupted attempts included. */
   readonly records: readonly string[];
@@ -54,9 +70,14 @@ export function mergeRepairs(current: Readonly<Record<string, ClusterRepair>>, u
     if (existing === undefined && (change.status === undefined || change.records === undefined)) {
       throw new Error(`A partial update for repair ${id}, which the thread does not have.`);
     }
-    merged[id] = { attempt: null, waiting: null, ...(existing ?? {}), ...change } as ClusterRepair;
+    merged[id] = { attempt: null, earlier: [], waiting: null, ...(existing ?? {}), ...change } as ClusterRepair;
   }
   return merged;
+}
+
+/** The number of finished attempts of a cluster: the earlier ones and the latest. */
+export function finishedAttempts(repair: ClusterRepair): number {
+  return (repair.earlier ?? []).length + (repair.attempt === null ? 0 : 1);
 }
 
 export type RepairRoute =

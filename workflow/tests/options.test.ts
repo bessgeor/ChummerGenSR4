@@ -62,8 +62,8 @@ test("--no-repair ends the run after diagnosis; the profile sets the repair dead
   const env = { LOCALAPPDATA: root };
   equal(start(["--no-repair"]).noRepair, true);
   equal(resolveRunOptions(start(["--no-repair"]), { repair: { deadlineMinutes: 5 } }, env, root).repair, null);
-  deepStrictEqual(resolveRunOptions(start([]), {}, env, root).repair, { deadlineMinutes: 60 });
-  deepStrictEqual(resolveRunOptions(start([]), { repair: { deadlineMinutes: 5 } }, env, root).repair, { deadlineMinutes: 5 });
+  deepStrictEqual(resolveRunOptions(start([]), {}, env, root).repair, { deadlineMinutes: 60, maxAttempts: 2 });
+  deepStrictEqual(resolveRunOptions(start([]), { repair: { deadlineMinutes: 5, maxAttempts: 3 } }, env, root).repair, { deadlineMinutes: 5, maxAttempts: 3 });
 });
 
 test("--no-widening ends the run after repair, and --no-repair turns widening off too", () => {
@@ -72,7 +72,7 @@ test("--no-widening ends the run after repair, and --no-repair turns widening of
   equal(start(["--no-widening"]).noWidening, true);
   equal(resolveRunOptions(start([]), {}, env, root).widening, true);
   equal(resolveRunOptions(start(["--no-widening"]), {}, env, root).widening, false);
-  deepStrictEqual(resolveRunOptions(start(["--no-widening"]), {}, env, root).repair, { deadlineMinutes: 60 });
+  deepStrictEqual(resolveRunOptions(start(["--no-widening"]), {}, env, root).repair, { deadlineMinutes: 60, maxAttempts: 2 });
   equal(resolveRunOptions(start(["--no-repair"]), {}, env, root).widening, false);
 });
 

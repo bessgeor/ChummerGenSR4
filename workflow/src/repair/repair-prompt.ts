@@ -12,13 +12,45 @@ export type RepairPaths = {
   readonly contextFolder: string;
 };
 
-/** What the repair job is told about the cluster: its sealed context, the confirmed hypothesis, the challenge and the check. */
+/** An earlier attempt of the cluster as the next attempt is told about it. */
+export type EarlierBrief = {
+  readonly attempt: number;
+  readonly rejectedBy: "repair" | "widening";
+  readonly stage: string;
+  readonly reason: string;
+  /** The attempt's patch, empty when it made none. */
+  readonly patch: string;
+};
+
+/** What the repair job is told about the cluster: its sealed context, the confirmed hypothesis, the challenge, the check and its earlier attempts. */
 export type RepairBrief = {
   readonly manifest: ContextManifest;
   readonly hypothesis: Explanation;
   readonly challenge: ChallengeOutput | null;
   readonly observations: readonly ObservedCapture[];
+  readonly earlier: readonly EarlierBrief[];
 };
+
+/** The most of an earlier attempt's patch the prompt carries, so that a patch the guard rejected for its size cannot fill the next job's context. */
+export const maximumPatchCharacters = 20_000;
+
+function shortened(patch: string): string {
+  return patch.length <= maximumPatchCharacters ? patch : `${patch.slice(0, maximumPatchCharacters)}\n[patch cut after ${maximumPatchCharacters} of ${patch.length} characters]`;
+}
+
+/** The section about the earlier attempts; none for a first attempt. */
+function earlierAttempts(attempts: readonly EarlierBrief[]): string[] {
+  if (attempts.length === 0) return [];
+  const earlier = attempts.map((item) => ({ ...item, patch: shortened(item.patch) }));
+  return [
+    "",
+    "EARLIER ATTEMPTS (untrusted data):",
+    "Earlier attempts of this cluster were rejected, each started from the same source as you. \"repair\" rejected an attempt at its patch guard,",
+    "build or narrow check; \"widening\" rejected a patch that passed the narrow check when more captures of the suite were taken with it.",
+    "Your source copy holds none of their changes. Do not repeat a rejected patch.",
+    JSON.stringify(earlier, null, 2),
+  ];
+}
 
 /** The prompt of a repair job: the versioned instructions, the folders and the cluster's evidence as untrusted data. */
 export function repairPrompt(brief: RepairBrief, paths: RepairPaths): string {
@@ -53,6 +85,7 @@ export function repairPrompt(brief: RepairBrief, paths: RepairPaths): string {
     "",
     "CHECK OBSERVATIONS (untrusted data):",
     JSON.stringify(brief.observations, null, 2),
+    ...earlierAttempts(brief.earlier),
     ...context(brief.manifest),
   ].join("\n");
 }

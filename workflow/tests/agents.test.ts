@@ -169,9 +169,9 @@ test("the profile's agents part is validated strictly", () => {
 
 test("the profile's repair deadline is a positive number of minutes within a timer's range", () => {
   const path = join(mkdtempSync(join(tmpdir(), "workflow-agents-")), "profile.json");
-  writeFileSync(path, JSON.stringify({ repair: { deadlineMinutes: 20 } }));
-  deepStrictEqual(loadProfile({ PARITY_WORKFLOW_PROFILE: path }).repair, { deadlineMinutes: 20 });
-  for (const repair of [{ deadlineMinutes: 0 }, { deadlineMinutes: 100_000 }, { deadline: 5 }]) {
+  writeFileSync(path, JSON.stringify({ repair: { deadlineMinutes: 20, maxAttempts: 3 } }));
+  deepStrictEqual(loadProfile({ PARITY_WORKFLOW_PROFILE: path }).repair, { deadlineMinutes: 20, maxAttempts: 3 });
+  for (const repair of [{ deadlineMinutes: 0 }, { deadlineMinutes: 100_000 }, { deadline: 5 }, { maxAttempts: 0 }, { maxAttempts: 1.5 }]) {
     writeFileSync(path, JSON.stringify({ repair }));
     throws(() => loadProfile({ PARITY_WORKFLOW_PROFILE: path }), (error: Error) => error instanceof SetupError && error.message.includes(path), JSON.stringify(repair));
   }

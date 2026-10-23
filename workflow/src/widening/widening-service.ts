@@ -50,6 +50,10 @@ export type WideningPrepareInput = {
   readonly triagePath: string;
   /** The runs of the thread's candidate, oldest first: its capture runs and its diagnosis check run. */
   readonly candidateRuns: readonly CandidateRun[];
+  /** The thread's widenings so far: a passed attempt that has one is not widened again. */
+  readonly widenings: Readonly<Record<string, ClusterWidening>>;
+  /** The source accepted so far, kept as it is; null before the thread's first widening. */
+  readonly accepted: AcceptedState | null;
 };
 
 export type WideningInput = {
@@ -91,12 +95,13 @@ export class WideningService {
   constructor(private readonly dependencies: WideningDependencies) {}
 
   /**
-   * A widening for each cluster whose repair passed, and the accepted state of the thread's snapshot; null when nothing
-   * is widened. Only candidate runs without execution failures are baselines.
+   * A widening for each cluster whose latest repair attempt passed and has none yet, and the accepted state: the one the
+   * thread has, else that of the thread's snapshot, or null when nothing is widened. Only candidate runs without
+   * execution failures are baselines.
    */
   prepare(input: WideningPrepareInput): { widenings: Record<string, ClusterWidening>; accepted: AcceptedState | null } {
-    const passed = Object.values(input.repairs).filter((repair) => repair.status === "passed" && repair.attempt !== null);
-    if (passed.length === 0) return { widenings: {}, accepted: null };
+    const passed = Object.values(input.repairs).filter((repair) => repair.status === "passed" && repair.attempt !== null && input.widenings[repair.clusterId] === undefined);
+    if (passed.length === 0) return { widenings: {}, accepted: input.accepted };
     const triage = readDocument(input.triagePath, TriageDocumentSchema);
     const threadFolder = this.dependencies.threadFolder(input.threadId);
     const widenings: Record<string, ClusterWidening> = {};
@@ -108,11 +113,12 @@ export class WideningService {
       base ??= readSealedManifest(diagnosis).source.commit;
       widenings[repair.clusterId] = {
         clusterId: repair.clusterId, attempt: repair.attempt!.attempt, recordId: repair.attempt!.recordId, archive: repair.attempt!.folder,
-        folder: join(threadFolder, "widening", repair.clusterId), scope: { cases: cluster.cases, captures: cluster.captures },
+        folder: join(threadFolder, "widening", repair.clusterId, `attempt-${repair.attempt!.attempt}`), scope: { cases: cluster.cases, captures: cluster.captures },
         targets: [...new Set(cluster.members.map((member) => key(member.case, member.capture)))],
         status: "pending", build: null, levels: [], rejection: null, commit: null,
       };
     }
+    if (input.accepted !== null) return { widenings, accepted: input.accepted };
     const baselineRuns: string[] = [];
     for (const run of input.candidateRuns) {
       const { execution } = judgeNarrowCheck(run.status, run.runFolder);
@@ -286,7 +292,7 @@ export class WideningService {
         commit: widening.commit, labelledUtc: this.dependencies.now().toISOString(),
       },
     });
-    for (const line of describeWidening({ [widening.clusterId]: widening }, accepted, null).slice(0, 1)) this.dependencies.log(line);
+    for (const line of describeWidening([widening], accepted, null).slice(0, 1)) this.dependencies.log(line);
     return { update: widening, accepted };
   }
 
@@ -295,9 +301,9 @@ export class WideningService {
   }
 
   /** Writes the thread's `widening.json` and returns its path. */
-  finish(threadId: string, widenings: Readonly<Record<string, ClusterWidening>>, accepted: AcceptedState | null): string {
+  finish(threadId: string, widenings: Readonly<Record<string, ClusterWidening>>, accepted: AcceptedState | null, earlier: readonly ClusterWidening[]): string {
     const path = join(this.dependencies.threadFolder(threadId), "widening.json");
-    writeJson(path, wideningDocument(threadId, widenings, accepted));
+    writeJson(path, wideningDocument(threadId, widenings, accepted, earlier));
     return path;
   }
 }

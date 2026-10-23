@@ -28,6 +28,7 @@ import { FakeWideningHost } from "./widening-fixtures.js";
 import { captureNames } from "../src/cases/case-plan.js";
 import { processBranchGit, type BranchGit } from "../src/widening/accepted-branch.js";
 import { WideningService, type WideningDependencies } from "../src/widening/widening-service.js";
+import { LoopService } from "../src/loop/loop-service.js";
 import { plannedCase, readReport, repository, runFolders, scratch, triageDocument, type Spot } from "./diagnosis-fixtures.js";
 
 export const hypothesisAnswer = (claim = "The Skills tab label moved in frmCreate."): HypothesisOutput => ({
@@ -168,7 +169,7 @@ export type HarnessOptions = {
   /** Runs after triage, before diagnosis, with the fixture repository's folder: an edit made between the build and the diagnosis. */
   readonly afterTriage?: (repository: string) => void;
   /** Turns repair on (it is off by default here), with this deadline and fake host for builds and narrow checks. */
-  readonly repair?: { readonly deadlineMinutes: number; readonly host: (root: string) => FakeRepairHost };
+  readonly repair?: { readonly deadlineMinutes: number; readonly maxAttempts?: number; readonly host: (root: string) => FakeRepairHost };
   /**
    * Turns widening on (with repair; off by default here), with a fake host for builds and captures, more build cases
    * for the case file, and a wrapper around the git of the accepted branch.
@@ -256,7 +257,7 @@ export function diagnosisHarness(options: HarnessOptions) {
   });
   const checkpointer = options.checkpointer ?? new MemorySaver();
   const store = options.store ?? new InMemoryStore();
-  const graph = buildWorkflowGraph(steps, diagnosis, repair, widening).compile({ checkpointer, store });
+  const graph = buildWorkflowGraph(steps, diagnosis, repair, widening, new LoopService({ threadFolder: (threadId) => join(root, "threads", threadId), now: () => new Date("2026-10-01T14:00:00Z") })).compile({ checkpointer, store });
   const settings = resolveAgentSettings({ ...(options.budgetMinutes === undefined ? {} : { runBudgetMinutes: options.budgetMinutes }) });
   const dependencies: RunDependencies = {
     graph,
@@ -264,7 +265,7 @@ export function diagnosisHarness(options: HarnessOptions) {
       caseFile: join(root, "cases.json"), cases: [], captures: [], settingsOverlay: null, threshold: null, canonicalCache: "cache",
       canonicalCacheSource: "default", noOcr: false, tessdata: null, only: command.arguments.only, recapture: false,
       diagnosis: !command.arguments.noDiagnosis, agents: settings, unattended: command.arguments.unattended, certificates: join(root, "certificates"),
-      repair: options.repair === undefined || command.arguments.noRepair ? null : { deadlineMinutes: options.repair.deadlineMinutes },
+      repair: options.repair === undefined || command.arguments.noRepair ? null : { deadlineMinutes: options.repair.deadlineMinutes, maxAttempts: options.repair.maxAttempts ?? 1 },
       widening: options.repair !== undefined && options.widening !== undefined && !command.arguments.noRepair && !command.arguments.noWidening,
     }),
     planCases: () => ({ cases: cases.filter((item) => folders[item.name] !== undefined), excluded: [] }),

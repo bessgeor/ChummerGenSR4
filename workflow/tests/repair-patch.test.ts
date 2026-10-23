@@ -6,7 +6,7 @@ import { parsePatch } from "../src/evals/benchmark.js";
 import { createScratchFolder } from "../src/host/scratch-folder.js";
 import { computePatch, type Patch, type PatchFile } from "../src/repair/patch.js";
 import { guardPatch, maximumChangedLines } from "../src/repair/patch-guard.js";
-import { repairPrompt } from "../src/repair/repair-prompt.js";
+import { maximumPatchCharacters, repairPrompt } from "../src/repair/repair-prompt.js";
 import { repairPromptVersion, validateRepair, type RepairOutput } from "../src/repair/repair-schemas.js";
 import { stageWorkspace, workspaceIn } from "../src/repair/workspace.js";
 import { hypothesisAnswer } from "./diagnosis-harness.js";
@@ -142,10 +142,29 @@ test("a repair answer is validated: reasons, file lists and safe paths", () => {
 test("the repair prompt carries its version, the two folders, the rules, and the evidence as untrusted data", () => {
   const manifest = { cluster: { id: "d-0000000000000100" }, vocabulary: [] } as unknown as ContextManifest;
   const hypothesis = hypothesisAnswer().explanation!;
-  const prompt = repairPrompt({ manifest, hypothesis, challenge: null, observations: [{ case: "build-alpha", capture: "skills", observation: "differs", detail: "visual difference (0.01)" }] },
-    { sourceFolder: "C:/scratch/source", contextFolder: "C:/scratch/d-1" });
+  const observations = [{ case: "build-alpha", capture: "skills", observation: "differs" as const, detail: "visual difference (0.01)" }];
+  const paths = { sourceFolder: "C:/scratch/source", contextFolder: "C:/scratch/d-1" };
+  const prompt = repairPrompt({ manifest, hypothesis, challenge: null, observations, earlier: [] }, paths);
   ok(prompt.startsWith(`PROMPT_VERSION=${repairPromptVersion}\n`));
   for (const text of ["C:/scratch/source", "C:/scratch/d-1", "untrusted data", "Chummer/", "no_patch", hypothesis.claim, "visual difference (0.01)", manifest.cluster.id]) {
     ok(prompt.includes(text), text);
   }
+  ok(!prompt.includes("EARLIER ATTEMPTS"));
+  const next = repairPrompt({
+    manifest, hypothesis, challenge: null, observations,
+    earlier: [{ attempt: 1, rejectedBy: "widening", stage: "character", reason: "build-alpha/armor introduced", patch: "+  moved = 2;" }],
+  }, paths);
+  ok(next.includes("EARLIER ATTEMPTS (untrusted data):"));
+  for (const text of ["\"rejectedBy\": \"widening\"", "\"stage\": \"character\"", "build-alpha/armor introduced", "+  moved = 2;"]) ok(next.includes(text), text);
+});
+
+test("an earlier attempt's patch is cut in the next prompt past a fixed length", () => {
+  const manifest = { cluster: { id: "d-0000000000000100" }, vocabulary: [] } as unknown as ContextManifest;
+  const huge = `+${"x".repeat(maximumPatchCharacters)}TAIL`;
+  const prompt = repairPrompt({
+    manifest, hypothesis: hypothesisAnswer().explanation!, challenge: null, observations: [],
+    earlier: [{ attempt: 1, rejectedBy: "repair", stage: "patch", reason: "too many lines", patch: huge }],
+  }, { sourceFolder: "s", contextFolder: "c" });
+  ok(!prompt.includes("TAIL"));
+  ok(prompt.includes(`[patch cut after ${maximumPatchCharacters} of ${huge.length} characters]`));
 });

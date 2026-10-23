@@ -64,7 +64,7 @@ function documentOf(folder: string): AttemptDocument {
 test("prepare starts a repair for each confirmed cluster only", async () => {
   const { service, repairs, harness, threadId } = await diagnosed();
   deepStrictEqual(Object.keys(repairs), [cluster]);
-  deepStrictEqual(repairs[cluster], { clusterId: cluster, status: "pending", attempt: null, waiting: null, records: [] });
+  deepStrictEqual(repairs[cluster], { clusterId: cluster, status: "pending", attempt: null, earlier: [], waiting: null, records: [] });
   const state = await harness.state(threadId);
   const refuted = { ...state.diagnosisCheck!, clusters: { [cluster]: { ...state.diagnosisCheck!.clusters[cluster]!, outcome: "refuted" as const } } };
   deepStrictEqual(service.prepare(state.clusters, refuted), {});
@@ -109,7 +109,7 @@ test("a passed attempt edits only its own copy, is built and checked narrowly, a
   ok(readFileSync(join(attempt.folder, "files", "before", "Chummer", "frmCreate.cs"), "utf8").includes("moved"));
   ok(existsSync(join(attempt.folder, "build.log")));
   const stored = EvalRecordSchema.parse((await setup.store.get(recordNamespace("repair"), recordId))!.value);
-  deepStrictEqual([stored.jobKind, stored.origin, stored.subject, stored.promptVersion, stored.result.status], ["repair", "workflow", { kind: "discrepancy-cluster", id: cluster }, "repair-v1", "succeeded"]);
+  deepStrictEqual([stored.jobKind, stored.origin, stored.subject, stored.promptVersion, stored.result.status], ["repair", "workflow", { kind: "discrepancy-cluster", id: cluster }, "repair-v2", "succeeded"]);
   deepStrictEqual({ ...stored.labels, repair: { ...stored.labels.repair!, labelledUtc: "t" } }, { ...noLabels, repair: { outcome: "passed", stage: null, reason: null, labelledUtc: "t" } });
 });
 

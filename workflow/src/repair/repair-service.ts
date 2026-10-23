@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { BaseStore } from "@langchain/langgraph-checkpoint";
 import { wasNotStarted, type AgentFailure, type AgentResult, type NotStarted } from "../agents/agent-job.js";
@@ -71,7 +71,7 @@ export class RepairService {
   /** A pending repair for every cluster the check confirmed. */
   prepare(clusters: Readonly<Record<string, ClusterDiagnosis>>, check: CheckResult | null): Record<string, ClusterRepair> {
     const confirmed = Object.values(clusters).filter((cluster) => check?.clusters[cluster.clusterId]?.outcome === "confirmed");
-    return Object.fromEntries(confirmed.map((cluster) => [cluster.clusterId, { clusterId: cluster.clusterId, status: "pending", attempt: null, waiting: null, records: [] }]));
+    return Object.fromEntries(confirmed.map((cluster) => [cluster.clusterId, { clusterId: cluster.clusterId, status: "pending", attempt: null, earlier: [], waiting: null, records: [] }]));
   }
 
   async waitForQuota(marks: readonly QuotaWaitMark[], signal?: AbortSignal): Promise<void> {
@@ -112,6 +112,9 @@ export class RepairService {
       const brief = {
         manifest, hypothesis: explanation, challenge: diagnosis.challenge?.output ?? null,
         observations: input.check.observations.filter((item) => predicted.has(`${item.case}/${item.capture}`)),
+        earlier: (repair.earlier ?? []).map((item) => ({
+          attempt: item.attempt, rejectedBy: item.rejectedBy, stage: item.stage, reason: item.reason, patch: patchText(item.archive),
+        })),
       };
       this.dependencies.log(`${label}: running on ${choice.provider} (${choice.model ?? "default model"}, effort ${choice.effort}), deadline ${settings.deadlineMinutes} min.`);
       const ran: AgentResult<RepairOutput> | NotStarted = await this.dependencies.agents(options.agents).run<RepairOutput>({
@@ -233,6 +236,13 @@ export class RepairService {
     this.dependencies.log(`${label}: the run budget of ${budgetMinutes} min is spent; not started.`);
     return { update: { clusterId, status: "budget_exhausted" }, chargedMs: 0 };
   }
+}
+
+/** The patch an archived attempt made, empty when it made none; an archive always holds the file, so a missing one is a lost archive. */
+function patchText(archive: string): string {
+  const path = join(archive, "patch.diff");
+  if (!existsSync(path)) throw new SetupError(`The archive of an earlier attempt lost its patch: ${path} does not exist; restore ${archive} or start a new thread.`);
+  return readFileSync(path, "utf8");
 }
 
 /** The build log's name in the archive, or null when the build wrote none. */

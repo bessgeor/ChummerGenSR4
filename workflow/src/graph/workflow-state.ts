@@ -4,6 +4,7 @@ import type { CheckResult } from "../diagnosis/check.js";
 import { mergeClusters, type ClusterDiagnosis, type ClusterUpdate } from "../diagnosis/cluster-diagnosis.js";
 import type { RunOptions } from "../options/run-options.js";
 import { mergeRepairs, type ClusterRepair, type RepairUpdate } from "../repair/cluster-repair.js";
+import type { OutcomeDocument } from "../loop/outcome.js";
 import type { InputFingerprints } from "../steps/input-fingerprints.js";
 import type { StepOutcome } from "../steps/step-outcome.js";
 import { mergeWidenings, type AcceptedState, type ClusterWidening, type WideningUpdate } from "../widening/cluster-widening.js";
@@ -54,15 +55,25 @@ export const WorkflowState = Annotation.Root({
   }),
   /** The thread's `repair.json`, once repair finished. */
   repairPath: Annotation<string | null>(),
-  /** Each passed repair attempt's widening, by cluster ID; widening nodes update the cluster they ran. */
-  widenings: Annotation<Record<string, ClusterWidening>, Record<string, WideningUpdate>>({
+  /** Each passed repair attempt's widening, by cluster ID; widening nodes update the cluster they ran, and a next attempt removes its cluster's. */
+  widenings: Annotation<Record<string, ClusterWidening>, Record<string, WideningUpdate | null>>({
     reducer: mergeWidenings,
     default: () => ({}),
+  }),
+  /** Rejected widenings of clusters that got a next attempt, in the order they were replaced. */
+  earlierWidenings: Annotation<ClusterWidening[]>({
+    reducer: (current, update) => [...current, ...update],
+    default: () => [],
   }),
   /** The source accepted so far, which the next widening starts from; null until widening starts or when nothing is widened. */
   accepted: Annotation<AcceptedState | null>(),
   /** The thread's `widening.json`, once widening finished. */
   wideningPath: Annotation<string | null>(),
+  /** When the thread started; absent in a thread stored before it was recorded. */
+  startedUtc: Annotation<string | null>(),
+  /** The thread's outcome and its `outcome.json`, once it concluded. */
+  outcome: Annotation<OutcomeDocument | null>(),
+  outcomePath: Annotation<string | null>(),
 });
 
 export type WorkflowStateValue = typeof WorkflowState.State;
