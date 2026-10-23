@@ -1,42 +1,62 @@
 using System.Runtime.CompilerServices;
 using System.Xml;
 using Chummer;
+using Parity.Tests;
 using Parity.Tests.Fakes;
 
 namespace Parity.Hosted.Tests;
 
 /// <summary>
 /// Registers, once for this test process, an application host whose folder holds small data files, so that items can be created.
-/// Every choice the host would ask of a user fails the test instead.
+/// Every choice the host would ask of a user fails the test instead; a test may record the error messages and written images.
 /// </summary>
 internal sealed class HostedApplication : IApplicationHost
 {
     private static readonly string Folder = Path.Combine(Path.GetTempPath(), "chummer-hosted-tests-" + Guid.NewGuid().ToString("N"));
 
     public string StartupPath => Folder;
+    public string ProductVersion => "0.0.0.512";
+    /// <summary>Whether error messages and written images are recorded; otherwise they fail the test.</summary>
+    public bool Recording { get; set; }
+    public List<(string Text, string Caption)> Errors { get; } = [];
+    public List<(byte[] Image, string FileName)> SavedImages { get; } = [];
     public IEquipmentHost Equipment { get; } = new RecordingEquipmentHost();
 
-    public IImprovementDialogs ImprovementDialogs => throw Unasked();
+    public IImprovementDialogs ImprovementDialogs { get; } = new UnaskedDialogs();
 
-    public static RecordingEquipmentHost Host => (RecordingEquipmentHost)((HostedApplication)ApplicationHost.Current).Equipment;
+    public static HostedApplication Current => (HostedApplication)ApplicationHost.Current;
+
+    public static RecordingEquipmentHost Host => (RecordingEquipmentHost)Current.Equipment;
+
+    public static string FolderPath => Folder;
 
     [ModuleInitializer]
     internal static void Register()
     {
         Directory.CreateDirectory(Path.Combine(Folder, "lang"));
         Directory.CreateDirectory(Path.Combine(Folder, "data"));
-        File.WriteAllText(Path.Combine(Folder, "lang", "en-us.xml"), "<chummer><strings /></chummer>");
+        Directory.CreateDirectory(Path.Combine(Folder, "settings"));
+        File.Copy(Path.Combine(RepositoryPaths.Root, "bin", "settings", "default.xml"), Path.Combine(Folder, "settings", "default.xml"));
+        File.WriteAllText(Path.Combine(Folder, "lang", "en-us.xml"), TestData.Language);
         File.WriteAllText(Path.Combine(Folder, "data", "books.xml"), "<chummer><books /></chummer>");
         File.WriteAllText(Path.Combine(Folder, "data", "weapons.xml"), TestData.Weapons);
         File.WriteAllText(Path.Combine(Folder, "data", "vehicles.xml"), TestData.Vehicles);
         File.WriteAllText(Path.Combine(Folder, "data", "gear.xml"), TestData.Gear);
+        File.WriteAllText(Path.Combine(Folder, "data", "skills.xml"), TestData.Skills);
+        File.WriteAllText(Path.Combine(Folder, "data", "metatypes.xml"), TestData.Metatypes);
+        File.WriteAllText(Path.Combine(Folder, "data", "qualities.xml"), TestData.Qualities);
         AppDomain.CurrentDomain.ProcessExit += (sender, args) => Directory.Delete(Folder, true);
         ApplicationHost.Current = new HostedApplication();
         if (GlobalOptions.Instance.Language != "en-us")
             throw new InvalidOperationException("These tests expect the language option of the current user to be en-us, not " + GlobalOptions.Instance.Language + ".");
     }
 
-    public void ShowError(string strText, string strCaption) => throw Unasked();
+    public void ShowError(string strText, string strCaption)
+    {
+        if (!Recording)
+            throw Unasked();
+        Errors.Add((strText, strCaption));
+    }
 
     public void ShowInformation(string strText, string strCaption) => throw Unasked();
 
@@ -44,11 +64,18 @@ internal sealed class HostedApplication : IApplicationHost
 
     public void Exit() => throw Unasked();
 
+    public void SaveImage(byte[] bytImage, string strFileName)
+    {
+        if (!Recording)
+            throw Unasked();
+        SavedImages.Add((bytImage, strFileName));
+    }
+
     public void TranslateControls(object objObject)
     {
     }
 
-    private static InvalidOperationException Unasked() => new("The test host is asked for nothing.");
+    internal static InvalidOperationException Unasked() => new("The test host is asked for nothing.");
 
     /// <summary>
     /// Creates a weapon with only a name for every weapon an item grants and keeps it by its identifier.

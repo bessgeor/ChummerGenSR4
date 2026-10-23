@@ -1,10 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Text;
-using System.Windows.Forms;
 using System.Xml;
 using System.Xml.XPath;
 
@@ -190,8 +188,6 @@ namespace Chummer
 		public event CharacterNameChangedHandler CharacterNameChanged;
 		public event BlackMarketEnabledChangedHandler BlackMarketEnabledChanged;
 
-		private frmViewer _frmPrintView;
-		
 		#region Initialization, Save, Load, Print, and Reset Methods
 		/// <summary>
 		/// Character.
@@ -231,7 +227,7 @@ namespace Chummer
 			objWriter.WriteStartElement("character");
 
 			// <appversion />
-			objWriter.WriteElementString("appversion", Application.ProductVersion.ToString().Replace("0.0.0.", string.Empty));
+			objWriter.WriteElementString("appversion", ApplicationHost.Current.ProductVersion.ToString().Replace("0.0.0.", string.Empty));
 			// <gameedition />
 			objWriter.WriteElementString("gameedition", "SR4");
 
@@ -724,7 +720,7 @@ namespace Chummer
 			{
 				if (objXmlCharacter["gameedition"].InnerText != string.Empty && objXmlCharacter["gameedition"].InnerText != "SR4")
 				{
-					MessageBox.Show(LanguageManager.Instance.GetString("Message_IncorrectGameVersion_SR5"), LanguageManager.Instance.GetString("MessageTitle_IncorrectGameVersion"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+					ApplicationHost.Current.ShowError(LanguageManager.Instance.GetString("Message_IncorrectGameVersion_SR5"), LanguageManager.Instance.GetString("MessageTitle_IncorrectGameVersion"));
 					return false;
 				}
 			}
@@ -1546,14 +1542,11 @@ namespace Chummer
 			string strMugshotPath = "";
 			if (_strMugshot != "")
 			{
-				if (!Directory.Exists(Application.StartupPath + Path.DirectorySeparatorChar + "mugshots"))
-					Directory.CreateDirectory(Application.StartupPath + Path.DirectorySeparatorChar + "mugshots");
+				if (!Directory.Exists(ApplicationHost.Current.StartupPath + Path.DirectorySeparatorChar + "mugshots"))
+					Directory.CreateDirectory(ApplicationHost.Current.StartupPath + Path.DirectorySeparatorChar + "mugshots");
 				byte[] bytImage = Convert.FromBase64String(_strMugshot);
-				MemoryStream objImageStream = new MemoryStream(bytImage, 0, bytImage.Length);
-				objImageStream.Write(bytImage, 0, bytImage.Length);
-				Image imgMugshot = Image.FromStream(objImageStream, true);
-				imgMugshot.Save(Application.StartupPath + Path.DirectorySeparatorChar + "mugshots" + Path.DirectorySeparatorChar + guiImage.ToString() + ".img");
-				strMugshotPath = "file://" + (Application.StartupPath + Path.DirectorySeparatorChar + "mugshots" + Path.DirectorySeparatorChar + guiImage.ToString() + ".img").Replace(Path.DirectorySeparatorChar, '/');
+				ApplicationHost.Current.SaveImage(bytImage, ApplicationHost.Current.StartupPath + Path.DirectorySeparatorChar + "mugshots" + Path.DirectorySeparatorChar + guiImage.ToString() + ".img");
+				strMugshotPath = "file://" + (ApplicationHost.Current.StartupPath + Path.DirectorySeparatorChar + "mugshots" + Path.DirectorySeparatorChar + guiImage.ToString() + ".img").Replace(Path.DirectorySeparatorChar, '/');
 			}
 			// <mugshot />
 			objWriter.WriteElementString("mugshot", strMugshotPath);
@@ -2156,66 +2149,6 @@ namespace Chummer
 
 			// </character>
 			objWriter.WriteEndElement();
-		}
-
-		/// <summary>
-		/// Print this character and open the View Character window.
-		/// </summary>
-		/// <param name="blnDialog">Whether or not the window should be shown as a dialogue window.</param>
-		public void Print(bool blnDialog = true)
-		{
-			// Write the Character information to a MemoryStream so we don't need to create any files.
-			MemoryStream objStream = new MemoryStream();
-			XmlTextWriter objWriter = new XmlTextWriter(objStream, Encoding.UTF8);
-
-			// Being the document.
-			objWriter.WriteStartDocument();
-
-			// </characters>
-			objWriter.WriteStartElement("characters");
-
-			PrintToStream(objStream, objWriter);
-
-			// </characters>
-			objWriter.WriteEndElement();
-
-			// Finish the document and flush the Writer and Stream.
-			objWriter.WriteEndDocument();
-			objWriter.Flush();
-			objStream.Flush();
-
-			// Read the stream.
-			StreamReader objReader = new StreamReader(objStream);
-			objStream.Position = 0;
-			XmlDocument objCharacterXML = new XmlDocument();
-
-			// Put the stream into an XmlDocument and send it off to the Viewer.
-			string strXML = objReader.ReadToEnd();
-			objCharacterXML.LoadXml(strXML);
-
-			objWriter.Close();
-			objStream.Close();
-
-			// If a reference to the Viewer window does not yet exist for this character, open a new Viewer window and set the reference to it.
-			// If a Viewer window already exists for this character, use it instead.
-			if (_frmPrintView == null)
-			{
-				List<Character> lstCharacters = new List<Character>();
-				lstCharacters.Add(this);
-				frmViewer frmViewCharacter = new frmViewer();
-				frmViewCharacter.Characters = lstCharacters;
-				frmViewCharacter.CharacterXML = objCharacterXML;
-				_frmPrintView = frmViewCharacter;
-				if (blnDialog)
-					frmViewCharacter.ShowDialog();
-				else
-					frmViewCharacter.Show();
-			}
-			else
-			{
-				_frmPrintView.Activate();
-				_frmPrintView.RefreshView();
-			}
 		}
 
 		/// <summary>
@@ -4423,19 +4356,19 @@ namespace Chummer
 
 		Gear ICharacter.FindGear(string strGuid)
 		{
-			CommonFunctions objFunctions = new CommonFunctions(this);
+			ItemFinder objFunctions = new ItemFinder(this);
 			return objFunctions.FindGear(strGuid, _lstGear);
 		}
 
 		Gear ICharacter.FindGearByWeaponID(string strGuid)
 		{
-			CommonFunctions objFunctions = new CommonFunctions(this);
+			ItemFinder objFunctions = new ItemFinder(this);
 			return objFunctions.FindGearByWeaponID(strGuid, _lstGear);
 		}
 
 		Gear ICharacter.FindVehicleGear(string strGuid)
 		{
-			CommonFunctions objFunctions = new CommonFunctions(this);
+			ItemFinder objFunctions = new ItemFinder(this);
 			Vehicle objFoundVehicle;
 			return objFunctions.FindVehicleGear(strGuid, _lstVehicles, out objFoundVehicle);
 		}
@@ -5834,23 +5767,6 @@ namespace Chummer
 		}
 		#endregion
 
-		#region Application Properties
-		/// <summary>
-		/// The frmViewer window being used by the character.
-		/// </summary>
-		public frmViewer PrintWindow
-		{
-			get
-			{
-				return _frmPrintView;
-			}
-			set
-			{
-				_frmPrintView = value;
-			}
-		}
-		#endregion
-
 		#region Old Quality Conversion Code
 		/// <summary>
 		/// Convert Qualities that are still saved in the old format.
@@ -5889,9 +5805,8 @@ namespace Chummer
 					// Convert the item to the new Quality class.
 					Quality objQuality = new Quality(this);
 					List<Weapon> objWeapons = new List<Weapon>();
-					List<TreeNode> objWeaponNodes = new List<TreeNode>();
-					TreeNode objNode = new TreeNode();
-					objQuality.Create(objXmlQualityNode, this, QualitySource.Selected, objNode, objWeapons, objWeaponNodes, strForceValue);
+					UnshownTreeNode objNode = new UnshownTreeNode();
+					objQuality.Create(objXmlQualityNode, this, QualitySource.Selected, objNode, AddGrantedWeapon(objWeapons, objNode), strForceValue);
 					_lstQualities.Add(objQuality);
 
 					// Add any created Weapons to the character.
@@ -5926,16 +5841,15 @@ namespace Chummer
 				if (!blnFound)
 				{
 					string strForceValue = "";
-					TreeNode objNode = new TreeNode();
+					UnshownTreeNode objNode = new UnshownTreeNode();
 					List<Weapon> objWeapons = new List<Weapon>();
-					List<TreeNode> objWeaponNodes = new List<TreeNode>();
 					Quality objQuality = new Quality(this);
 
 					if (objXmlMetatypeQuality.Attributes["select"] != null)
 						strForceValue = objXmlMetatypeQuality.Attributes["select"].InnerText;
 
 					XmlNode objXmlQuality = objXmlQualityDocument.SelectSingleNode("/chummer/qualities/quality[name = \"" + objXmlMetatypeQuality.InnerText + "\"]");
-					objQuality.Create(objXmlQuality, this, QualitySource.Metatype, objNode, objWeapons, objWeaponNodes, strForceValue);
+					objQuality.Create(objXmlQuality, this, QualitySource.Metatype, objNode, AddGrantedWeapon(objWeapons, objNode), strForceValue);
 					_lstQualities.Add(objQuality);
 
 					// Add any created Weapons to the character.
@@ -5962,16 +5876,15 @@ namespace Chummer
 				if (!blnFound)
 				{
 					string strForceValue = "";
-					TreeNode objNode = new TreeNode();
+					UnshownTreeNode objNode = new UnshownTreeNode();
 					List<Weapon> objWeapons = new List<Weapon>();
-					List<TreeNode> objWeaponNodes = new List<TreeNode>();
 					Quality objQuality = new Quality(this);
 
 					if (objXmlMetatypeQuality.Attributes["select"] != null)
 						strForceValue = objXmlMetatypeQuality.Attributes["select"].InnerText;
 
 					XmlNode objXmlQuality = objXmlQualityDocument.SelectSingleNode("/chummer/qualities/quality[name = \"" + objXmlMetatypeQuality.InnerText + "\"]");
-					objQuality.Create(objXmlQuality, this, QualitySource.Metatype, objNode, objWeapons, objWeaponNodes, strForceValue);
+					objQuality.Create(objXmlQuality, this, QualitySource.Metatype, objNode, AddGrantedWeapon(objWeapons, objNode), strForceValue);
 					_lstQualities.Add(objQuality);
 
 					// Add any created Weapons to the character.
@@ -6003,16 +5916,15 @@ namespace Chummer
 					if (!blnFound)
 					{
 						string strForceValue = "";
-						TreeNode objNode = new TreeNode();
+						UnshownTreeNode objNode = new UnshownTreeNode();
 						List<Weapon> objWeapons = new List<Weapon>();
-						List<TreeNode> objWeaponNodes = new List<TreeNode>();
 						Quality objQuality = new Quality(this);
 
 						if (objXmlMetatypeQuality.Attributes["select"] != null)
 							strForceValue = objXmlMetatypeQuality.Attributes["select"].InnerText;
 
 						XmlNode objXmlQuality = objXmlQualityDocument.SelectSingleNode("/chummer/qualities/quality[name = \"" + objXmlMetatypeQuality.InnerText + "\"]");
-						objQuality.Create(objXmlQuality, this, QualitySource.Metatype, objNode, objWeapons, objWeaponNodes, strForceValue);
+						objQuality.Create(objXmlQuality, this, QualitySource.Metatype, objNode, AddGrantedWeapon(objWeapons, objNode), strForceValue);
 						_lstQualities.Add(objQuality);
 
 						// Add any created Weapons to the character.
@@ -6039,16 +5951,15 @@ namespace Chummer
 					if (!blnFound)
 					{
 						string strForceValue = "";
-						TreeNode objNode = new TreeNode();
+						UnshownTreeNode objNode = new UnshownTreeNode();
 						List<Weapon> objWeapons = new List<Weapon>();
-						List<TreeNode> objWeaponNodes = new List<TreeNode>();
 						Quality objQuality = new Quality(this);
 
 						if (objXmlMetatypeQuality.Attributes["select"] != null)
 							strForceValue = objXmlMetatypeQuality.Attributes["select"].InnerText;
 
 						XmlNode objXmlQuality = objXmlQualityDocument.SelectSingleNode("/chummer/qualities/quality[name = \"" + objXmlMetatypeQuality.InnerText + "\"]");
-						objQuality.Create(objXmlQuality, this, QualitySource.Metatype, objNode, objWeapons, objWeaponNodes, strForceValue);
+						objQuality.Create(objXmlQuality, this, QualitySource.Metatype, objNode, AddGrantedWeapon(objWeapons, objNode), strForceValue);
 						_lstQualities.Add(objQuality);
 
 						// Add any created Weapons to the character.
@@ -6071,6 +5982,25 @@ namespace Chummer
 			strTemp = strTemp.Substring(0, intPos - 1);
 
 			return strTemp;
+		}
+
+		/// <summary>
+		/// Create the function with which a converted Quality adds each Weapon it grants: the Weapon is created for this character without context menus in a new node of the Quality's node,
+		/// the node is shown in grey and dropped, the Weapon is added to the list, and its ID is returned.
+		/// </summary>
+		/// <param name="objWeapons">List of Weapons that should be added to the Character.</param>
+		/// <param name="objQualityNode">Node of the Quality.</param>
+		private Func<XmlNode, string> AddGrantedWeapon(List<Weapon> objWeapons, ITreeNodeView objQualityNode)
+		{
+			return objXmlWeapon =>
+			{
+				ITreeNodeView objWeaponNode = objQualityNode.NewNode();
+				Weapon objWeapon = new Weapon(this);
+				objWeapon.Create(objXmlWeapon, this, objWeaponNode, objWeaponNode.NewNode, objWeaponNode.NewNode, objWeaponNode.NewNode);
+				objWeaponNode.ShowAsGrayText();
+				objWeapons.Add(objWeapon);
+				return objWeapon.InternalId;
+			};
 		}
 		#endregion
 	}

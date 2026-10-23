@@ -11,6 +11,11 @@ namespace Chummer
 		string StartupPath { get; }
 
 		/// <summary>
+		/// The application's product version.
+		/// </summary>
+		string ProductVersion { get; }
+
+		/// <summary>
 		/// Show an error message and wait until the user closes it.
 		/// </summary>
 		/// <param name="strText">Message to show.</param>
@@ -36,6 +41,13 @@ namespace Chummer
 		/// Close the application.
 		/// </summary>
 		void Exit();
+
+		/// <summary>
+		/// Decode an image and write it to a file in its own format.
+		/// </summary>
+		/// <param name="bytImage">Encoded image.</param>
+		/// <param name="strFileName">File to write.</param>
+		void SaveImage(byte[] bytImage, string strFileName);
 
 		/// <summary>
 		/// Translate the controls of a form or user control with the loaded language. Any other object is left alone.

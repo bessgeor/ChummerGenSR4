@@ -1,3 +1,5 @@
+using System.Drawing;
+using System.IO;
 using System.Windows.Forms;
 
 namespace Chummer
@@ -19,6 +21,14 @@ namespace Chummer
 			}
 		}
 
+		public string ProductVersion
+		{
+			get
+			{
+				return Application.ProductVersion;
+			}
+		}
+
 		public void ShowError(string strText, string strCaption)
 		{
 			MessageBox.Show(strText, strCaption, MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -37,6 +47,14 @@ namespace Chummer
 		public void Exit()
 		{
 			Application.Exit();
+		}
+
+		public void SaveImage(byte[] bytImage, string strFileName)
+		{
+			MemoryStream objImageStream = new MemoryStream(bytImage, 0, bytImage.Length);
+			objImageStream.Write(bytImage, 0, bytImage.Length);
+			Image imgImage = Image.FromStream(objImageStream, true);
+			imgImage.Save(strFileName);
 		}
 
 		public void TranslateControls(object objObject)

@@ -40,6 +40,15 @@ public sealed class ApplicationHostTests
             }
         }
 
+        public string ProductVersion
+        {
+            get
+            {
+                Calls.Add(nameof(ProductVersion));
+                return "0.0.0.1";
+            }
+        }
+
         public void ShowError(string strText, string strCaption) => Calls.Add(nameof(ShowError));
 
         public void ShowInformation(string strText, string strCaption) => Calls.Add(nameof(ShowInformation));
@@ -51,6 +60,8 @@ public sealed class ApplicationHostTests
         }
 
         public void Exit() => Calls.Add(nameof(Exit));
+
+        public void SaveImage(byte[] bytImage, string strFileName) => Calls.Add(nameof(SaveImage));
 
         public void TranslateControls(object objObject) => Calls.Add(nameof(TranslateControls));
 

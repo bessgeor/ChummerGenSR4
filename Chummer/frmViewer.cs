@@ -10,7 +10,7 @@ namespace Chummer
 {
 	public partial class frmViewer : Form
 	{
-		private List<Character> _lstCharacters = new List<Character>();
+		private List<CharacterViewModel> _lstCharacters = new List<CharacterViewModel>();
 		private XmlDocument _objCharacterXML = new XmlDocument();
 		private string _strSelectedSheet = "Shadowrun 4";
 		private bool _blnLoading = false;
@@ -100,9 +100,9 @@ namespace Chummer
 			if (cboXSLT.Text == "")
 				cboXSLT.SelectedValue = "Shadowrun 4";
 			GenerateOutput();
-            this.Text = _lstCharacters[0].Alias;
+            this.Text = _lstCharacters[0].Character.Alias;
             if (this.Text == "")
-                this.Text = _lstCharacters[0].FileName;
+                this.Text = _lstCharacters[0].Character.FileName;
 			_blnLoading = false;
 		}
 
@@ -168,7 +168,7 @@ namespace Chummer
 			// Clear the reference to the character's Print window.
 			if (_lstCharacters.Count > 0)
 			{
-				foreach (Character objCharacter in _lstCharacters)
+				foreach (CharacterViewModel objCharacter in _lstCharacters)
 					objCharacter.PrintWindow = null;
 			}
 		}
@@ -237,8 +237,8 @@ namespace Chummer
 			// </characters>
 			objWriter.WriteStartElement("characters");
 
-			foreach (Character objCharacter in _lstCharacters)
-				objCharacter.PrintToStream(objStream, objWriter);
+			foreach (CharacterViewModel objCharacter in _lstCharacters)
+				objCharacter.Character.PrintToStream(objStream, objWriter);
 
 			// </characters>
 			objWriter.WriteEndElement();
@@ -298,7 +298,7 @@ namespace Chummer
 		/// <summary>
 		/// List of Characters to print.
 		/// </summary>
-		public List<Character> Characters
+		public List<CharacterViewModel> Characters
 		{
 			set
 			{
