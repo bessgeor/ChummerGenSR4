@@ -22,6 +22,10 @@ internal sealed class CaptureOptionsParser
           --runs-dir <path>          default: out/runs
           --run-folder-file <path>   file that receives the run folder's full path once the folder exists
           --repo-root <path>         default: the current directory
+          --environment-fingerprint-file <path>
+                                     write the SHA-256 of the screens, scale, OS build, Windows colour and text
+                                     settings and app options the canonical cache keys on, then exit with 0
+                                     without running a case
           --help
 
         Exit status: 0 all passed, 1 visual differences, 2 execution failures, 3 setup error.
@@ -69,6 +73,9 @@ internal sealed class CaptureOptionsParser
                     break;
                 case "--runs-dir":
                     options = options with { RunsDirectory = Value(args, ref index) };
+                    break;
+                case "--environment-fingerprint-file":
+                    options = options with { EnvironmentFingerprintFile = Value(args, ref index) };
                     break;
                 case "--repo-root":
                     options = options with { RepositoryRoot = Path.GetFullPath(Value(args, ref index)) };

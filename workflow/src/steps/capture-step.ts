@@ -1,0 +1,121 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import type { PlannedCase } from "../cases/case-plan.js";
+import type { HostRunner } from "../host/host-runner.js";
+import type { ScratchFolder } from "../host/scratch-folder.js";
+import { SetupError } from "../host/setup-error.js";
+import type { WorkflowPaths } from "../paths.js";
+import { z } from "zod";
+import { listFiles, sha256File } from "./fingerprint.js";
+import { captureInputs, changedInputs } from "./input-fingerprints.js";
+import { captureKey } from "./step-keys.js";
+import { readDocument } from "./read-document.js";
+import { finishedStatus, type StepContext, type StepOutcome } from "./step-outcome.js";
+import type { StepStore } from "./step-store.js";
+
+/** The files a completed capture run must have; their hashes guard a reused record, with every screenshot. */
+export const captureOutputs = ["summary.json", "results.json", "coverage.json"] as const;
+
+export type CaptureDependencies = {
+  readonly paths: WorkflowPaths;
+  readonly host: HostRunner;
+  readonly store: StepStore;
+  readonly log: (line: string) => void;
+  readonly now: () => Date;
+  readonly createScratchFolder: (prefix: string) => ScratchFolder;
+  /** Checks the inputs again, so a thread never mixes candidates or tools; replaceable in tests. */
+  readonly changedInputs: typeof changedInputs;
+};
+
+/** The cases a capture run covered, from its coverage document. */
+const RunCasesSchema = z.object({ cases: z.array(z.object({ case: z.string() })) });
+
+function captureArguments(paths: WorkflowPaths, context: StepContext, item: PlannedCase, runFolderFile: string): string[] {
+  const { options } = context;
+  const args = [join(paths.captureTools, "Parity.Capture.dll"),
+    "--case", item.name, "--case-file", options.caseFile, "--repo-root", paths.repositoryRoot, "--run-folder-file", runFolderFile];
+  if (item.captureFilter !== null) args.push("--capture", item.captureFilter.join(","));
+  if (options.threshold !== null) args.push("--threshold", String(options.threshold));
+  if (options.settingsOverlay !== null) args.push("--settings-overlay", options.settingsOverlay);
+  if (options.canonicalCache !== null) args.push("--canonical-cache", options.canonicalCache);
+  return args;
+}
+
+/** The screenshots of a run, relative to its folder. */
+function screenshots(runFolder: string): string[] {
+  return existsSync(join(runFolder, "captures")) ? listFiles(join(runFolder, "captures"), true).map((path) => `captures/${path}`) : [];
+}
+
+/** Captures one case on the desktop lane, or reuses a completed capture with the same inputs. */
+export class CaptureStep {
+  constructor(private readonly dependencies: CaptureDependencies) {}
+
+  async run(context: StepContext, item: PlannedCase): Promise<StepOutcome> {
+    const { paths, store, log } = this.dependencies;
+    const changed = await this.dependencies.changedInputs(paths, context.options, context.fingerprints, captureInputs);
+    if (changed.length > 0) {
+      throw new SetupError(`Inputs changed since the thread started (${changed.join(", ")}); start a new thread.`);
+    }
+    const environment = await this.readEnvironment(context, item);
+    const stepKey = captureKey(item, await sha256File(item.fixturePath), environment, context.options, context.fingerprints);
+    const recapture = context.options.recapture && context.mode === "run";
+    const found = recapture ? { found: "none" as const } : await store.lookup("capture", stepKey.key);
+    if (found.found === "valid") {
+      log(`capture ${item.name}: reusing ${found.record.runFolder} from thread ${found.record.threadId} (status ${found.record.status}).`);
+      return { case: item.name, status: found.record.status, runFolder: found.record.runFolder, key: stepKey.key, reusedFrom: found.record.threadId };
+    }
+    if (context.mode === "reuse-only") {
+      const why = found.found === "stale" ? `its record is stale: ${found.reason}` : "there is no completed capture with these inputs";
+      throw new SetupError(`capture ${item.name}: ${why}; run the capture node first.`);
+    }
+    if (recapture) log(`capture ${item.name}: capturing again (--recapture).`);
+    else if (found.found === "stale") log(`capture ${item.name}: capturing again because ${found.reason}.`);
+
+    const scratch = this.dependencies.createScratchFolder("workflow-capture-");
+    try {
+      const runFolderFile = join(scratch.path, "run-folder.txt");
+      const exit = await this.dependencies.host.run({
+        resource: "desktop", label: `capture ${item.name}`, command: "dotnet",
+        args: captureArguments(paths, context, item, runFolderFile), ...(context.signal === undefined ? {} : { signal: context.signal }),
+      });
+      const status = finishedStatus(exit);
+      if (status === null) throw new SetupError(`capture ${item.name} exited with ${exit}, so its run did not finish.`);
+      if (!existsSync(runFolderFile)) throw new SetupError(`capture ${item.name} exited with ${exit} but did not report its run folder.`);
+      const runFolder = readFileSync(runFolderFile, "utf8").trim();
+      for (const output of captureOutputs) {
+        if (!existsSync(join(runFolder, output))) throw new SetupError(`capture ${item.name} exited with ${exit} but wrote no ${join(runFolder, output)}.`);
+      }
+      // The runner also matches `--case` against fixture file names, so it may have run more than the planned case.
+      const covered = readDocument(join(runFolder, "coverage.json"), RunCasesSchema).cases.map((entry) => entry.case);
+      if (covered.length !== 1 || covered[0] !== item.name) {
+        throw new SetupError(`capture ${item.name} ran ${covered.length} cases (${covered.join(", ")}) in ${runFolder}, not only the planned one; nothing it wrote is recorded.`);
+      }
+      if (status !== 2) {
+        await store.save({ kind: "capture", key: stepKey.key, keyLines: [...stepKey.lines], case: item.name, runFolder, status, threadId: context.threadId },
+          [...captureOutputs, ...screenshots(runFolder)], this.dependencies.now());
+      }
+      return { case: item.name, status, runFolder, key: stepKey.key, reusedFrom: null };
+    } finally {
+      scratch.remove();
+    }
+  }
+
+  /** The capture runner's fingerprint of the machine and app environment, which decides the pixels. */
+  private async readEnvironment(context: StepContext, item: PlannedCase): Promise<string> {
+    const scratch = this.dependencies.createScratchFolder("workflow-environment-");
+    try {
+      const file = join(scratch.path, "environment.txt");
+      const exit = await this.dependencies.host.run({
+        resource: "cpu", label: `environment ${item.name}`, command: "dotnet",
+        args: [join(this.dependencies.paths.captureTools, "Parity.Capture.dll"), "--environment-fingerprint-file", file],
+        ...(context.signal === undefined ? {} : { signal: context.signal }),
+      });
+      if (exit !== 0 || !existsSync(file)) throw new SetupError(`The capture runner could not fingerprint the environment (exit ${exit}).`);
+      const fingerprint = readFileSync(file, "utf8").trim();
+      if (!/^[0-9a-f]{64}$/.test(fingerprint)) throw new SetupError(`The capture runner wrote an environment fingerprint that is not a SHA-256: '${fingerprint}'.`);
+      return fingerprint;
+    } finally {
+      scratch.remove();
+    }
+  }
+}

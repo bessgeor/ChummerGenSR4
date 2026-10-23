@@ -25,3 +25,5 @@ Each step is an OpenSpec change (`openspec/`) in its own pull request, with a pr
 npm install
 npm run openspec:validate
 ```
+
+`npm start` runs the visual parity workflow (`workflow/`, a LangGraph graph): it builds the app from the current source, captures each test character on the released and the rebuilt executable, compares the captures and groups the differences it finds. It needs Windows with an interactive desktop, .NET 10 and Visual Studio Build Tools; `AGENTS.md` describes its options and output. A GitHub Actions job type-checks and tests the workflow, builds the parity tools and checks the generated contracts.

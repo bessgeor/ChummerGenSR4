@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Parity.Capture.Cache;
 using Parity.Capture.Execution;
 using Parity.Capture.Run;
 using Parity.Capture.Staging;
@@ -43,6 +44,7 @@ public sealed class CaptureRunTests
     [InlineData("--threshold", "2")]
     [InlineData("--capture", "--case")]
     [InlineData("--run-folder-file")]
+    [InlineData("--environment-fingerprint-file")]
     public void Invalid_options_are_rejected(params string[] args)
     {
         Assert.Throws<ArgumentException>(() => new CaptureOptionsParser().Parse(args));
@@ -65,6 +67,30 @@ public sealed class CaptureRunTests
             string runFolder = File.ReadAllText(runFolderFile);
             Assert.Equal(runs, Path.GetDirectoryName(runFolder));
             Assert.True(File.Exists(Path.Combine(runFolder, "summary.json")));
+        }
+        finally
+        {
+            Directory.Delete(runs, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Environment_fingerprint_file_receives_the_environment_fingerprint_and_no_case_runs()
+    {
+        string runs = Directory.CreateTempSubdirectory("parity-environment-").FullName;
+        try
+        {
+            string file = Path.Combine(runs, "environment.txt");
+            using ServiceProvider services = Parity.Capture.Program.BuildServices();
+
+            int exitCode = services.GetRequiredService<CaptureRun>().Execute(["--repo-root", RepositoryPaths.Root, "--runs-dir", runs, "--environment-fingerprint-file", file]);
+
+            Assert.Equal(0, exitCode);
+            string fingerprint = File.ReadAllText(file).Trim();
+            Assert.Matches("^[0-9a-f]{64}$", fingerprint);
+            Assert.Equal([file], Directory.GetFileSystemEntries(runs));
+            Assert.Equal(new CacheEnvironment(["a", "b"]).Fingerprint(), new CacheEnvironment(["a", "b"]).Fingerprint());
+            Assert.NotEqual(new CacheEnvironment(["a", "b"]).Fingerprint(), new CacheEnvironment(["a", "c"]).Fingerprint());
         }
         finally
         {

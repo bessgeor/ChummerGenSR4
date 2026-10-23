@@ -1,2 +1,10 @@
 # Character saves are UTF-16 XML; keep them byte-exact.
 *.chum binary
+
+# The canonical capture cache keys on the capture runner's assemblies, so every checkout must compile
+# byte-identical sources: their line endings are pinned instead of following core.autocrlf.
+*.cs text eol=crlf
+*.csproj text eol=crlf
+*.props text eol=crlf
+*.targets text eol=crlf
+*.slnx text eol=crlf

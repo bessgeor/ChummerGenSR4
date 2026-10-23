@@ -18,6 +18,9 @@ internal sealed record CaptureOptions
     /// <summary>A file that receives the run folder's full path once the folder exists, so a caller can find the run.</summary>
     public string? RunFolderFile { get; init; }
 
+    /// <summary>A file that receives the SHA-256 of the environment the cache keys on; the run then ends without running a case.</summary>
+    public string? EnvironmentFingerprintFile { get; init; }
+
     public string? SettingsOverlay { get; init; }
 
     /// <summary>Folder of the canonical capture cache; null runs every canonical side live and caches nothing.</summary>

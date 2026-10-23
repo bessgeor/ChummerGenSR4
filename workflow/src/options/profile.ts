@@ -1,0 +1,46 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { z } from "zod";
+import { SetupError } from "../host/setup-error.js";
+
+/** The optional local workflow profile: machine-specific defaults, never committed. */
+export const ProfileSchema = z.strictObject({
+  canonicalCache: z.string().min(1).optional(),
+  settingsOverlay: z.string().min(1).optional(),
+  cpuPool: z.number().int().min(1).optional(),
+});
+export type Profile = z.infer<typeof ProfileSchema>;
+
+export type Environment = Readonly<Record<string, string | undefined>>;
+
+/** The machine-wide folder for the workflow's shared state, in the user's local application data. */
+export function localDataFolder(env: Environment): string {
+  const localAppData = env["LOCALAPPDATA"];
+  if (localAppData === undefined || localAppData.length === 0) {
+    throw new SetupError("LOCALAPPDATA is not set, so the machine-wide workflow folder cannot be found.");
+  }
+  return join(localAppData, "ChummerGenSR4");
+}
+
+export function profilePath(env: Environment): string {
+  return env["PARITY_WORKFLOW_PROFILE"] ?? join(localDataFolder(env), "workflow-profile.json");
+}
+
+/** Reads the profile; a missing file is an empty profile, an unreadable or invalid one a setup error. */
+export function loadProfile(env: Environment): Profile {
+  const path = profilePath(env);
+  if (!existsSync(path)) {
+    return {};
+  }
+  let document: unknown;
+  try {
+    document = JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    throw new SetupError(`The workflow profile ${path} cannot be read: ${(error as Error).message}`);
+  }
+  const parsed = ProfileSchema.safeParse(document);
+  if (!parsed.success) {
+    throw new SetupError(`The workflow profile ${path} is invalid: ${z.prettifyError(parsed.error)}`);
+  }
+  return parsed.data;
+}
