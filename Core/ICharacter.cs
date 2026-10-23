@@ -3,7 +3,7 @@ using System.Collections.Generic;
 namespace Chummer
 {
 	/// <summary>
-	/// What the character's attributes, qualities, skills, magic, resonance, martial arts, contacts and critter powers read of their character.
+	/// What the character's attributes, qualities, skills, magic, resonance, martial arts, contacts, critter powers, armor, cyberware and gear read of their character.
 	/// </summary>
 	public interface ICharacter : IImprovementCharacter
 	{
@@ -38,6 +38,11 @@ namespace Chummer
 		string MetatypeCategory { get; }
 
 		/// <summary>
+		/// Character's Metatype.
+		/// </summary>
+		string Metatype { get; }
+
+		/// <summary>
 		/// Whether or not the character's MAG and RES are not reduced by Essence loss.
 		/// </summary>
 		bool OverrideSpecialAttributeEssenceLoss { get; }
@@ -46,6 +51,26 @@ namespace Chummer
 		/// The Essence penalty to the character's MAG or RES.
 		/// </summary>
 		int EssencePenalty { get; }
+
+		/// <summary>
+		/// Charisma (CHA) Attribute.
+		/// </summary>
+		Attribute CHA { get; }
+
+		/// <summary>
+		/// Intuition (INT) Attribute.
+		/// </summary>
+		Attribute INT { get; }
+
+		/// <summary>
+		/// Logic (LOG) Attribute.
+		/// </summary>
+		Attribute LOG { get; }
+
+		/// <summary>
+		/// Willpower (WIL) Attribute.
+		/// </summary>
+		Attribute WIL { get; }
 
 		/// <summary>
 		/// Magic (MAG) Attribute.

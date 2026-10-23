@@ -47,5 +47,10 @@ namespace Chummer
 		/// The dialogs that ask the user for the selections of improvement bonuses.
 		/// </summary>
 		IImprovementDialogs ImprovementDialogs { get; }
+
+		/// <summary>
+		/// The choices and Weapons of armor, cyberware and gear.
+		/// </summary>
+		IEquipmentHost Equipment { get; }
 	}
 }

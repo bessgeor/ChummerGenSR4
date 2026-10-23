@@ -19,6 +19,17 @@ namespace Chummer
 			_objNode = objNode;
 		}
 
+		/// <summary>
+		/// The Windows Forms tree node this view shows the item in.
+		/// </summary>
+		public TreeNode Node
+		{
+			get
+			{
+				return _objNode;
+			}
+		}
+
 		public string Text
 		{
 			get
@@ -46,6 +57,25 @@ namespace Chummer
 		public void ShowAsGrayText()
 		{
 			_objNode.ForeColor = SystemColors.GrayText;
+		}
+
+		public ITreeNodeView NewNode()
+		{
+			return new TreeNodeView(new TreeNode());
+		}
+
+		/// <summary>
+		/// Add a node as the last child of this one. Throws an InvalidCastException for a node that is no TreeNodeView.
+		/// </summary>
+		/// <param name="objChild">Node to add.</param>
+		public void Add(ITreeNodeView objChild)
+		{
+			_objNode.Nodes.Add(((TreeNodeView)objChild)._objNode);
+		}
+
+		public void Expand()
+		{
+			_objNode.Expand();
 		}
 	}
 }

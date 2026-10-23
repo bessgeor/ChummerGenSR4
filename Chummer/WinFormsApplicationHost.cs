@@ -9,6 +9,7 @@ namespace Chummer
 	{
 		private readonly ControlTranslator _objTranslator = new ControlTranslator();
 		private readonly WinFormsImprovementDialogs _objImprovementDialogs = new WinFormsImprovementDialogs();
+		private readonly WinFormsEquipmentHost _objEquipment = new WinFormsEquipmentHost();
 
 		public string StartupPath
 		{
@@ -48,6 +49,14 @@ namespace Chummer
 			get
 			{
 				return _objImprovementDialogs;
+			}
+		}
+
+		public IEquipmentHost Equipment
+		{
+			get
+			{
+				return _objEquipment;
 			}
 		}
 	}

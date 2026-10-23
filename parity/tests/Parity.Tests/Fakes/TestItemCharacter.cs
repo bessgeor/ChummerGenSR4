@@ -19,8 +19,13 @@ internal sealed class TestItemCharacter : ICharacter
     public CharacterBuildMethod BuildMethod => throw Unused();
     public bool IsCritter => throw Unused();
     public string MetatypeCategory => throw Unused();
+    public string Metatype => throw Unused();
     public bool OverrideSpecialAttributeEssenceLoss => throw Unused();
     public int EssencePenalty => throw Unused();
+    public Attribute CHA => throw Unused();
+    public Attribute INT => throw Unused();
+    public Attribute LOG => throw Unused();
+    public Attribute WIL => throw Unused();
     public Attribute MAG => throw Unused();
     public int MAGMagician => throw Unused();
     public int WoundModifiers => throw Unused();
