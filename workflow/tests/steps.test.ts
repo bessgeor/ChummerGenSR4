@@ -45,8 +45,11 @@ function plannedCase(root: string): PlannedCase {
 /** Plays the capture runner and the comparer: writes their files and returns scripted statuses. */
 class FakeHost implements HostRunner {
   readonly commands: HostCommand[] = [];
+  readonly lanes = ["desktop"];
   environment = "e".repeat(64);
   environmentReads = 0;
+  /** Holds every capture until it is released. */
+  gate: Promise<void> | null = null;
   captureStatus = 1;
   compareStatus = 1;
   reportStatus = "differences";
@@ -69,6 +72,7 @@ class FakeHost implements HostRunner {
     }
     this.commands.push(command);
     if (command.resource === "desktop") {
+      await this.gate;
       const runFolder = join(this.root, "runs", `run-${++this.runs}`);
       mkdirSync(runFolder, { recursive: true });
       for (const file of ["summary.json", "results.json"]) writeFileSync(join(runFolder, file), `${file} ${this.runs}`);
@@ -330,4 +334,24 @@ test("the comparer's fingerprint covers its native files and language data but n
   notEqual(given.tessdata, "default");
   writeFileSync(join(tessdata, "eng.traineddata"), "two");
   notEqual((await read(tessdata)).tessdata, given.tessdata);
+});
+
+test("captures that run together share one reading of the environment, and the next group reads again", async () => {
+  const { host, capture, context, root } = setup();
+  const alpha = plannedCase(root);
+  const beta = { ...alpha, name: "build-Beta" };
+  let release: () => void = () => {};
+  host.gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const first = capture.run(context(), alpha);
+  while (host.environmentReads === 0) await new Promise((resolve) => setTimeout(resolve, 5));
+  // The second capture starts while the first drives its lane.
+  const second = capture.run(context(), beta);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  release();
+  await Promise.all([first, second]);
+  equal(host.environmentReads, 1);
+  await capture.run(context(), { ...alpha, name: "build-Gamma" });
+  equal(host.environmentReads, 2);
 });

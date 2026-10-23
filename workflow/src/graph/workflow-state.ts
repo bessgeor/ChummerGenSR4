@@ -31,8 +31,6 @@ export const WorkflowState = Annotation.Root({
   plan: Annotation<PlannedCase[]>(),
   fingerprints: Annotation<InputFingerprints | null>(),
   captures: byCase(),
-  /** The index of the case the latest capture step handled; only one capture runs per super-step. */
-  lastCaptured: Annotation<number>(),
   compares: byCase(),
   triageSummary: Annotation<TriageSummary | null>(),
   /** The inventory's totals and folder, once the inventory after triage ran; absent in a thread stored before it existed. */

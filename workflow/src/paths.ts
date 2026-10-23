@@ -7,6 +7,8 @@ export type WorkflowPaths = {
   readonly checkpoints: string;
   readonly store: string;
   readonly steps: string;
+  /** Hand-over files of desktop commands, inside the repository so that every lane sees them at the same path. */
+  readonly laneScratch: string;
   readonly canonicalApp: string;
   readonly candidateApp: string;
   readonly captureTools: string;
@@ -29,6 +31,7 @@ export function workflowPaths(repositoryRoot: string): WorkflowPaths {
     checkpoints: join(workflowFolder, "checkpoints.sqlite"),
     store: join(workflowFolder, "store.sqlite"),
     steps: join(workflowFolder, "steps"),
+    laneScratch: join(workflowFolder, "lane-scratch"),
     canonicalApp: join(repositoryRoot, "bin"),
     candidateApp: join(repositoryRoot, "out", "candidate", "bin"),
     captureTools: toolFolder("Parity.Capture"),

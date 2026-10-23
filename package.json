@@ -12,6 +12,7 @@
     "review": "node --import tsx workflow/src/review/review-main.ts",
     "inventory": "node --import tsx workflow/src/inventory/inventory-main.ts",
     "discover": "node --import tsx workflow/src/discovery/discover-main.ts",
+    "lane-agent": "node --import tsx workflow/src/lanes/lane-agent-main.ts",
     "parity": "dotnet run --project parity/src/Parity.Capture -c Release --",
     "compare": "dotnet run --project parity/src/Parity.Compare -c Release --",
     "build:candidate": "node parity/scripts/build-candidate.mjs",

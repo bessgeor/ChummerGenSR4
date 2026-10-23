@@ -3,12 +3,15 @@ import { join } from "node:path";
 import { z } from "zod";
 import { AgentsProfileSchema } from "../agents/agent-settings.js";
 import { SetupError } from "../host/setup-error.js";
+import { LanesSchema } from "../lanes/lane-settings.js";
 
 /** The optional local workflow profile: machine-specific defaults, never committed. */
 export const ProfileSchema = z.strictObject({
   canonicalCache: z.string().min(1).optional(),
   settingsOverlay: z.string().min(1).optional(),
   cpuPool: z.number().int().min(1).optional(),
+  /** The desktop lanes captures run on; one lane on this machine's desktop when absent. */
+  lanes: LanesSchema.optional(),
   agents: AgentsProfileSchema.optional(),
   /** The folder of the certificates that unattended runs need. */
   certificates: z.string().min(1).optional(),

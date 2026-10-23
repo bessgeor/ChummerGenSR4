@@ -136,6 +136,7 @@ test("the check capture is one capture runner call on the desktop lane with the 
   const runFolder = join(root, "run");
   const commands: HostCommand[] = [];
   const host: HostRunner = {
+    lanes: ["desktop"],
     async run(command) {
       commands.push(command);
       mkdirSync(runFolder, { recursive: true });
@@ -163,9 +164,9 @@ test("the check capture is one capture runner call on the desktop lane with the 
   ok(!command.args.includes("--candidate-exe"));
   const attempt = captureArguments(paths, options, { cases: ["build-a"], captures: ["skills"] }, "f", "C:/attempt/build/bin/ChummerGenSR4.exe");
   equal(attempt[attempt.indexOf("--candidate-exe") + 1], "C:/attempt/build/bin/ChummerGenSR4.exe");
-  const failing = hostCheckCapture(paths, { run: async () => 3 }, createScratchFolder);
+  const failing = hostCheckCapture(paths, { lanes: ["desktop"], run: async () => 3 }, createScratchFolder);
   await rejects(failing({ cases: ["a"], captures: ["x"], options }), (error: Error) => error instanceof SetupError && /exited with 3/.test(error.message));
-  const silent = hostCheckCapture(paths, { run: async () => 0 }, createScratchFolder);
+  const silent = hostCheckCapture(paths, { lanes: ["desktop"], run: async () => 0 }, createScratchFolder);
   await rejects(silent({ cases: ["a"], captures: ["x"], options }), /did not report its run folder/);
 });
 

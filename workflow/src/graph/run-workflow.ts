@@ -89,7 +89,7 @@ async function start(command: Extract<Command, { kind: "start" }>, dependencies:
   const cache = options.canonicalCache === null ? "off (--live-canonical)" : `${options.canonicalCache} (${options.canonicalCacheSource})`;
   dependencies.log(`Thread ${threadId}: ${plan.cases.length} cases, canonical cache ${cache}.`);
   const input: WorkflowStateValue = {
-    threadId, options, plan: [...plan.cases], fingerprints: null, captures: {}, lastCaptured: -1, compares: {}, triageSummary: null, inventorySummary: null,
+    threadId, options, plan: [...plan.cases], fingerprints: null, captures: {}, compares: {}, triageSummary: null, inventorySummary: null,
     clusters: {}, agentMilliseconds: 0, diagnosisCheck: null, diagnosisPath: null, repairs: {}, repairPath: null, widenings: {}, earlierWidenings: [], accepted: null, wideningPath: null,
     startedUtc: dependencies.now().toISOString(), outcome: null, outcomePath: null,
   };
@@ -113,7 +113,19 @@ async function checkResumable(threadId: string, dependencies: RunDependencies): 
   if (snapshot.next.length === 0) {
     throw new SetupError(`Thread ${threadId} already finished; start a new run instead.`);
   }
+  if (values.triageSummary === null && await storedByCaseChain(threadId, dependencies)) {
+    throw new SetupError(`Thread ${threadId} was stored in an older checkpoint format and stopped before its triage, so it cannot continue. `
+      + "Start a new run with the same options: it reuses the steps the thread recorded.");
+  }
   requireCertificates(values.options, dependencies);
+}
+
+/** Whether the thread is in the older checkpoint format, whose state has the field `lastCaptured`. */
+async function storedByCaseChain(threadId: string, dependencies: RunDependencies): Promise<boolean> {
+  const { checkpointer } = dependencies.graph;
+  if (checkpointer === undefined || typeof checkpointer === "boolean") return false;
+  const tuple = await checkpointer.getTuple({ configurable: { thread_id: threadId } });
+  return tuple !== undefined && "lastCaptured" in tuple.checkpoint.channel_values;
 }
 
 /** Reports a thread whose graph ran to its end; a result that cannot be read is a setup error, and the finished thread has nothing to resume. */

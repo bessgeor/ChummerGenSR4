@@ -1,14 +1,14 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { join } from "node:path";
+import type { LanePool } from "../lanes/lane-pool.js";
 import type { CpuPool } from "./cpu-pool.js";
-import type { DesktopLane } from "./desktop-lane.js";
+import { prefixLines } from "./prefix-lines.js";
 import { SetupError } from "./setup-error.js";
 import { stopAppsUnder } from "./stray-apps.js";
 
 export type HostResource = "desktop" | "cpu";
 
-export type HostCommand = {
-  readonly resource: HostResource;
+type CommandBase = {
   /** Prefix of every output line, for example `capture build-Diego`. */
   readonly label: string;
   readonly command: string;
@@ -17,32 +17,26 @@ export type HostCommand = {
   readonly signal?: AbortSignal;
 };
 
+/** A desktop command holds the first free desktop lane; a `cpu` command that names a lane runs on that lane's machine without its lock. */
+export type HostCommand = CommandBase & ({ readonly resource: "desktop" } | { readonly resource: "cpu"; readonly lane?: string });
+
 /** Runs child processes on the host, each under the resource it needs. */
 export interface HostRunner {
+  /** The names of the desktop lanes, in their order. */
+  readonly lanes: readonly string[];
   /** The child's exit status; a child that cannot start or ends from a signal is a setup error. */
   run(command: HostCommand): Promise<number>;
-}
-
-function prefixLines(label: string, write: (text: string) => void) {
-  let pending = "";
-  return {
-    push(chunk: string) {
-      const lines = (pending + chunk).split(/\r?\n/);
-      pending = lines.pop() ?? "";
-      for (const line of lines) write(`[${label}] ${line}\n`);
-    },
-    flush() {
-      if (pending.length > 0) write(`[${label}] ${pending}\n`);
-      pending = "";
-    },
-  };
 }
 
 /** Ends a child and everything it started; a capture run owns Chummer processes that must not outlive it. */
 export function killTree(child: ChildProcess): void {
   if (child.pid === undefined) return;
   if (process.platform === "win32") {
-    spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore" }).on("error", () => child.kill());
+    try {
+      spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore" }).on("error", () => child.kill());
+    } catch {
+      child.kill();
+    }
   } else {
     child.kill("SIGKILL");
   }
@@ -52,27 +46,38 @@ export function killTree(child: ChildProcess): void {
 export class ProcessHostRunner implements HostRunner {
   constructor(
     private readonly repositoryRoot: string,
-    private readonly lane: DesktopLane,
+    private readonly desktopLanes: LanePool,
     private readonly pool: CpuPool,
     private readonly write: (text: string) => void,
     private readonly spawnProcess: typeof spawn = spawn,
     private readonly stopStrayApps: (folder: string) => void = stopAppsUnder,
   ) {}
 
+  get lanes(): readonly string[] {
+    return this.desktopLanes.lanes.map((lane) => lane.name);
+  }
+
   async run(command: HostCommand): Promise<number> {
     if (command.resource === "cpu") {
-      return this.pool.run(() => this.spawnChild(command));
+      if (command.lane === undefined) return this.pool.run(() => this.spawnChild(command));
+      const { remote } = this.desktopLanes.lane(command.lane);
+      await this.desktopLanes.check(command.signal);
+      if (remote === null) return this.pool.run(() => this.spawnChild(command));
+      return remote.run({ ...command, desktop: false }, this.repositoryRoot, this.write);
     }
-    const release = await this.lane.acquire(command.signal);
+    await this.desktopLanes.check(command.signal);
+    const held = await this.desktopLanes.acquire(command.signal);
+    this.write(`[${command.label}] on desktop lane ${held.lane.name}\n`);
+    const remote = held.lane.remote;
     let status: number | undefined;
     let failure: unknown;
     try {
-      status = await this.spawnChild(command);
+      status = remote === null ? await this.spawnChild(command) : await remote.run({ ...command, desktop: true }, this.repositoryRoot, this.write);
     } catch (error) {
       failure = error;
     }
     try {
-      await release();
+      await held.release();
     } catch (error) {
       // The child's own failure is the cause worth reporting; a lock problem must not replace it.
       if (failure === undefined) throw error;
@@ -97,11 +102,17 @@ export class ProcessHostRunner implements HostRunner {
         reject(new SetupError(`${command.label}: not started because the run was stopped.`));
         return;
       }
-      const child = this.spawnProcess(command.command, [...command.args], { cwd: this.repositoryRoot, stdio: ["ignore", "pipe", "pipe"] });
+      let child: ChildProcess;
+      try {
+        child = this.spawnProcess(command.command, [...command.args], { cwd: this.repositoryRoot, stdio: ["ignore", "pipe", "pipe"] });
+      } catch (error) {
+        reject(new SetupError(`${command.label}: ${command.command} could not be started: ${(error as Error).message}`));
+        return;
+      }
       const out = prefixLines(command.label, this.write);
       const err = prefixLines(command.label, this.write);
-      child.stdout.setEncoding("utf8").on("data", (chunk: string) => out.push(chunk));
-      child.stderr.setEncoding("utf8").on("data", (chunk: string) => err.push(chunk));
+      child.stdout!.setEncoding("utf8").on("data", (chunk: string) => out.push(chunk));
+      child.stderr!.setEncoding("utf8").on("data", (chunk: string) => err.push(chunk));
       let aborted = false;
       const abort = () => {
         aborted = true;
