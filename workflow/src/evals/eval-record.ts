@@ -21,19 +21,31 @@ const HindsightLabelSchema = z.strictObject({ grade: z.enum(grades), item: z.str
 const ReviewLabelSchema = z.strictObject({ verdict: z.enum(verdicts), note: z.string().nullable(), reviewer: z.string().min(1), reviewedUtc: z.string() });
 const GraderLabelSchema = z.strictObject({ score: z.number().min(0).max(1), rationale: z.string().min(1), record: z.string().min(1), gradedUtc: z.string() });
 
+/** Where a rejected repair attempt stopped. */
+export const repairStages = ["model", "deadline", "patch", "build", "check"] as const;
+export type RepairStage = (typeof repairStages)[number];
+
+/** The outcome of a repair job's attempt: automatic, never gold. */
+const RepairLabelSchema = z.strictObject({
+  outcome: z.enum(["passed", "rejected"]), stage: z.enum(repairStages).nullable(), reason: z.string().nullable(), labelledUtc: z.string(),
+});
+
 /** The labels of a record, each from its own source; only hindsight and review verdicts are gold. */
 const LabelsSchema = z.strictObject({
   check: z.enum(checkLabels).nullable(),
   hindsight: HindsightLabelSchema.nullable(),
   review: ReviewLabelSchema.nullable(),
   grader: GraderLabelSchema.nullable(),
+  /** Set once a repair attempt is archived; empty for every other record, and a stored record without the key reads as empty. */
+  repair: RepairLabelSchema.nullable().default(null),
 });
 export type Labels = z.infer<typeof LabelsSchema>;
 export type HindsightLabel = z.infer<typeof HindsightLabelSchema>;
 export type ReviewLabel = z.infer<typeof ReviewLabelSchema>;
 export type GraderLabel = z.infer<typeof GraderLabelSchema>;
+export type RepairLabel = z.infer<typeof RepairLabelSchema>;
 
-export const noLabels: Labels = { check: null, hindsight: null, review: null, grader: null };
+export const noLabels: Labels = { check: null, hindsight: null, review: null, grader: null, repair: null };
 
 const common = {
   recordId: z.string().min(1),
@@ -86,6 +98,21 @@ export function readRecord(value: unknown): EvalRecord {
 
 export function recordNamespace(jobKind: EvalRecord["jobKind"]): string[] {
   return ["eval-record", jobKind];
+}
+
+/**
+ * The ID `<prefix>/<n>` of the next record of a subject's job kind, where the caller already lists attempts 1 to
+ * `listed`, and the stored records after them that the caller never saw: a job that ended the run with `infra`
+ * stored its record first, so only the store knows it.
+ */
+export async function nextRecordId(store: BaseStore, jobKind: EvalRecord["jobKind"], prefix: string, listed: number): Promise<{ recordId: string; attempt: number; unlisted: string[] }> {
+  const unlisted: string[] = [];
+  let attempt = listed + 1;
+  for (;; attempt++) {
+    const id = `${prefix}/${attempt}`;
+    if ((await store.get(recordNamespace(jobKind), id)) === null) return { recordId: id, attempt, unlisted };
+    unlisted.push(id);
+  }
 }
 
 export async function putRecord(store: BaseStore, record: EvalRecord): Promise<void> {

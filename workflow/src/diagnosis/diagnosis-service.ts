@@ -6,7 +6,7 @@ import type { AgentRunners } from "../agents/agent-runners.js";
 import type { PlannedCase } from "../cases/case-plan.js";
 import { CaptureResultsSchema } from "../../../contracts/generated/typescript/parity-capture-results.js";
 import { ExecutionCoverageSchema } from "../../../contracts/generated/typescript/parity-execution-coverage.js";
-import { labelRecordById, noLabels, putRecord, recordNamespace, type EvalRecord } from "../evals/eval-record.js";
+import { labelRecordById, nextRecordId, noLabels, putRecord, type EvalRecord } from "../evals/eval-record.js";
 import type { ScratchFolder } from "../host/scratch-folder.js";
 import { SetupError } from "../host/setup-error.js";
 import type { RunOptions } from "../options/run-options.js";
@@ -162,27 +162,16 @@ export class DiagnosisService {
   }
 
   private manifest(cluster: ClusterDiagnosis): ContextManifest {
-    const manifest = readDocument(join(cluster.contextFolder, "context.json"), ContextManifestSchema);
-    if (contextHash(manifest) !== cluster.contextHash) {
-      throw new SetupError(`The context of cluster ${cluster.clusterId} in ${cluster.contextFolder} changed after it was sealed.`);
-    }
-    return manifest;
+    return readSealedManifest(cluster);
   }
 
   /**
    * The ID of the next record of a kind, and the earlier records of that kind the state never saw: a job that failed
    * with `infra` stored its record and then ended the run, so only the store knows it.
    */
-  private async nextRecord(store: BaseStore, threadId: string, cluster: ClusterDiagnosis, kind: JobKind): Promise<{ recordId: string; unlisted: string[] }> {
+  private nextRecord(store: BaseStore, threadId: string, cluster: ClusterDiagnosis, kind: JobKind): Promise<{ recordId: string; unlisted: string[] }> {
     // The listed records of a kind are attempts 1 to n, so a stored record the state does not list comes after them.
-    const unlisted: string[] = [];
-    let attempt = cluster.records.filter((id) => id.includes(`/${kind}/`)).length + 1;
-    for (;; attempt++) {
-      const id = `${threadId}/${cluster.clusterId}/${kind}/${attempt}`;
-      if ((await store.get(recordNamespace(kind), id)) === null) break;
-      unlisted.push(id);
-    }
-    return { recordId: `${threadId}/${cluster.clusterId}/${kind}/${attempt}`, unlisted };
+    return nextRecordId(store, kind, `${threadId}/${cluster.clusterId}/${kind}`, cluster.records.filter((id) => id.includes(`/${kind}/`)).length);
   }
 
   /** Model time charged to a thread: the state's total, or more when finished jobs of the same step are not in it yet. */
@@ -280,18 +269,27 @@ export class DiagnosisService {
       const waiting: QuotaWaitMark = { job: kind, provider: choice.provider, since: finished.toISOString(), processId: this.dependencies.quota.processId, message: failure.message };
       return { update: { clusterId: cluster.clusterId, waiting, records }, chargedMs: 0 };
     }
-    if (failure.kind === "infra") throw new SetupError(`${label} failed: ${failure.message} (record ${recordId})`);
+    if (failure.kind === "infra" || failure.kind === "timeout") throw new SetupError(`${label} failed: ${failure.message} (record ${recordId})`);
     return { update: { clusterId: cluster.clusterId, status: "failed", failure: { job: kind, kind: failure.kind, message: failure.message }, records }, chargedMs: record.durationMs };
   }
 }
 
-/** The model time a result charges to the run budget: a finished job, a failed one too; not a usage limit, and an infra failure ends the run. */
+/** A cluster's sealed manifest; a context that changed since it was sealed is a setup error. */
+export function readSealedManifest(cluster: Pick<ClusterDiagnosis, "clusterId" | "contextFolder" | "contextHash">): ContextManifest {
+  const manifest = readDocument(join(cluster.contextFolder, "context.json"), ContextManifestSchema);
+  if (contextHash(manifest) !== cluster.contextHash) {
+    throw new SetupError(`The context of cluster ${cluster.clusterId} in ${cluster.contextFolder} changed after it was sealed.`);
+  }
+  return manifest;
+}
+
+/** The model time a result charges to the run budget: a finished job, a failed one too; not a usage limit, and an infra failure or timeout ends the run. */
 function chargedMilliseconds(label: string, result: AgentResult<unknown>): number {
-  return !result.ok && (result.failure.kind === "quota_exhausted" || result.failure.kind === "infra") ? 0 : measuredDuration(label, result);
+  return !result.ok && ["quota_exhausted", "infra", "timeout"].includes(result.failure.kind) ? 0 : measuredDuration(label, result);
 }
 
 /** The adapter's duration in whole milliseconds. A negative or non-finite duration or cost is a bug in the adapter and fails the run. */
-function measuredDuration(label: string, result: AgentResult<unknown>): number {
+export function measuredDuration(label: string, result: AgentResult<unknown>): number {
   if (!Number.isFinite(result.durationMs) || result.durationMs < 0) {
     throw new SetupError(`${label}: the agent runner reported the duration ${result.durationMs} ms.`);
   }

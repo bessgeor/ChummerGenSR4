@@ -111,11 +111,20 @@ test("a CLI that crashes, cannot start or prints a usage limit without a result 
   equal(failureOf(limit.result).kind, "quota_exhausted");
 });
 
-test("a job past its time limit is stopped and fails as infra", async () => {
+test("a writable job may edit and write in accept-edits mode, still without a command tool or allowance rule", () => {
+  const given = job({ workspace: { folder: "C:/attempt/source", readOnly: ["C:/attempt/context"], writable: true } });
+  const args = claudeArguments(given);
+  equal(args[args.indexOf("--permission-mode") + 1], "acceptEdits");
+  equal(args[args.indexOf("--tools") + 1], "Read,Grep,Glob,Edit,Write");
+  equal(args[args.indexOf("--add-dir") + 1], "C:/attempt/context");
+  ok(!args.includes("--allowedTools") && !args.join(",").includes("Bash"));
+});
+
+test("a job past its time limit is stopped and fails as timeout", async () => {
   const given = job({ choice: { provider: "claude", model: null, effort: "low", timeoutMinutes: 0.0005 } });
   const { result: outcome } = await runWith([{ lines: [init()], code: 0, hang: true }], {}, given);
   const failure = failureOf(outcome);
-  equal(failure.kind, "infra");
+  equal(failure.kind, "timeout");
   ok(/longer than 0.0005 minutes/.test(failure.message));
 });
 

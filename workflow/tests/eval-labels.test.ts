@@ -40,6 +40,18 @@ test("a version-1 record is read as a workflow record with empty labels, and set
   throws(() => readRecord({ ...record(), labels: { ...noLabels, grader: { score: 1.5, rationale: "r", record: "g", gradedUtc: "t" } } }));
 });
 
+test("a version-2 record stored without a repair label is read with it empty; setting it keeps the other labels", async () => {
+  const { repair: _repair, ...earlier } = { ...noLabels, check: "confirmed" as const };
+  const stored = { ...record(), labels: earlier };
+  deepStrictEqual(readRecord(stored).labels, { ...noLabels, check: "confirmed" });
+  const store = new InMemoryStore();
+  await store.put(recordNamespace("hypothesis"), stored.recordId, stored);
+  const repair = { outcome: "rejected" as const, stage: "build" as const, reason: "CS1002", labelledUtc: "t" };
+  await setLabels(store, readRecord(stored), { repair });
+  deepStrictEqual((await getRecord(store, "hypothesis", stored.recordId)).labels, { ...noLabels, check: "confirmed", repair });
+  throws(() => readRecord({ ...record(), labels: { ...noLabels, repair: { ...repair, stage: "deploy" } } }));
+});
+
 test("records are listed across job kinds and pages", async () => {
   const store = new InMemoryStore();
   for (let index = 0; index < 205; index++) await putRecord(store, record({ recordId: `r${index}` }));

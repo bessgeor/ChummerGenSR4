@@ -113,8 +113,15 @@ export function dispatchedJobKinds(options: Pick<RunOptions, "diagnosis" | "only
 /** The one field of a run's stored options the gate reads; options that do not state `unattended` are not unattended. */
 const UnattendedFlagSchema = z.looseObject({ unattended: z.boolean().default(false) });
 
-/** Why an unattended run may not start; empty for a run that is not unattended. */
+/** Whether a run dispatches repair jobs: after diagnosis, with repair on and no single node asked for. */
+export function dispatchesRepair(options: Pick<RunOptions, "diagnosis" | "only" | "repair">): boolean {
+  return options.diagnosis && options.repair !== null && options.only === null;
+}
+
+/** Why an unattended run may not start; empty for a run that is not unattended. No certificate covers repair jobs. */
 export function unattendedProblems(options: RunOptions): string[] {
   if (!UnattendedFlagSchema.parse(options).unattended) return [];
-  return certificateProblems(options.certificates, dispatchedJobKinds(options), options.agents);
+  const problems = certificateProblems(options.certificates, dispatchedJobKinds(options), options.agents);
+  if (dispatchesRepair(options)) problems.push("repair: no certificate covers repair jobs, so an unattended run cannot repair; add --no-repair");
+  return problems;
 }

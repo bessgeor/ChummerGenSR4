@@ -25,7 +25,15 @@ export type RunOptions = {
   readonly unattended: boolean;
   /** The folder of the certificates: the profile's `certificates`, else `workflow/evals/certificates`. */
   readonly certificates: string;
+  /**
+   * Whether confirmed clusters are repaired (null with --no-repair) and each attempt's deadline.
+   */
+  readonly repair: RepairSettings | null;
 };
+
+export type RepairSettings = { readonly deadlineMinutes: number };
+
+export const defaultRepairDeadlineMinutes = 60;
 
 function cacheFolder(args: Arguments, profile: Profile, env: Environment): Pick<RunOptions, "canonicalCache" | "canonicalCacheSource"> {
   if (args.liveCanonical) return { canonicalCache: null, canonicalCacheSource: "off" };
@@ -58,5 +66,6 @@ export function resolveRunOptions(args: Arguments, profile: Profile, env: Enviro
     agents: resolveAgentSettings(profile.agents),
     unattended: args.unattended,
     certificates: resolve(repositoryRoot, profile.certificates ?? join("workflow", "evals", "certificates")),
+    repair: args.noRepair ? null : { deadlineMinutes: profile.repair?.deadlineMinutes ?? defaultRepairDeadlineMinutes },
   };
 }

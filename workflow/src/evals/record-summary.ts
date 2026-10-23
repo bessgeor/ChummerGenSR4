@@ -17,7 +17,8 @@ export function recordSummary(records: readonly EvalRecord[]): string[] {
   for (const [key, group] of [...groups].sort(([left], [right]) => (left < right ? -1 : 1))) {
     lines.push(`${key}: ${group.length}; results ${tally(group.map((record) => record.result.status))}`);
     lines.push(`  check ${tally(group.flatMap((record) => record.labels.check ?? []))}; hindsight ${tally(group.flatMap((record) => record.labels.hindsight?.grade ?? []))}; `
-      + `review ${tally(group.flatMap((record) => record.labels.review?.verdict ?? []))}; graded ${group.filter((record) => record.labels.grader !== null).length}`);
+      + `review ${tally(group.flatMap((record) => record.labels.review?.verdict ?? []))}; graded ${group.filter((record) => record.labels.grader !== null).length}`
+      + (key.endsWith(" repair") ? `; repair ${tally(group.flatMap((record) => (record.labels.repair === null ? [] : [record.labels.repair.stage ?? record.labels.repair.outcome])))}` : ""));
   }
   return lines;
 }

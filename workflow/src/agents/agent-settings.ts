@@ -11,7 +11,9 @@ const ChoiceSchema = z.strictObject({
 
 /** The `agents` part of the local workflow profile; every field is optional. */
 export const AgentsProfileSchema = z.strictObject({
-  jobs: z.strictObject({ hypothesis: ChoiceSchema.optional(), challenge: ChoiceSchema.optional(), grade: ChoiceSchema.optional() }).optional(),
+  jobs: z.strictObject({
+    hypothesis: ChoiceSchema.optional(), challenge: ChoiceSchema.optional(), grade: ChoiceSchema.optional(), repair: ChoiceSchema.optional(),
+  }).optional(),
   modelPool: z.number().int().min(1).optional(),
   runBudgetMinutes: z.number().positive().optional(),
   executables: z.strictObject({ claude: z.string().min(1).optional(), codex: z.string().min(1).optional() }).optional(),
@@ -31,11 +33,15 @@ export type AgentSettings = {
   };
 };
 
-/** Hypotheses on Claude, challenges on Codex, so the challenger is another provider unless the profile says otherwise; grades on Claude. */
+/**
+ * Hypotheses on Claude, challenges on Codex, so the challenger is another provider unless the profile says
+ * otherwise; grades and repairs on Claude, repairs with more effort.
+ */
 const defaultChoices: Readonly<Record<JobKind, AgentChoice>> = {
   hypothesis: { provider: "claude", model: null, effort: "medium", timeoutMinutes: 30 },
   challenge: { provider: "codex", model: null, effort: "medium", timeoutMinutes: 30 },
   grade: { provider: "claude", model: null, effort: "medium", timeoutMinutes: 30 },
+  repair: { provider: "claude", model: null, effort: "high", timeoutMinutes: 30 },
 };
 
 function choice(kind: JobKind, configured: z.infer<typeof ChoiceSchema> | undefined): AgentChoice {

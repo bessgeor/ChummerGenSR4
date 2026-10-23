@@ -182,7 +182,7 @@ async function gradeOne(
       await dependencies.quota.wait([dependencies.quota.processId], signal);
       continue;
     }
-    if (failure.kind === "infra") throw new SetupError(`${label} failed: ${failure.message} (record ${recordId})`);
+    if (failure.kind === "infra" || failure.kind === "timeout") throw new SetupError(`${label} failed: ${failure.message} (record ${recordId})`);
     return "failed";
   }
 }

@@ -1,6 +1,6 @@
 import type { z } from "zod";
 
-export const jobKinds = ["hypothesis", "challenge", "grade"] as const;
+export const jobKinds = ["hypothesis", "challenge", "grade", "repair"] as const;
 export type JobKind = (typeof jobKinds)[number];
 
 export const providers = ["claude", "codex"] as const;
@@ -18,7 +18,7 @@ export type AgentChoice = {
   readonly timeoutMinutes: number;
 };
 
-/** One model job: a prompt, images and an output schema, run read-only in its own folder. */
+/** One model job: a prompt, images and an output schema, run in its own folder, read-only unless the workspace is writable. */
 export type AgentJob<T> = {
   readonly kind: JobKind;
   /** Prefix of the job's progress lines, for example `hypothesis d-1234`. */
@@ -29,8 +29,11 @@ export type AgentJob<T> = {
   readonly schema: z.ZodType<T>;
   /** Checks a schema-valid output against what the job was given; each returned line is an error. */
   readonly validate: (output: T) => readonly string[];
-  /** The job's working folder, which holds its context, and other folders it may read. */
-  readonly workspace: { readonly folder: string; readonly readOnly: readonly string[] };
+  /**
+   * The job's working folder and other folders it may read. A writable job may change files in its working folder
+   * only; every other job may change nothing.
+   */
+  readonly workspace: { readonly folder: string; readonly readOnly: readonly string[]; readonly writable?: boolean };
   readonly choice: AgentChoice;
   /** Where the adapter writes the provider's raw event stream. */
   readonly logFile: string;
@@ -50,7 +53,8 @@ export type AgentUsage = {
   readonly costUsd: number | null;
 };
 
-export const failureKinds = ["invalid_output", "refused", "quota_exhausted", "infra"] as const;
+/** `timeout`: the job ran past its time limit and was stopped. */
+export const failureKinds = ["invalid_output", "refused", "quota_exhausted", "timeout", "infra"] as const;
 export type AgentFailureKind = (typeof failureKinds)[number];
 
 export type AgentFailure = { readonly kind: AgentFailureKind; readonly message: string };

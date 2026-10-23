@@ -1,5 +1,5 @@
 // Composition root of the parity workflow: `npm start -- <options>` runs or resumes a thread of the graph
-// build → capture → compare → triage → diagnosis and exits with 0, 1, 2 or 3 (see --help).
+// build → capture → compare → triage → diagnosis → repair and exits with 0, 1, 2 or 3 (see --help).
 import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -24,6 +24,8 @@ import { parseArguments, usage } from "./options/arguments.js";
 import { loadProfile, localDataFolder } from "./options/profile.js";
 import { resolveRunOptions } from "./options/run-options.js";
 import { workflowPaths } from "./paths.js";
+import { hostAttemptBuild, hostNarrowCheck } from "./repair/attempt-host.js";
+import { RepairService } from "./repair/repair-service.js";
 import { CaptureStep } from "./steps/capture-step.js";
 import { CompareStep, reportPath } from "./steps/compare-step.js";
 import { readCaseDetails } from "./steps/case-details.js";
@@ -83,17 +85,24 @@ async function main(): Promise<number> {
     new CaptureStep({ paths, host, store: stepStore, log, now, createScratchFolder, changedInputs }),
     new CompareStep({ paths, host, store: stepStore, log, now, changedInputs }), stepStore, now);
 
+  // Diagnosis and repair share the model pools and the count of quota waits.
+  const agents = agentRunners(process.env);
+  const quota = new QuotaWaiter(randomBytes(8).toString("hex"), undefined, log);
   const diagnosis = new DiagnosisService({
-    repositoryRoot, threadFolder: paths.threadFolder, agents: agentRunners(process.env), quota: new QuotaWaiter(randomBytes(8).toString("hex"), undefined, log),
+    repositoryRoot, threadFolder: paths.threadFolder, agents, quota,
     git: processGit(repositoryRoot), allCases: (caseFile) => planCases(caseFile, [], []).cases,
     readReport: (runFolder) => readDocument(join(runFolder, reportPath), CompareReportSchema),
     checkCapture: hostCheckCapture(paths, host, createScratchFolder), createScratchFolder, now, log,
+  });
+  const repair = new RepairService({
+    threadFolder: paths.threadFolder, agents, quota, build: hostAttemptBuild(paths, host), narrowCheck: hostNarrowCheck(paths, host, createScratchFolder),
+    createScratchFolder, now, log,
   });
 
   const checkpointer = SqliteSaver.fromConnString(paths.checkpoints);
   const store = new SqliteStore(paths.store);
   try {
-    const graph = buildWorkflowGraph(steps, diagnosis).compile({ checkpointer, store });
+    const graph = buildWorkflowGraph(steps, diagnosis, repair).compile({ checkpointer, store });
     return await runWorkflow(command, {
       graph,
       resolveOptions: (start) => resolveRunOptions(start.arguments, profile, process.env, repositoryRoot),

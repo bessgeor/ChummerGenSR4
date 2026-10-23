@@ -90,6 +90,16 @@ test("a challenger that does not disagree on a shared capture is invalid_output"
   deepStrictEqual([cluster.status, cluster.failure?.job, cluster.failure?.kind], ["failed", "challenge", "invalid_output"]);
 });
 
+test("a timeout of a diagnosis job ends the run with 3 and is recorded as timeout", async () => {
+  const agents = new FakeAgents((call) => (call.kind === "hypothesis"
+    ? { failure: { kind: "timeout", message: "the Claude job ran longer than 30 minutes and was stopped." } } : { answer: challengeAnswer() }));
+  const harness = diagnosisHarness({ spots: [twoClusters[0]!], agents });
+  equal(await harness.start(), 3);
+  ok(harness.lines.some((line) => /hypothesis d-0000000000000100 failed: the Claude job ran longer than 30 minutes/.test(line)));
+  const stored = EvalRecordSchema.parse((await harness.store.get(recordNamespace("hypothesis"), `${harness.threadId()}/d-0000000000000100/hypothesis/1`))!.value);
+  equal(stored.result.status, "timeout");
+});
+
 test("an infra failure ends the run with 3; the resumed thread runs that job again with a new record", async () => {
   const agents = new FakeAgents((call, attempt) => (call.kind === "challenge" && attempt === 1
     ? { failure: { kind: "infra", message: "spawn claude ENOENT" } } : { answer: call.kind === "hypothesis" ? hypothesisAnswer() : challengeAnswer() }));

@@ -3,6 +3,7 @@ import type { PlannedCase } from "../cases/case-plan.js";
 import type { CheckResult } from "../diagnosis/check.js";
 import { mergeClusters, type ClusterDiagnosis, type ClusterUpdate } from "../diagnosis/cluster-diagnosis.js";
 import type { RunOptions } from "../options/run-options.js";
+import { mergeRepairs, type ClusterRepair, type RepairUpdate } from "../repair/cluster-repair.js";
 import type { InputFingerprints } from "../steps/input-fingerprints.js";
 import type { StepOutcome } from "../steps/step-outcome.js";
 
@@ -45,6 +46,13 @@ export const WorkflowState = Annotation.Root({
   diagnosisCheck: Annotation<CheckResult | null>(),
   /** The thread's `diagnosis.json`, once diagnosis finished. */
   diagnosisPath: Annotation<string | null>(),
+  /** Each confirmed cluster's repair, by cluster ID; repair nodes update the clusters they ran. */
+  repairs: Annotation<Record<string, ClusterRepair>, Record<string, RepairUpdate>>({
+    reducer: mergeRepairs,
+    default: () => ({}),
+  }),
+  /** The thread's `repair.json`, once repair finished. */
+  repairPath: Annotation<string | null>(),
 });
 
 export type WorkflowStateValue = typeof WorkflowState.State;
@@ -53,5 +61,5 @@ export type WorkflowStateUpdate = typeof WorkflowState.Update;
 /** The payload `Send` gives the capture and compare nodes: the state plus the index of their case. */
 export type CaseTask = WorkflowStateValue & { readonly index: number };
 
-/** The payload `Send` gives a diagnosis job node: the state plus the cluster it works on. */
+/** The payload `Send` gives a diagnosis job node or a repair node: the state plus the cluster it works on. */
 export type ClusterTask = WorkflowStateValue & { readonly clusterId: string };

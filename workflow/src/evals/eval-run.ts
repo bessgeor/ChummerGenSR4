@@ -162,7 +162,7 @@ async function runSamples(dependencies: EvalRunDependencies, folder: string, set
   dependencies.log(`Eval run ${settings.runId}: ${settings.jobKind} on ${dataset.name} v${dataset.version} (${settings.partition}), ${settings.choice.provider} `
     + `(${settings.choice.model ?? "default model"}, effort ${settings.choice.effort}); ${missing.length} of ${settings.samples.length} samples to run.`);
   const agentSettings: AgentSettings = {
-    jobs: { hypothesis: settings.choice, challenge: settings.choice, grade: settings.choice }, modelPool: settings.modelPool,
+    jobs: { hypothesis: settings.choice, challenge: settings.choice, grade: settings.choice, repair: settings.choice }, modelPool: settings.modelPool,
     runBudgetMinutes: 0, executables: settings.executables,
   };
   const runner = dependencies.agents(agentSettings);
@@ -268,7 +268,9 @@ async function runSample(
       await dependencies.quota.wait([dependencies.quota.processId], signal);
       continue;
     }
-    if (failure.kind === "infra") throw new SetupError(`${label} failed: ${failure.message} (record ${recordId}); resume the run with --resume ${settings.runId}.`);
+    if (failure.kind === "infra" || failure.kind === "timeout") {
+      throw new SetupError(`${label} failed: ${failure.message} (record ${recordId}); resume the run with --resume ${settings.runId}.`);
+    }
     return { ...common, status: failure.kind, message: failure.message, output: null, ...failedScores(item) };
   }
 }
