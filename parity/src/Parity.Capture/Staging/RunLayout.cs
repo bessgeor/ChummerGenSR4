@@ -1,3 +1,6 @@
+using Parity.Cases;
+using static Parity.Cases.RunPaths;
+
 namespace Parity.Capture.Staging;
 
 /// <summary>The folders and files of one run under <c>out/runs/&lt;runId&gt;/</c>.</summary>
@@ -29,12 +32,5 @@ internal sealed record RunLayout(string RunId, string Root)
         Path.Combine(Root, "captures", SafeSegment(caseName), side, $"{SafeSegment(captureName)}.png");
 
     /// <summary>A path relative to the run folder, with forward slashes.</summary>
-    public string Relative(string path) => Path.GetRelativePath(Root, path).Replace('\\', '/');
-
-    private static string SafeSegment(string value)
-    {
-        char[] invalid = Path.GetInvalidFileNameChars();
-        string safe = new(value.Select(character => invalid.Contains(character) ? '_' : character).ToArray());
-        return string.IsNullOrWhiteSpace(safe) ? "unnamed" : safe;
-    }
+    public string Relative(string path) => RunPaths.Relative(Root, path);
 }

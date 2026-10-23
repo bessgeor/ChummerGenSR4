@@ -15,6 +15,9 @@ internal sealed record CaptureOptions
 
     public string RunsDirectory { get; init; } = Path.Combine("out", "runs");
 
+    /// <summary>A file that receives the run folder's full path once the folder exists, so a caller can find the run.</summary>
+    public string? RunFolderFile { get; init; }
+
     public string? SettingsOverlay { get; init; }
 
     public double Threshold { get; init; } = DefaultThreshold;

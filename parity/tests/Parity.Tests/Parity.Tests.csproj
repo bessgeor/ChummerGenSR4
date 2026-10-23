@@ -11,11 +11,15 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
     <PackageReference Include="xunit.v3" Version="3.2.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <!-- The native Tesseract libraries and the language data are copied only by direct references. -->
+    <PackageReference Include="Tesseract" Version="5.2.0" />
+    <PackageReference Include="Tesseract.Data.English" Version="4.0.0" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Parity.Cases\Parity.Cases.csproj" />
     <ProjectReference Include="..\..\src\Parity.Capture\Parity.Capture.csproj" />
+    <ProjectReference Include="..\..\src\Parity.Compare\Parity.Compare.csproj" />
   </ItemGroup>
 
   <ItemGroup>

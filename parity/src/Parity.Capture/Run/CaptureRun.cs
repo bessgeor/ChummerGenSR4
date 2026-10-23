@@ -94,6 +94,11 @@ internal sealed class CaptureRun(
         List<CaseRun> runs = [];
         try
         {
+            if (options.RunFolderFile is not null)
+            {
+                File.WriteAllText(options.Resolve(options.RunFolderFile), layout.Root);
+            }
+
             report = report with { Screens = screens.Current() };
             StagedRun staged = stager.Stage(layout, options.RepositoryRoot, canonicalSource, report.CandidateSource, report.SettingsOverlay, cases);
             report = report with { Staged = staged };

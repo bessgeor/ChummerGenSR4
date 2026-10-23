@@ -1,0 +1,211 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/bessgeor/ChummerGenSR4/contracts/parity-compare-report.schema.json",
+  "title": "CompareReport",
+  "description": "The comparer's analysis of one capture run: one row per results row, the discrepancies found in the raw pixel difference, and their duplicate groups.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["runId", "threshold", "ocr", "status", "rows", "discrepancies", "groups", "totals"],
+  "properties": {
+    "runId": { "type": "string", "minLength": 1 },
+    "threshold": {
+      "description": "The capture run's threshold: the largest share of differing pixels that still passes.",
+      "type": "number",
+      "minimum": 0
+    },
+    "ocr": { "$ref": "#/definitions/OcrSettings" },
+    "status": { "$ref": "#/definitions/ReportStatus" },
+    "rows": {
+      "description": "One row per row of the capture run's results, in the same order.",
+      "type": "array",
+      "items": { "$ref": "#/definitions/ReportRow" }
+    },
+    "discrepancies": {
+      "description": "Every discrepancy, in report order: rows in order, then top to bottom and left to right.",
+      "type": "array",
+      "items": { "$ref": "#/definitions/Discrepancy" }
+    },
+    "groups": {
+      "description": "Duplicate groups; every discrepancy is a member of exactly one group.",
+      "type": "array",
+      "items": { "$ref": "#/definitions/DiscrepancyGroup" }
+    },
+    "totals": { "$ref": "#/definitions/ReportTotals" }
+  },
+  "definitions": {
+    "ReportStatus": {
+      "description": "clear: every row passed; differences: differences reported and nothing failed; analysis-failures: a row failed or an OCR result is an error.",
+      "type": "string",
+      "enum": ["clear", "differences", "analysis-failures"]
+    },
+    "OcrSettings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "language": {
+          "description": "OCR language; absent when OCR is disabled.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "ReportRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["case", "characterFile", "mode", "capture", "status", "difference", "discrepancies"],
+      "properties": {
+        "case": { "type": "string", "minLength": 1 },
+        "characterFile": { "type": "string", "minLength": 1 },
+        "mode": { "type": "string", "enum": ["build", "career"] },
+        "capture": { "type": "string", "minLength": 1 },
+        "status": { "$ref": "#/definitions/RowStatus" },
+        "difference": {
+          "description": "The difference recorded by the capture run.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "differingPixels": {
+          "description": "The number of differing pixels; present for analyzed rows.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "failure": {
+          "description": "Why the row could not be analyzed; present for failed rows.",
+          "type": "string",
+          "minLength": 1
+        },
+        "canonicalCapture": {
+          "description": "PNG path relative to the run folder; absent when the canonical side produced no capture.",
+          "type": "string"
+        },
+        "candidateCapture": {
+          "description": "PNG path relative to the run folder; absent when the candidate side produced no capture.",
+          "type": "string"
+        },
+        "canonicalSize": { "$ref": "#/definitions/ImageSize" },
+        "candidateSize": { "$ref": "#/definitions/ImageSize" },
+        "discrepancies": {
+          "description": "IDs of this row's discrepancies.",
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "RowStatus": {
+      "type": "string",
+      "enum": ["passed", "analyzed", "size-mismatch", "missing-canonical", "missing-candidate", "failed"]
+    },
+    "Discrepancy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "case", "capture", "core", "crop", "differingPixels", "imageHash",
+        "canonicalCrop", "candidateCrop", "canonicalOcr", "candidateOcr", "representative"
+      ],
+      "properties": {
+        "id": {
+          "description": "<case>/<capture>#<n>, numbered from 1 within the row.",
+          "type": "string",
+          "minLength": 1
+        },
+        "case": { "type": "string", "minLength": 1 },
+        "capture": { "type": "string", "minLength": 1 },
+        "core": {
+          "description": "Bounding box of the discrepancy's differing pixels.",
+          "$ref": "#/definitions/PixelRect"
+        },
+        "crop": {
+          "description": "Review crop: contains the core and the surrounding text.",
+          "$ref": "#/definitions/PixelRect"
+        },
+        "differingPixels": { "type": "integer", "minimum": 1 },
+        "imageHash": {
+          "description": "SHA-256 (lowercase hex) of the core size and both sides' core ARGB pixels.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "canonicalCrop": { "description": "PNG path relative to the run folder.", "type": "string", "minLength": 1 },
+        "candidateCrop": { "description": "PNG path relative to the run folder.", "type": "string", "minLength": 1 },
+        "canonicalOcr": { "$ref": "#/definitions/OcrReading" },
+        "candidateOcr": { "$ref": "#/definitions/OcrReading" },
+        "representative": {
+          "description": "ID of the first discrepancy of this discrepancy's group; its own ID for a representative.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "PixelRect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": { "type": "integer", "minimum": 0 },
+        "y": { "type": "integer", "minimum": 0 },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "OcrReading": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": { "$ref": "#/definitions/OcrStatus" },
+        "text": { "description": "Present when the status is text.", "type": "string", "minLength": 1 },
+        "error": { "description": "Present when the status is error.", "type": "string", "minLength": 1 }
+      }
+    },
+    "OcrStatus": {
+      "description": "text: text was read; empty: no text was read; error: reading failed; disabled: OCR was turned off for the run.",
+      "type": "string",
+      "enum": ["text", "empty", "error", "disabled"]
+    },
+    "DiscrepancyGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["representative", "members"],
+      "properties": {
+        "representative": { "type": "string", "minLength": 1 },
+        "members": {
+          "description": "IDs of every discrepancy in the group, the representative first.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "ImageSize": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "ReportTotals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rows", "passed", "analyzed", "sizeMismatches", "missing", "failed", "discrepancies", "groups", "ocrErrors"],
+      "properties": {
+        "rows": { "type": "integer", "minimum": 0 },
+        "passed": { "type": "integer", "minimum": 0 },
+        "analyzed": { "type": "integer", "minimum": 0 },
+        "sizeMismatches": { "type": "integer", "minimum": 0 },
+        "missing": {
+          "description": "Rows with status missing-canonical or missing-candidate.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed": { "type": "integer", "minimum": 0 },
+        "discrepancies": { "type": "integer", "minimum": 0 },
+        "groups": { "type": "integer", "minimum": 0 },
+        "ocrErrors": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

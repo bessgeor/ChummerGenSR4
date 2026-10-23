@@ -1,4 +1,5 @@
 using System.Globalization;
+using static Parity.Cases.OptionArguments;
 
 namespace Parity.Capture.Run;
 
@@ -17,6 +18,7 @@ internal sealed class CaptureOptionsParser
           --canonical-exe <path>     default: bin/ChummerGenSR4.exe (verified by SHA-256, never modified)
           --candidate-exe <path>     default: out/candidate/bin/ChummerGenSR4.exe
           --runs-dir <path>          default: out/runs
+          --run-folder-file <path>   file that receives the run folder's full path once the folder exists
           --repo-root <path>         default: the current directory
           --help
 
@@ -57,6 +59,9 @@ internal sealed class CaptureOptionsParser
                 case "--candidate-exe":
                     options = options with { CandidateExecutable = Value(args, ref index) };
                     break;
+                case "--run-folder-file":
+                    options = options with { RunFolderFile = Value(args, ref index) };
+                    break;
                 case "--runs-dir":
                     options = options with { RunsDirectory = Value(args, ref index) };
                     break;
@@ -69,17 +74,6 @@ internal sealed class CaptureOptionsParser
         }
 
         return options with { Cases = cases, Captures = captures };
-    }
-
-    private static string Value(IReadOnlyList<string> args, ref int index)
-    {
-        string option = args[index];
-        if (++index >= args.Count || args[index].StartsWith("--", StringComparison.Ordinal))
-        {
-            throw new ArgumentException($"Option '{option}' needs a value.");
-        }
-
-        return args[index];
     }
 
     private static IEnumerable<string> List(string value) =>

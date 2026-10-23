@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Parity.Cases\Parity.Cases.csproj" />
+    <ProjectReference Include="..\Parity.Imaging\Parity.Imaging.csproj" />
   </ItemGroup>
 
   <ItemGroup>

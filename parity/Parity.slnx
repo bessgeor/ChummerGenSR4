@@ -2,6 +2,8 @@
   <Folder Name="/src/">
     <Project Path="src/Parity.Cases/Parity.Cases.csproj" />
     <Project Path="src/Parity.Capture/Parity.Capture.csproj" />
+    <Project Path="src/Parity.Compare/Parity.Compare.csproj" />
+    <Project Path="src/Parity.Imaging/Parity.Imaging.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Parity.Tests/Parity.Tests.csproj" />
