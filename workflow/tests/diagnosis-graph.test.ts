@@ -7,7 +7,7 @@ import type { ClusterDiagnosis } from "../src/diagnosis/cluster-diagnosis.js";
 import { nextDiagnosisRoute } from "../src/diagnosis/cluster-diagnosis.js";
 import { unrecordedSource } from "../src/diagnosis/candidate-source.js";
 import { QuotaWaiter } from "../src/diagnosis/quota-waiter.js";
-import { EvalRecordSchema, recordNamespace } from "../src/evals/eval-record.js";
+import { EvalRecordSchema, noLabels, recordNamespace } from "../src/evals/eval-record.js";
 import { nodeMode } from "../src/graph/workflow-graph.js";
 import { createScratchFolder } from "../src/host/scratch-folder.js";
 import { scratch, triageDocument } from "./diagnosis-fixtures.js";
@@ -43,7 +43,7 @@ test("hypotheses fan out per cluster, and challenges start once every hypothesis
   deepStrictEqual(record.result, { status: "succeeded", message: null });
   deepStrictEqual(record.output, hypothesisAnswer());
   // Both clusters' hypotheses held in the check and their alternatives did not.
-  deepStrictEqual(record.labels, { check: "confirmed" });
+  deepStrictEqual(record.labels, { ...noLabels, check: "confirmed" });
 });
 
 test("an abstaining cluster gets no challenge", async () => {
@@ -104,7 +104,7 @@ test("an infra failure ends the run with 3; the resumed thread runs that job aga
   deepStrictEqual(cluster.records, [`${threadId}/d-0000000000000100/hypothesis/1`, `${threadId}/d-0000000000000100/challenge/1`, `${threadId}/d-0000000000000100/challenge/2`]);
   const first = EvalRecordSchema.parse((await harness.store.get(recordNamespace("challenge"), `${threadId}/d-0000000000000100/challenge/1`))!.value);
   equal(first.result.status, "infra");
-  deepStrictEqual(first.labels, { check: "confirmed" });
+  deepStrictEqual(first.labels, { ...noLabels, check: "confirmed" });
 });
 
 test("a usage limit waits 1, 2 and 5 minutes, retries the job, and is never charged to the budget", async () => {
@@ -122,7 +122,7 @@ test("a usage limit waits 1, 2 and 5 minutes, retries the job, and is never char
   // The check labels every job of the cluster, the quota attempts too.
   for (const id of cluster.records) {
     const kind = id.includes("/hypothesis/") ? "hypothesis" : "challenge";
-    deepStrictEqual(EvalRecordSchema.parse((await harness.store.get(recordNamespace(kind), id))!.value).labels, { check: "confirmed" }, id);
+    deepStrictEqual(EvalRecordSchema.parse((await harness.store.get(recordNamespace(kind), id))!.value).labels, { ...noLabels, check: "confirmed" }, id);
   }
 });
 

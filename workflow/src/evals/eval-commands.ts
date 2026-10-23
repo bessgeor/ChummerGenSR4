@@ -1,0 +1,228 @@
+import type { BaseStore } from "@langchain/langgraph-checkpoint";
+import { randomBytes } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import type { AgentSettings } from "../agents/agent-settings.js";
+import type { AgentRunners } from "../agents/agent-runners.js";
+import type { QuotaWaiter } from "../diagnosis/quota-waiter.js";
+import type { Git } from "../diagnosis/source-snapshot.js";
+import type { ScratchFolder } from "../host/scratch-folder.js";
+import { SetupError } from "../host/setup-error.js";
+import type { WorkflowPaths } from "../paths.js";
+import { addBenchmarkItem, checkBenchmarkItem, readBenchmark } from "./benchmark.js";
+import { CommandOptions } from "./command-options.js";
+import { listRecords } from "./eval-record.js";
+import { certify as issueCertificate } from "./certificate.js";
+import { comparisonLines, compareRuns, metrics } from "./comparison.js";
+import { freezeDataset } from "./dataset.js";
+import { resumeEvalRun, runPartitions, startEvalRun, summaryLines } from "./eval-run.js";
+import { gradeRecords } from "./grader.js";
+import { labelHindsight } from "./hindsight.js";
+import { recordSummary } from "./record-summary.js";
+import { snapshotBaseCheck } from "./snapshot-base.js";
+import { defaultQueueOptions, queueLines, reviewQueue } from "./review-queue.js";
+
+export const evalUsage = `Usage: npm run eval -- <command> [options]
+
+  records                         count the eval records by origin, job kind, result and label
+  benchmark add --cluster <id> --fix <commit> --mechanism <class> [--thread <id>] [--regression <commit>]
+                                  write a benchmark item for an accepted fix and grade earlier answers by it
+  benchmark check                 verify that every benchmark item still replays from git
+  hindsight                       grade the answers every benchmark item covers
+  grade [--record <ids>] [--limit <n>]
+                                  advisory model grades of answers without one (or of the named records, again)
+  queue [--seed <text>] [--per-stratum <n>]
+                                  print the review queue (npm run review shows it)
+  freeze --job <hypothesis|challenge> --name <name> [--seed <text>] [--test-percent <0-100>] [--reason <text>]
+                                  freeze the next version of a dataset under out/evals/datasets/<name>/
+  run --dataset <folder> [--partition test|development|all] [--repeat <n>] [--name <text>]
+                                  run the current prompt with the profile's agent choice on a dataset (out/evals/runs/<run>/)
+  run --resume <run>              finish a stopped eval run with its stored settings
+  compare --baseline <run> --candidate <run> [--metric prediction|rootCause]
+                                  paired comparison of two eval runs with a 95% confidence interval
+  certify --run <run> --metric prediction|rootCause --min-pass <0-1> [--max-mean-cost-usd <usd>]
+                                  certify the run's job kind configuration for unattended runs (npm start -- --unattended)
+
+Exit status: 0 done, 1 certificate refused, 2 a grader job failed, 3 setup error.`;
+
+/** What the evaluation commands use; the composition root makes the real ones. */
+export type EvalContext = {
+  readonly paths: WorkflowPaths;
+  readonly store: BaseStore;
+  readonly git: Git;
+  readonly now: () => Date;
+  readonly log: (line: string) => void;
+  /** The agent settings of the local profile, read when a command needs them. */
+  readonly agentSettings: () => AgentSettings;
+  /** The certificates folder of the local profile, or the repository's. */
+  readonly certificatesFolder: () => string;
+  readonly agents: AgentRunners;
+  readonly quota: QuotaWaiter;
+  readonly createScratchFolder: (prefix: string) => ScratchFolder;
+  readonly signal?: AbortSignal;
+};
+
+type Command = (args: readonly string[], context: EvalContext) => Promise<number>;
+
+const records: Command = async (args, context) => {
+  CommandOptions.parse("records", args, []);
+  for (const line of recordSummary(await listRecords(context.store))) context.log(line);
+  return 0;
+};
+
+async function hindsightFor(context: EvalContext): Promise<void> {
+  const summary = await labelHindsight(context.store, readBenchmark(context.paths.benchmark), context.now, snapshotBaseCheck(context.git, context.paths.threadFolder));
+  const grades = Object.entries(summary.grades).map(([grade, count]) => `${grade} ${count}`).join(", ");
+  context.log(`Hindsight: ${summary.graded} answers graded (${grades}); ${summary.changed} labels set; ${summary.ungraded.length} not graded.`);
+  for (const item of summary.ungraded) context.log(`  ${item.recordId} is not graded by ${item.itemId}: ${item.reason}.`);
+}
+
+const hindsight: Command = async (args, context) => {
+  CommandOptions.parse("hindsight", args, []);
+  await hindsightFor(context);
+  return 0;
+};
+
+const benchmark: Command = async (args, context) => {
+  const [action, ...rest] = args;
+  if (action === "add") {
+    const options = CommandOptions.parse("benchmark add", rest, ["cluster", "fix", "mechanism", "thread", "regression"]);
+    const item = addBenchmarkItem(context.git, {
+      clusterId: options.required("cluster"), fix: options.required("fix"), mechanism: options.required("mechanism"),
+      regression: options.text("regression"), threadId: options.text("thread"),
+      threadsFolder: join(context.paths.workflowFolder, "threads"), benchmarkFolder: context.paths.benchmark,
+    });
+    context.log(`Benchmark item ${item.itemId} (${item.kind}): base ${item.base.commit.slice(0, 12)}, fix ${item.fix.commit.slice(0, 12)}, `
+      + `${item.fix.files.length} files, from thread ${item.provenance.threadId}.`);
+    await hindsightFor(context);
+    return 0;
+  }
+  if (action === "check") {
+    CommandOptions.parse("benchmark check", rest, []);
+    const items = readBenchmark(context.paths.benchmark);
+    const problems = items.flatMap((item) => checkBenchmarkItem(context.git, item));
+    if (problems.length > 0) throw new SetupError(problems.join("\n"));
+    context.log(`Benchmark: ${items.length} items replay from git.`);
+    return 0;
+  }
+  throw new SetupError("'benchmark' needs 'add' or 'check'. See npm run eval -- --help.");
+};
+
+const grade: Command = async (args, context) => {
+  const options = CommandOptions.parse("grade", args, ["record", "limit"]);
+  const settings = context.agentSettings();
+  const ids = options.text("record");
+  const { graded, failed, skipped } = await gradeRecords({
+    store: context.store, agents: context.agents(settings), choice: settings.jobs.grade, quota: context.quota,
+    threadFolder: context.paths.threadFolder, logsFolder: join(context.paths.evalsFolder, "grader", "logs"),
+    createScratchFolder: context.createScratchFolder, now: context.now, log: context.log,
+    ...(context.signal === undefined ? {} : { signal: context.signal }),
+  }, {
+    recordIds: ids === null ? null : ids.split(",").map((id) => id.trim()).filter((id) => id.length > 0),
+    limit: options.text("limit") === null ? null : options.number("limit", 0, 1, Number.MAX_SAFE_INTEGER, true),
+  });
+  context.log(`Grader: ${graded} graded, ${failed} failed, ${skipped} not graded (context gone or challenged hypothesis unknown).`);
+  return failed > 0 ? 2 : 0;
+};
+
+const queue: Command = async (args, context) => {
+  const options = CommandOptions.parse("queue", args, ["seed", "per-stratum"]);
+  const entries = reviewQueue(await listRecords(context.store), {
+    seed: options.text("seed") ?? defaultQueueOptions.seed,
+    perStratum: options.number("per-stratum", defaultQueueOptions.perStratum, 0, 1000, true),
+  });
+  for (const line of queueLines(entries)) context.log(line);
+  return 0;
+};
+
+const freeze: Command = async (args, context) => {
+  const options = CommandOptions.parse("freeze", args, ["job", "name", "seed", "test-percent", "reason"]);
+  options.required("job");
+  const jobKind = options.choice("job", ["hypothesis", "challenge"] as const, "hypothesis");
+  const { folder, dataset } = await freezeDataset({
+    name: options.required("name"), jobKind, seed: options.text("seed") ?? "dataset", testPercent: options.number("test-percent", 50, 0, 100, true),
+    reason: options.text("reason"), datasetsFolder: join(context.paths.evalsFolder, "datasets"), threadFolder: context.paths.threadFolder,
+    records: await listRecords(context.store), benchmark: readBenchmark(context.paths.benchmark),
+    snapshotBase: snapshotBaseCheck(context.git, context.paths.threadFolder), now: context.now, log: context.log,
+  });
+  const count = (partition: string) => dataset.items.filter((item) => item.partition === partition).length;
+  context.log(`Dataset ${dataset.name} v${dataset.version} (${jobKind}): ${dataset.items.length} items, ${count("test")} test and ${count("development")} development, `
+    + `${dataset.items.filter((item) => item.gold !== null).length} with gold; hash ${dataset.datasetHash}; ${folder}`);
+  return 0;
+};
+
+function runDependencies(context: EvalContext) {
+  return {
+    store: context.store, agents: context.agents, quota: context.quota, runsFolder: join(context.paths.evalsFolder, "runs"),
+    createScratchFolder: context.createScratchFolder, now: context.now, log: context.log,
+    newRunId: () => `er-${context.now().toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "")}-${randomBytes(4).toString("hex")}`,
+    ...(context.signal === undefined ? {} : { signal: context.signal }),
+  };
+}
+
+const run: Command = async (args, context) => {
+  const options = CommandOptions.parse("run", args, ["dataset", "partition", "repeat", "name", "resume"]);
+  const resumed = options.text("resume");
+  if (resumed !== null) {
+    for (const other of ["dataset", "partition", "repeat", "name"]) {
+      if (options.text(other) !== null) throw new SetupError(`--resume takes no --${other}: a run keeps the settings it started with.`);
+    }
+  }
+  const { folder, summary } = resumed !== null
+    ? await resumeEvalRun(runDependencies(context), resumed)
+    : await startEvalRun(runDependencies(context), {
+      datasetFolder: resolve(options.required("dataset")), partition: options.choice("partition", runPartitions, "test"),
+      repeat: options.number("repeat", 1, 1, 100, true), name: options.text("name"), settings: context.agentSettings(),
+    });
+  for (const line of summaryLines(summary)) context.log(line);
+  context.log(`Run folder: ${folder}`);
+  return 0;
+};
+
+const compare: Command = async (args, context) => {
+  const options = CommandOptions.parse("compare", args, ["baseline", "candidate", "metric"]);
+  const runs = join(context.paths.evalsFolder, "runs");
+  const metric = options.choice("metric", metrics, "prediction");
+  const comparison = compareRuns(join(runs, options.required("baseline")), join(runs, options.required("candidate")), metric, context.now());
+  const folder = join(context.paths.evalsFolder, "comparisons");
+  mkdirSync(folder, { recursive: true });
+  const path = join(folder, `${comparison.baseline}--${comparison.candidate}-${metric}.json`);
+  writeFileSync(path, `${JSON.stringify(comparison, null, 2)}\n`);
+  for (const line of comparisonLines(comparison)) context.log(line);
+  context.log(`Comparison: ${path}`);
+  return 0;
+};
+
+const certify: Command = async (args, context) => {
+  const options = CommandOptions.parse("certify", args, ["run", "metric", "min-pass", "max-mean-cost-usd"]);
+  options.required("metric");
+  options.required("min-pass");
+  const folder = context.certificatesFolder();
+  const outcome = issueCertificate(join(context.paths.evalsFolder, "runs", options.required("run")), {
+    metric: options.choice("metric", metrics, "prediction"), minPass: options.number("min-pass", 0, 0, 1),
+    maxMeanCostUsd: options.text("max-mean-cost-usd") === null ? null : options.number("max-mean-cost-usd", 0, Number.MIN_VALUE, Number.MAX_VALUE),
+  }, folder, context.now());
+  if ("refused" in outcome) {
+    context.log(`Certificate refused:\n  ${outcome.refused.join("\n  ")}`);
+    return 1;
+  }
+  const certificate = outcome.certificate;
+  context.log(`Certificate for ${certificate.jobKind}: ${certificate.agent.provider} (${certificate.agent.model ?? "default model"}, effort ${certificate.agent.effort}), `
+    + `${certificate.promptVersion}; ${certificate.metric} ${certificate.passes}/${certificate.items} items, 95% Wilson [${certificate.interval.low.toFixed(3)}, ${certificate.interval.high.toFixed(3)}] `
+    + `>= ${certificate.thresholds.minPass}; ${join(folder, `${certificate.jobKind}.json`)}`);
+  return 0;
+};
+
+const commands: Readonly<Record<string, Command>> = { records, benchmark, hindsight, grade, queue, freeze, run, compare, certify };
+
+/** Runs one evaluation command and returns its exit status; a setup error is thrown. */
+export async function runEvalCommand(args: readonly string[], context: EvalContext): Promise<number> {
+  const [name, ...rest] = args;
+  if (name === undefined || name === "--help" || name === "-h") {
+    context.log(evalUsage);
+    return 0;
+  }
+  const command = commands[name];
+  if (command === undefined) throw new SetupError(`Unknown command '${name}'. See npm run eval -- --help.`);
+  return command(rest, context);
+}

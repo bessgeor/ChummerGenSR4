@@ -8,6 +8,8 @@
   ],
   "scripts": {
     "start": "node --import tsx workflow/src/main.ts",
+    "eval": "node --import tsx workflow/src/evals/eval-main.ts",
+    "review": "node --import tsx workflow/src/review/review-main.ts",
     "parity": "dotnet run --project parity/src/Parity.Capture -c Release --",
     "compare": "dotnet run --project parity/src/Parity.Compare -c Release --",
     "build:candidate": "node parity/scripts/build-candidate.mjs",

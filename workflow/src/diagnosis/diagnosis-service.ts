@@ -6,7 +6,7 @@ import type { AgentRunners } from "../agents/agent-runners.js";
 import type { PlannedCase } from "../cases/case-plan.js";
 import { CaptureResultsSchema } from "../../../contracts/generated/typescript/parity-capture-results.js";
 import { ExecutionCoverageSchema } from "../../../contracts/generated/typescript/parity-execution-coverage.js";
-import { labelRecordById, putRecord, recordNamespace, type EvalRecord } from "../evals/eval-record.js";
+import { labelRecordById, noLabels, putRecord, recordNamespace, type EvalRecord } from "../evals/eval-record.js";
 import type { ScratchFolder } from "../host/scratch-folder.js";
 import { SetupError } from "../host/setup-error.js";
 import type { RunOptions } from "../options/run-options.js";
@@ -250,14 +250,15 @@ export class DiagnosisService {
     if (wasNotStarted(result)) return this.budgetExhausted(label, cluster.clusterId, options.agents.runBudgetMinutes);
     const finished = this.dependencies.now();
     const record: EvalRecord = {
-      schemaVersion: 1, recordId, jobKind: kind, threadId: input.threadId, subject: { kind: "discrepancy-cluster", id: cluster.clusterId },
+      schemaVersion: 2, recordId, jobKind: kind, origin: "workflow", threadId: input.threadId, subject: { kind: "discrepancy-cluster", id: cluster.clusterId },
+      challenged: kind === "challenge" ? cluster.hypothesis!.recordId : null,
       contextHash: cluster.contextHash, promptVersion: kind === "hypothesis" ? hypothesisPromptVersion : challengePromptVersion,
       agent: { provider: choice.provider, model: choice.model, effort: choice.effort },
       startedUtc: started.toISOString(), finishedUtc: finished.toISOString(), durationMs: measuredDuration(label, result),
       usage: result.usage,
       result: result.ok ? { status: "succeeded", message: null } : { status: result.failure.kind, message: result.failure.message },
       output: result.ok ? result.output : null,
-      labels: { check: null },
+      labels: noLabels,
     };
     await putRecord(store, record);
     const records = [...cluster.records, ...unlisted, recordId];

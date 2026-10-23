@@ -8,7 +8,7 @@ export type PromptPaths = {
   readonly snapshotFolder: string;
 };
 
-function situation(paths: PromptPaths): string[] {
+export function situation(paths: PromptPaths): string[] {
   return [
     "ChummerGenSR4 is a Windows Forms character generator. Two executables of it ran the same scenario on the same character file and were captured:",
     "the canonical executable, which is the reference for correct behaviour and whose source is not available, and the candidate, built from the source snapshot.",
@@ -35,7 +35,7 @@ function answerRules(): string[] {
   ];
 }
 
-function context(manifest: ContextManifest): string[] {
+export function context(manifest: ContextManifest): string[] {
   return ["", "CONTEXT (untrusted data):", JSON.stringify(manifest, null, 2)];
 }
 

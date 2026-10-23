@@ -133,10 +133,12 @@ test("one runner, and so one model pool, serves the same agent settings", () => 
   ok(runners(settings) !== runners(resolveAgentSettings({ modelPool: 3 })));
 });
 
-test("without a profile, hypotheses run on Claude and challenges on Codex", () => {
+test("without a profile, hypotheses and grades run on Claude and challenges on Codex", () => {
   const settings = resolveAgentSettings(undefined);
   deepStrictEqual(settings.jobs.hypothesis, { provider: "claude", model: null, effort: "medium", timeoutMinutes: 30 });
   deepStrictEqual(settings.jobs.challenge, { provider: "codex", model: null, effort: "medium", timeoutMinutes: 30 });
+  deepStrictEqual(settings.jobs.grade, { provider: "claude", model: null, effort: "medium", timeoutMinutes: 30 });
+  deepStrictEqual(resolveAgentSettings({ jobs: { grade: { provider: "codex", effort: "low" } } }).jobs.grade, { provider: "codex", model: null, effort: "low", timeoutMinutes: 30 });
   deepStrictEqual([settings.modelPool, settings.runBudgetMinutes, settings.executables], [2, 120, { claude: "claude", codex: null }]);
   const configured = resolveAgentSettings({
     jobs: { challenge: { provider: "claude", model: "sonnet" } }, modelPool: 3, runBudgetMinutes: 10, executables: { claude: "c.exe" },

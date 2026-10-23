@@ -9,6 +9,7 @@ import { finishOutput } from "../src/agents/job-output.js";
 import type { PlannedCase } from "../src/cases/case-plan.js";
 import type { CheckCapture, CheckCaptureRequest } from "../src/diagnosis/check-capture.js";
 import { DiagnosisService } from "../src/diagnosis/diagnosis-service.js";
+import { unattendedProblems } from "../src/evals/certificate.js";
 import type { ChallengeOutput, HypothesisOutput } from "../src/diagnosis/job-schemas.js";
 import { QuotaWaiter, type Sleep } from "../src/diagnosis/quota-waiter.js";
 import { compiledSourceIdentity, processGit } from "../src/diagnosis/source-snapshot.js";
@@ -130,7 +131,7 @@ const fingerprints = (candidateSource: string): InputFingerprints => ({
 
 const baseArguments: Arguments = {
   cases: [], captures: [], settingsOverlay: null, threshold: null, caseFile: null, canonicalCache: null,
-  liveCanonical: false, noOcr: false, tessdata: null, only: null, recapture: false, noDiagnosis: false,
+  liveCanonical: false, noOcr: false, tessdata: null, only: null, recapture: false, noDiagnosis: false, unattended: false,
 };
 
 const details: CaseDetails = {
@@ -227,10 +228,11 @@ export function diagnosisHarness(options: HarnessOptions) {
     resolveOptions: (command) => ({
       caseFile: join(root, "cases.json"), cases: [], captures: [], settingsOverlay: null, threshold: null, canonicalCache: "cache",
       canonicalCacheSource: "default", noOcr: false, tessdata: null, only: command.arguments.only, recapture: false,
-      diagnosis: !command.arguments.noDiagnosis, agents: settings,
+      diagnosis: !command.arguments.noDiagnosis, agents: settings, unattended: command.arguments.unattended, certificates: join(root, "certificates"),
     }),
     planCases: () => ({ cases: cases.filter((item) => folders[item.name] !== undefined), excluded: [] }),
     readCase: () => details,
+    certificateProblems: unattendedProblems,
     log,
     now: () => new Date("2026-10-01T12:00:00Z"),
     ...(options.signal === undefined ? {} : { signal: options.signal }),

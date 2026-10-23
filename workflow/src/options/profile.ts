@@ -10,6 +10,8 @@ export const ProfileSchema = z.strictObject({
   settingsOverlay: z.string().min(1).optional(),
   cpuPool: z.number().int().min(1).optional(),
   agents: AgentsProfileSchema.optional(),
+  /** The folder of the certificates that unattended runs need. */
+  certificates: z.string().min(1).optional(),
 });
 export type Profile = z.infer<typeof ProfileSchema>;
 

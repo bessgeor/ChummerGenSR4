@@ -21,6 +21,10 @@ export type RunOptions = {
   /** Whether triage's clusters are diagnosed (--no-diagnosis turns it off). */
   readonly diagnosis: boolean;
   readonly agents: AgentSettings;
+  /** Diagnosis dispatches only job kinds with a certificate for their configuration (--unattended). */
+  readonly unattended: boolean;
+  /** The folder of the certificates: the profile's `certificates`, else `workflow/evals/certificates`. */
+  readonly certificates: string;
 };
 
 function cacheFolder(args: Arguments, profile: Profile, env: Environment): Pick<RunOptions, "canonicalCache" | "canonicalCacheSource"> {
@@ -52,5 +56,7 @@ export function resolveRunOptions(args: Arguments, profile: Profile, env: Enviro
     recapture: args.recapture,
     diagnosis: !args.noDiagnosis,
     agents: resolveAgentSettings(profile.agents),
+    unattended: args.unattended,
+    certificates: resolve(repositoryRoot, profile.certificates ?? join("workflow", "evals", "certificates")),
   };
 }

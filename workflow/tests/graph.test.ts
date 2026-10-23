@@ -96,7 +96,7 @@ const noDiagnosis: DiagnosisSteps = {
 
 const baseArguments: Arguments = {
   cases: [], captures: [], settingsOverlay: null, threshold: null, caseFile: null, canonicalCache: null,
-  liveCanonical: false, noOcr: false, tessdata: null, only: null, recapture: false, noDiagnosis: false,
+  liveCanonical: false, noOcr: false, tessdata: null, only: null, recapture: false, noDiagnosis: false, unattended: false,
 };
 
 function harness(cases: string[], steps = new FakeSteps(), checkpointer = new MemorySaver(), signal?: AbortSignal) {
@@ -108,9 +108,10 @@ function harness(cases: string[], steps = new FakeSteps(), checkpointer = new Me
     resolveOptions: (command) => ({
       caseFile: "cases.json", cases: [], captures: [], settingsOverlay: null, threshold: null, canonicalCache: "cache",
       canonicalCacheSource: "default", noOcr: false, tessdata: null, only: command.arguments.only, recapture: false,
-      diagnosis: false, agents: resolveAgentSettings(undefined),
+      diagnosis: false, agents: resolveAgentSettings(undefined), unattended: false, certificates: "certificates",
     }),
     planCases: () => ({ cases: cases.map(plannedCase), excluded: [] }),
+    certificateProblems: () => [],
     readCase: (runFolder, compared) => {
       readCalls.push([runFolder, compared]);
       return fakeDetails(runFolder, compared);
@@ -278,6 +279,7 @@ test("results that cannot be read after the graph finished are a setup error wit
   const run = harness(["a"]);
   const unreadable: RunDependencies = {
     ...run.dependencies,
+    certificateProblems: () => [],
     readCase: () => {
       throw new SetupError("a/coverage.json cannot be read");
     },

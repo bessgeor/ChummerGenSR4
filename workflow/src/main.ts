@@ -9,6 +9,7 @@ import { agentRunners } from "./agents/agent-runners.js";
 import { planCases } from "./cases/case-plan.js";
 import { hostCheckCapture } from "./diagnosis/check-capture.js";
 import { DiagnosisService } from "./diagnosis/diagnosis-service.js";
+import { unattendedProblems } from "./evals/certificate.js";
 import { QuotaWaiter } from "./diagnosis/quota-waiter.js";
 import { processGit } from "./diagnosis/source-snapshot.js";
 import { buildWorkflowGraph } from "./graph/workflow-graph.js";
@@ -98,6 +99,7 @@ async function main(): Promise<number> {
       resolveOptions: (start) => resolveRunOptions(start.arguments, profile, process.env, repositoryRoot),
       planCases: (options) => planCases(options.caseFile, options.cases, options.captures),
       readCase: readCaseDetails,
+      certificateProblems: unattendedProblems,
       log,
       now,
       signal: interruptSignal(log),

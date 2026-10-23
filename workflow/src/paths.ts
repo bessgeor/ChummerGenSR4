@@ -11,6 +11,12 @@ export type WorkflowPaths = {
   readonly candidateApp: string;
   readonly captureTools: string;
   readonly compareTools: string;
+  /** Datasets, eval runs and comparisons. */
+  readonly evalsFolder: string;
+  /** Benchmark items, committed. */
+  readonly benchmark: string;
+  /** Where certificates are kept unless the profile names another folder. */
+  readonly certificates: string;
   threadFolder(threadId: string): string;
 };
 
@@ -27,6 +33,9 @@ export function workflowPaths(repositoryRoot: string): WorkflowPaths {
     candidateApp: join(repositoryRoot, "out", "candidate", "bin"),
     captureTools: toolFolder("Parity.Capture"),
     compareTools: toolFolder("Parity.Compare"),
+    evalsFolder: join(repositoryRoot, "out", "evals"),
+    benchmark: join(repositoryRoot, "workflow", "evals", "benchmark"),
+    certificates: join(repositoryRoot, "workflow", "evals", "certificates"),
     threadFolder: (threadId) => join(workflowFolder, "threads", threadId),
   };
 }
