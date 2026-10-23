@@ -19,7 +19,8 @@ export function recordSummary(records: readonly EvalRecord[]): string[] {
     lines.push(`  check ${tally(group.flatMap((record) => record.labels.check ?? []))}; hindsight ${tally(group.flatMap((record) => record.labels.hindsight?.grade ?? []))}; `
       + `review ${tally(group.flatMap((record) => record.labels.review?.verdict ?? []))}; graded ${group.filter((record) => record.labels.grader !== null).length}`
       + (key.endsWith(" repair") ? `; repair ${tally(group.flatMap((record) => (record.labels.repair === null ? [] : [record.labels.repair.stage ?? record.labels.repair.outcome])))}`
-        + `; widening ${tally(group.flatMap((record) => (record.labels.widening === null ? [] : [record.labels.widening.stage ?? record.labels.widening.outcome])))}` : ""));
+        + `; widening ${tally(group.flatMap((record) => (record.labels.widening === null ? [] : [record.labels.widening.stage ?? record.labels.widening.outcome])))}` : "")
+      + (key.endsWith(" rank") || key.endsWith(" scenario") ? `; discovery ${tally(group.flatMap((record) => record.labels.discovery?.outcome ?? []))}` : ""));
   }
   return lines;
 }

@@ -39,6 +39,17 @@ const WideningLabelSchema = z.strictObject({
   outcome: z.enum(["promoted", "rejected"]), stage: z.enum(wideningStages).nullable(), reason: z.string().nullable(), commit: z.string().nullable(), labelledUtc: z.string(),
 });
 
+/** What became of a discovery job's answer once its run decided: automatic, never gold. */
+export const discoveryOutcomes = ["proven", "not-proven", "untested", "invalid-plan", "execution-failed", "abstained"] as const;
+export type DiscoveryOutcome = (typeof discoveryOutcomes)[number];
+
+const DiscoveryLabelSchema = z.strictObject({
+  outcome: z.enum(discoveryOutcomes),
+  /** The scenario's captures that differed beyond the threshold, when it executed; null otherwise and for a rank job. */
+  differing: z.number().int().nonnegative().nullable(),
+  labelledUtc: z.string(),
+});
+
 /** The labels of a record, each from its own source; only hindsight and review verdicts are gold. */
 const LabelsSchema = z.strictObject({
   check: z.enum(checkLabels).nullable(),
@@ -49,15 +60,18 @@ const LabelsSchema = z.strictObject({
   repair: RepairLabelSchema.nullable().default(null),
   /** Set once a passed repair attempt's widening ends; empty for every other record, and a stored record without the key reads as empty. */
   widening: WideningLabelSchema.nullable().default(null),
+  /** Set once a discovery run decides a rank or scenario job's outcome; empty for every other record, and a stored record without the key reads as empty. */
+  discovery: DiscoveryLabelSchema.nullable().default(null),
 });
 export type Labels = z.infer<typeof LabelsSchema>;
+export type DiscoveryLabel = z.infer<typeof DiscoveryLabelSchema>;
 export type HindsightLabel = z.infer<typeof HindsightLabelSchema>;
 export type ReviewLabel = z.infer<typeof ReviewLabelSchema>;
 export type GraderLabel = z.infer<typeof GraderLabelSchema>;
 export type RepairLabel = z.infer<typeof RepairLabelSchema>;
 export type WideningLabel = z.infer<typeof WideningLabelSchema>;
 
-export const noLabels: Labels = { check: null, hindsight: null, review: null, grader: null, repair: null, widening: null };
+export const noLabels: Labels = { check: null, hindsight: null, review: null, grader: null, repair: null, widening: null, discovery: null };
 
 const common = {
   recordId: z.string().min(1),
@@ -83,7 +97,8 @@ export const EvalRecordSchema = z.strictObject({
   schemaVersion: z.literal(2),
   ...common,
   origin: z.enum(origins),
-  subject: z.strictObject({ kind: z.enum(["discrepancy-cluster", "eval-record"]), id: z.string().min(1) }),
+  /** A cluster, a graded record, a discovery thread (rank) or a discovery target (scenario). */
+  subject: z.strictObject({ kind: z.enum(["discrepancy-cluster", "eval-record", "discovery-thread", "discovery-target"]), id: z.string().min(1) }),
   /** For a workflow challenge: the ID of the hypothesis record it challenged; null for every other job. */
   challenged: z.string().min(1).nullable().default(null),
   labels: LabelsSchema,

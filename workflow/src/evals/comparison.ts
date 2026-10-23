@@ -1,9 +1,9 @@
 import { SetupError } from "../host/setup-error.js";
 import { itemShares, readRun, type RunSettings, type Sample } from "./eval-run.js";
+import { requireMetric, type Metric } from "./metrics.js";
 import { mean, pairedStatistics, type Interval } from "./statistics.js";
 
-export const metrics = ["prediction", "rootCause"] as const;
-export type Metric = (typeof metrics)[number];
+export { metrics, type Metric } from "./metrics.js";
 
 export type Verdict = "improved" | "worse" | "no-difference" | "too-few-pairs";
 
@@ -67,6 +67,7 @@ export function compareRuns(baselineFolder: string, candidateFolder: string, met
   if ([...baseline.settings.samples].sort().join() !== [...candidate.settings.samples].sort().join()) problems.push("their samples differ");
   if (problems.length > 0) throw new SetupError(`Eval runs ${baseline.settings.runId} and ${candidate.settings.runId} cannot be paired: ${problems.join("; ")}.`);
 
+  requireMetric(baseline.settings.jobKind, metric);
   const pairs = baseline.settings.samples.map((key) => ({ baseline: baseline.samples.get(key)!, candidate: candidate.samples.get(key)! }));
   // The unit of a pair is an item: its repetitions are not independent samples, so each side gives the share of them that pass.
   const shares = {

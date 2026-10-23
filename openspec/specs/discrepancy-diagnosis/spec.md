@@ -44,7 +44,7 @@ The Claude adapter SHALL run the Claude Code CLI in headless mode with stream-js
 - **THEN** the job is stopped and fails with `infra`
 
 ### Requirement: Provider, model and effort are chosen per job kind
-The local workflow profile SHALL be able to choose, for each job kind (`hypothesis`, `challenge`, `grade`, `repair`), the provider (`claude` or `codex`), the model (or the CLI's default), the effort and the time limit, and SHALL be able to set the model pool size, the run budget for model time, the CLI executables, the certificates folder and the repair deadline. Without a profile, hypothesis, grade and repair jobs SHALL run on Claude and challenge jobs on Codex. The provider, model and effort SHALL be recorded with every job. An invalid profile SHALL be a setup error, a time limit above 35 000 minutes included.
+The local workflow profile SHALL be able to choose, for each job kind (`hypothesis`, `challenge`, `grade`, `repair`, `rank`, `scenario`), the provider (`claude` or `codex`), the model (or the CLI's default), the effort and the time limit, and SHALL be able to set the model pool size, the run budget for model time, the CLI executables, the certificates folder and the repair deadline. Without a profile, hypothesis, grade, repair, rank and scenario jobs SHALL run on Claude and challenge jobs on Codex. The provider, model and effort SHALL be recorded with every job. An invalid profile SHALL be a setup error, a time limit above 35 000 minutes included.
 
 #### Scenario: Challenger on another provider by default
 - **WHEN** no profile sets the job kinds and a cluster is diagnosed
@@ -53,6 +53,10 @@ The local workflow profile SHALL be able to choose, for each job kind (`hypothes
 #### Scenario: Unknown provider
 - **WHEN** the profile names provider `other` for `challenge`
 - **THEN** the run ends with status 3 naming the profile
+
+#### Scenario: Discovery jobs on Codex
+- **WHEN** the profile names provider `codex` for `scenario`
+- **THEN** discovery runs its scenario jobs on Codex and its rank job on Claude
 
 ### Requirement: Each cluster is diagnosed from a sealed context
 Before any model job, the workflow SHALL write for each cluster a context made only of recorded evidence: the cluster's members with their cores, crops and both sides' OCR text; for each member case its mode, fixture file name and fixture hash and the expanded actions up to the capture; the cases and captures a check may name; and the identity of a history-less snapshot of the app's source and data that the thread shares. The context SHALL be identified by the SHA-256 of its manifest, building it again from the same run SHALL give the same hash, and every job of the cluster SHALL record that hash. Prompts SHALL be built from the manifest only and SHALL mark text taken from the run as untrusted data. Each job SHALL work in a copy of its cluster's context folder and of the snapshot, made in a scratch folder outside the repository and removed when the job ends (a copy that cannot be removed is named in the log and does not replace the job's result), so that no log of another job, other thread, instruction file or version history of the repository lies around its working folder, whichever way a provider limits reads; the snapshot SHALL have no version history and SHALL be of the source the captured candidate was built from: a candidate build SHALL record next to the candidate the identity of the compiled source (`Chummer/` and `Core/`) as it was when the build started, and when the compiled source of the snapshot differs from that record, or the candidate has none, the run SHALL end with status 3 and no job SHALL run, also with `--only diagnose` on recorded captures. Data and language files are copied into each staged app at capture time, so they are capture inputs and not build inputs, and editing them SHALL NOT make diagnosis fail. A recorded file that the context needs and cannot read SHALL be a setup error.

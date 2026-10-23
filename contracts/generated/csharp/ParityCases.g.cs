@@ -99,6 +99,13 @@ namespace Parity.Contracts.ParityCases
 
     public partial class CharacterEntry
     {
+        /// <summary>
+        /// With scenario: the entry's own actions, replacing the mode's actions.
+        /// </summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        [JsonPropertyName("actions")]
+        public List<CaseAction>? Actions { get; set; }
+
         [JsonRequired]
         [JsonPropertyName("mode")]
         public CharacterMode Mode { get; set; }
@@ -110,6 +117,13 @@ namespace Parity.Contracts.ParityCases
         [JsonPropertyName("path")]
         [JsonConverter(typeof(MinMaxLengthCheckConverter))]
         public string Path { get; set; }
+
+        /// <summary>
+        /// With actions: names the case &lt;mode&gt;-&lt;file&gt;@&lt;scenario&gt; instead of &lt;mode&gt;-&lt;file&gt;.
+        /// </summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        [JsonPropertyName("scenario")]
+        public string? Scenario { get; set; }
     }
 
     public enum CaseActionType { Capture, Include, SelectTab, Wait, WaitFor };

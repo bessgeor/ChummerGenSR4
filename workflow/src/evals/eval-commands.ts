@@ -7,6 +7,7 @@ import type { AgentRunners } from "../agents/agent-runners.js";
 import type { QuotaWaiter } from "../diagnosis/quota-waiter.js";
 import type { Git } from "../diagnosis/source-snapshot.js";
 import type { ScratchFolder } from "../host/scratch-folder.js";
+import { discoveryPaths } from "../discovery/discovery-paths.js";
 import { SetupError } from "../host/setup-error.js";
 import type { WorkflowPaths } from "../paths.js";
 import { addBenchmarkItem, checkBenchmarkItem, readBenchmark } from "./benchmark.js";
@@ -14,8 +15,10 @@ import { CommandOptions } from "./command-options.js";
 import { listRecords } from "./eval-record.js";
 import { certify as issueCertificate } from "./certificate.js";
 import { comparisonLines, compareRuns, metrics } from "./comparison.js";
+import { metricsOfJobKind } from "./metrics.js";
 import { freezeDataset } from "./dataset.js";
-import { resumeEvalRun, runPartitions, startEvalRun, summaryLines } from "./eval-run.js";
+import { freezeDiscoveryDataset } from "./discovery-dataset.js";
+import { readRun, resumeEvalRun, runPartitions, startEvalRun, summaryLines } from "./eval-run.js";
 import { gradeRecords } from "./grader.js";
 import { labelHindsight } from "./hindsight.js";
 import { recordSummary } from "./record-summary.js";
@@ -34,18 +37,18 @@ export const evalUsage = `Usage: npm run eval -- <command> [options]
                                   advisory model grades of answers without one (or of the named records, again)
   queue [--seed <text>] [--per-stratum <n>]
                                   print the review queue (npm run review shows it)
-  freeze --job <hypothesis|challenge> --name <name> [--seed <text>] [--test-percent <0-100>] [--reason <text>]
+  freeze --job <hypothesis|challenge|rank|scenario> --name <name> [--seed <text>] [--test-percent <0-100>] [--reason <text>]
                                   freeze the next version of a dataset under out/evals/datasets/<name>/
   run --dataset <folder> [--partition test|development|all] [--repeat <n>] [--name <text>]
                                   run the current prompt with the profile's agent choice on a dataset (out/evals/runs/<run>/)
   run --resume <run>              finish a stopped eval run with its stored settings
-  compare --baseline <run> --candidate <run> [--metric prediction|rootCause]
+  compare --baseline <run> --candidate <run> [--metric prediction|rootCause|valid|reached]  (default: prediction, or valid for rank and scenario runs)
                                   paired comparison of two eval runs with a 95% confidence interval
   compare-threads --baseline <threads> --candidate <threads>
                                   paired comparison of finished workflow threads (comma-separated IDs) by cluster:
                                   fix rate and model time, with 95% confidence intervals
-  certify --run <run> --metric prediction|rootCause --min-pass <0-1> [--max-mean-cost-usd <usd>]
-                                  certify the run's job kind configuration for unattended runs (npm start -- --unattended)
+  certify --run <run> --metric prediction|rootCause|valid|reached --min-pass <0-1> [--max-mean-cost-usd <usd>]
+                                  certify the run's job kind configuration for unattended runs (npm start or npm run discover -- --unattended)
 
 Exit status: 0 done, 1 certificate refused, 2 a grader job failed, 3 setup error.`;
 
@@ -142,7 +145,8 @@ const queue: Command = async (args, context) => {
 const freeze: Command = async (args, context) => {
   const options = CommandOptions.parse("freeze", args, ["job", "name", "seed", "test-percent", "reason"]);
   options.required("job");
-  const jobKind = options.choice("job", ["hypothesis", "challenge"] as const, "hypothesis");
+  const jobKind = options.choice("job", ["hypothesis", "challenge", "rank", "scenario"] as const, "hypothesis");
+  if (jobKind === "rank" || jobKind === "scenario") return freezeDiscovery(options, jobKind, context);
   const { folder, dataset } = await freezeDataset({
     name: options.required("name"), jobKind, seed: options.text("seed") ?? "dataset", testPercent: options.number("test-percent", 50, 0, 100, true),
     reason: options.text("reason"), datasetsFolder: join(context.paths.evalsFolder, "datasets"), threadFolder: context.paths.threadFolder,
@@ -154,6 +158,18 @@ const freeze: Command = async (args, context) => {
     + `${dataset.items.filter((item) => item.gold !== null).length} with gold; hash ${dataset.datasetHash}; ${folder}`);
   return 0;
 };
+
+async function freezeDiscovery(options: CommandOptions, jobKind: "rank" | "scenario", context: EvalContext): Promise<number> {
+  const { folder, dataset } = await freezeDiscoveryDataset({
+    name: options.required("name"), jobKind, seed: options.text("seed") ?? "dataset", testPercent: options.number("test-percent", 50, 0, 100, true),
+    reason: options.text("reason"), datasetsFolder: join(context.paths.evalsFolder, "datasets"),
+    threadFolder: (threadId) => discoveryPaths(context.paths.repositoryRoot).thread(threadId).root, records: await listRecords(context.store), now: context.now, log: context.log,
+  });
+  const count = (partition: string) => dataset.items.filter((item) => item.partition === partition).length;
+  context.log(`Dataset ${dataset.name} v${dataset.version} (${jobKind}): ${dataset.items.length} items, ${count("test")} test and ${count("development")} development, `
+    + `${dataset.items.filter((item) => item.gold !== null).length} with gold; hash ${dataset.datasetHash}; ${folder}`);
+  return 0;
+}
 
 function runDependencies(context: EvalContext) {
   return {
@@ -186,7 +202,9 @@ const run: Command = async (args, context) => {
 const compare: Command = async (args, context) => {
   const options = CommandOptions.parse("compare", args, ["baseline", "candidate", "metric"]);
   const runs = join(context.paths.evalsFolder, "runs");
-  const metric = options.choice("metric", metrics, "prediction");
+  // Without --metric, the first metric the runs' job kind scores.
+  const fallback = metricsOfJobKind[readRun(join(runs, options.required("baseline"))).settings.jobKind][0];
+  const metric = options.choice("metric", metrics, fallback);
   const comparison = compareRuns(join(runs, options.required("baseline")), join(runs, options.required("candidate")), metric, context.now());
   const folder = join(context.paths.evalsFolder, "comparisons");
   mkdirSync(folder, { recursive: true });

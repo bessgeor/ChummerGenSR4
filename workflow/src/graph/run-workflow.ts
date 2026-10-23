@@ -32,9 +32,10 @@ export type RunDependencies = {
   readonly signal?: AbortSignal;
 };
 
-export function newThreadId(now: Date): string {
+/** A thread ID: the prefix, the time and a random suffix. */
+export function newThreadId(now: Date, prefix = "wf"): string {
   const stamp = now.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
-  return `wf-${stamp}-${randomBytes(4).toString("hex")}`;
+  return `${prefix}-${stamp}-${randomBytes(4).toString("hex")}`;
 }
 
 /**
@@ -43,7 +44,8 @@ export function newThreadId(now: Date): string {
  */
 export const recursionLimit = 1_000_000;
 
-function config(threadId: string, signal: AbortSignal | undefined) {
+/** The configuration every graph invocation of a thread takes. */
+export function threadConfig(threadId: string, signal: AbortSignal | undefined) {
   return {
     configurable: { thread_id: threadId }, recursionLimit, durability: "sync" as const,
     ...(signal === undefined ? {} : { signal }),
@@ -137,12 +139,12 @@ export async function runWorkflow(command: Exclude<Command, { kind: "help" }>, d
     if (command.kind === "resume") {
       await checkResumable(command.threadId, dependencies);
       log(`Resuming thread ${command.threadId}.`);
-      final = await graph.invoke(null, config(command.threadId, dependencies.signal));
+      final = await graph.invoke(null, threadConfig(command.threadId, dependencies.signal));
     } else {
       const started = await start(command, dependencies);
       threadId = started.threadId;
       log(`Resume it after an interruption with: npm start -- --resume ${threadId}`);
-      final = await graph.invoke(started.input, config(threadId, dependencies.signal));
+      final = await graph.invoke(started.input, threadConfig(threadId, dependencies.signal));
     }
     return finish(final, dependencies);
   } catch (error) {

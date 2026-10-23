@@ -4,13 +4,13 @@ import { z } from "zod";
 import { efforts, providers, type JobKind } from "../agents/agent-job.js";
 import type { AgentSettings } from "../agents/agent-settings.js";
 import type { RunOptions } from "../options/run-options.js";
-import { metrics, type Metric } from "./comparison.js";
-import { promptVersions, readRun, summarize } from "./eval-run.js";
+import { metrics, requireMetric, type Metric } from "./metrics.js";
+import { evaluatedJobKinds, promptVersions, readRun, summarize, type EvaluatedJobKind } from "./eval-run.js";
 
 /** A job kind's configuration, certified by an eval run on a test partition for unattended runs. */
 export const CertificateSchema = z.strictObject({
   schemaVersion: z.literal(1),
-  jobKind: z.enum(["hypothesis", "challenge"]),
+  jobKind: z.enum(evaluatedJobKinds),
   agent: z.strictObject({ provider: z.enum(providers), model: z.string().nullable(), effort: z.enum(efforts) }),
   promptVersion: z.string().min(1),
   run: z.string().min(1),
@@ -37,7 +37,8 @@ export function certificatePath(folder: string, jobKind: JobKind): string {
 /** Issues a certificate from a complete test-partition run that meets the thresholds, or returns every reason it does not. */
 export function certify(runFolder: string, thresholds: Thresholds, certificatesFolder: string, now: Date): { certificate: Certificate } | { refused: string[] } {
   const { settings, samples } = readRun(runFolder);
-  const summary = summarize(settings.runId, samples, now);
+  requireMetric(settings.jobKind, thresholds.metric);
+  const summary = summarize(settings.runId, settings.jobKind, samples, now);
   const reasons: string[] = [];
   const missing = settings.samples.filter((key) => !samples.some((sample) => sample.key === key)).length;
   if (missing > 0) reasons.push(`the run is not complete: ${missing} samples are missing`);
@@ -70,7 +71,7 @@ export function certify(runFolder: string, thresholds: Thresholds, certificatesF
  * Why each job kind may not be dispatched unattended: no certificate, an invalid one, or one for another agent
  * choice or prompt version than the run's. An empty list lets the run start.
  */
-export function certificateProblems(folder: string, jobKinds: readonly ("hypothesis" | "challenge")[], agents: AgentSettings): string[] {
+export function certificateProblems(folder: string, jobKinds: readonly EvaluatedJobKind[], agents: AgentSettings): string[] {
   const problems: string[] = [];
   for (const jobKind of jobKinds) {
     const path = certificatePath(folder, jobKind);

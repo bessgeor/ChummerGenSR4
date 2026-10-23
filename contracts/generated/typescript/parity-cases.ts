@@ -28,8 +28,10 @@ export const CaseActionSchema = z.object({
 export type CaseAction = z.infer<typeof CaseActionSchema>;
 
 export const CharacterEntrySchema = z.object({
+    "actions": z.array(CaseActionSchema).min(1).optional(),
     "mode": CharacterModeSchema,
     "path": z.string(),
+    "scenario": z.string().optional(),
 });
 export type CharacterEntry = z.infer<typeof CharacterEntrySchema>;
 

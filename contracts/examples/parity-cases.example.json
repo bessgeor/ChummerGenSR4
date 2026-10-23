@@ -24,6 +24,16 @@
   ],
   "characters": [
     { "path": "../fixtures/characters/example-build.chum", "mode": "build" },
-    { "path": "../fixtures/characters/example-career.chum", "mode": "career" }
+    { "path": "../fixtures/characters/example-career.chum", "mode": "career" },
+    {
+      "path": "../fixtures/characters/example-career.chum",
+      "mode": "career",
+      "scenario": "calendar",
+      "actions": [
+        { "type": "selectTab", "name": "Calendar" },
+        { "type": "waitFor", "label": "Add Week" },
+        { "type": "capture", "name": "calendar" }
+      ]
+    }
   ]
 }

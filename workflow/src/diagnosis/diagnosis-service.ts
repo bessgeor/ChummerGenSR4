@@ -289,7 +289,7 @@ export function readSealedManifest(cluster: Pick<ClusterDiagnosis, "clusterId" |
 }
 
 /** The model time a result charges to the run budget: a finished job, a failed one too; not a usage limit, and an infra failure or timeout ends the run. */
-function chargedMilliseconds(label: string, result: AgentResult<unknown>): number {
+export function chargedMilliseconds(label: string, result: AgentResult<unknown>): number {
   return !result.ok && ["quota_exhausted", "infra", "timeout"].includes(result.failure.kind) ? 0 : measuredDuration(label, result);
 }
 

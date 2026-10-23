@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using ParityCasesContract = Parity.Contracts.ParityCases.ParityCases;
 using WireCharacterEntry = Parity.Contracts.ParityCases.CharacterEntry;
 using WireCharacterMode = Parity.Contracts.ParityCases.CharacterMode;
@@ -8,6 +9,8 @@ namespace Parity.Cases;
 /// <summary>Loads a case file and validates it against the fixtures it names.</summary>
 public sealed class CaseFileLoader(ActionExpander expander, CharacterModeReader modeReader)
 {
+    private static readonly Regex ScenarioName = new(@"^[a-z0-9][a-z0-9-]*\z", RegexOptions.CultureInvariant);
+
     public CaseSuite Load(string caseFilePath)
     {
         string fullPath = Path.GetFullPath(caseFilePath);
@@ -90,9 +93,27 @@ public sealed class CaseFileLoader(ActionExpander expander, CharacterModeReader 
                 $"{location}: '{entry.Path}' is declared {Wire(declared)} but the file is in {Wire(actual)} mode.");
         }
 
-        IReadOnlyList<ParityAction> actions = declared == CharacterMode.Career
-            ? expander.Expand(document.CareerActions, document.Sequences, "careerActions")
-            : expander.Expand(document.BuildActions, document.Sequences, "buildActions");
+        if ((entry.Scenario is null) != (entry.Actions is null))
+        {
+            throw new InvalidDataException($"{location}: 'scenario' and 'actions' are given together or not at all.");
+        }
+
+        if (entry.Actions is { Count: 0 })
+        {
+            throw new InvalidDataException($"{location}: 'actions' holds no action.");
+        }
+
+        if (entry.Scenario is not null && !ScenarioName.IsMatch(entry.Scenario))
+        {
+            throw new InvalidDataException(
+                $"{location}: scenario '{entry.Scenario}' is not lower-case letters, digits and dashes starting with a letter or digit.");
+        }
+
+        IReadOnlyList<ParityAction> actions = entry.Actions is not null
+            ? expander.Expand(entry.Actions, document.Sequences, $"{location}.actions")
+            : declared == CharacterMode.Career
+                ? expander.Expand(document.CareerActions, document.Sequences, "careerActions")
+                : expander.Expand(document.BuildActions, document.Sequences, "buildActions");
         string? duplicateCapture = actions.OfType<CaptureAction>()
             .GroupBy(action => action.CaptureName, StringComparer.OrdinalIgnoreCase)
             .FirstOrDefault(group => group.Count() > 1)?.Key;
@@ -102,6 +123,11 @@ public sealed class CaseFileLoader(ActionExpander expander, CharacterModeReader 
         }
 
         string name = $"{Wire(declared)}-{Path.GetFileNameWithoutExtension(characterPath)}";
+        if (entry.Scenario is not null)
+        {
+            name = $"{name}@{entry.Scenario}";
+        }
+
         return new ParityCase(name, Path.GetFileName(characterPath), characterPath, declared, actions);
     }
 

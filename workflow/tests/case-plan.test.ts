@@ -1,9 +1,9 @@
-import { deepStrictEqual, throws } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { deepStrictEqual, strictEqual, throws } from "node:assert/strict";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { captureNames, planCases } from "../src/cases/case-plan.js";
+import { captureNames, planCases, scenarioPattern } from "../src/cases/case-plan.js";
 import { SetupError } from "../src/host/setup-error.js";
 
 function caseFile(): string {
@@ -49,6 +49,44 @@ test("each case gets the subset of requested captures it has, and a case with no
   throws(() => planCases(caseFile(), ["career-Beta career"], ["gear"]), /gear/);
 });
 
+function scenarioFile(characters: readonly object[]): string {
+  const path = caseFile();
+  const document = JSON.parse(readFileSync(path, "utf8")) as { characters: object[] };
+  writeFileSync(path, JSON.stringify({ ...document, characters }));
+  return path;
+}
+
+test("an entry with a scenario has its own actions and the case name <mode>-<file>@<scenario>", () => {
+  const path = scenarioFile([
+    { path: "fixtures/Alpha.chum", mode: "build" },
+    { path: "fixtures/Alpha.chum", mode: "build", scenario: "pets", actions: [{ type: "include", name: "tabs" }, { type: "capture", name: "pets" }] },
+  ]);
+  const plan = planCases(path, [], []);
+  deepStrictEqual(plan.cases.map((item) => item.name), ["build-Alpha", "build-Alpha@pets"]);
+  deepStrictEqual(captureNames(plan.cases[1]!), ["skills", "pets"]);
+  deepStrictEqual(planCases(path, ["build-Alpha@pets"], []).cases.map((item) => item.name), ["build-Alpha@pets"]);
+});
+
+test("a scenario without actions, actions without a scenario, a bad scenario name and a repeated case name are setup errors", () => {
+  const actions = [{ type: "capture", name: "x" }];
+  throws(() => planCases(scenarioFile([{ path: "fixtures/Alpha.chum", mode: "build", scenario: "a" }]), [], []), /together or not at all/);
+  throws(() => planCases(scenarioFile([{ path: "fixtures/Alpha.chum", mode: "build", actions }]), [], []), /together or not at all/);
+  throws(() => planCases(scenarioFile([{ path: "fixtures/Alpha.chum", mode: "build", scenario: "A b", actions }]), [], []), /scenario 'A b'/);
+  throws(() => planCases(scenarioFile([
+    { path: "fixtures/Alpha.chum", mode: "build", scenario: "a", actions }, { path: "fixtures/Alpha.chum", mode: "build", scenario: "a", actions },
+  ]), [], []), /case name 'build-Alpha@a'/);
+});
+
+test("a scenario with no action is a setup error", () => {
+  throws(() => planCases(scenarioFile([{ path: "fixtures/Alpha.chum", mode: "build", scenario: "a", actions: [] }]), [], []), SetupError);
+});
+
+test("the scenario name rule is the schema's pattern", () => {
+  const schema = JSON.parse(readFileSync(new URL("../../contracts/schemas/parity-cases.schema.json", import.meta.url), "utf8")) as {
+    definitions: { CharacterEntry: { properties: { scenario: { pattern: string } } } };
+  };
+  strictEqual(scenarioPattern.source, schema.definitions.CharacterEntry.properties.scenario.pattern);
+});
 test("an unreadable or invalid case file is a setup error", () => {
   const root = mkdtempSync(join(tmpdir(), "workflow-cases-"));
   throws(() => planCases(join(root, "missing.json"), [], []), SetupError);

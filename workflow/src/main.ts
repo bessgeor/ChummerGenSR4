@@ -19,6 +19,7 @@ import { HostSteps } from "./host-steps.js";
 import { CpuPool, defaultCpuPoolSize } from "./host/cpu-pool.js";
 import { defaultLaneSettings, DesktopLane } from "./host/desktop-lane.js";
 import { ProcessHostRunner } from "./host/host-runner.js";
+import { interruptSignal } from "./host/interrupt-signal.js";
 import { createScratchFolder } from "./host/scratch-folder.js";
 import { SetupError } from "./host/setup-error.js";
 import { LoopService } from "./loop/loop-service.js";
@@ -45,21 +46,6 @@ process.on("uncaughtException", (error) => {
   console.error(`npm start failed: ${error.stack ?? String(error)}`);
   process.exit(setupErrorStatus);
 });
-
-/**
- * Ctrl+C, closing the console window (SIGHUP) and Ctrl+Break stop the running steps and their child processes
- * instead of leaving them running; the thread stays resumable.
- */
-function interruptSignal(log: (line: string) => void): AbortSignal {
-  const controller = new AbortController();
-  for (const signal of ["SIGINT", "SIGHUP", "SIGBREAK"] as const) {
-    process.once(signal, () => {
-      log(`${signal}: stopping the running steps...`);
-      controller.abort();
-    });
-  }
-  return controller.signal;
-}
 
 async function main(): Promise<number> {
   const log = (line: string) => console.log(line);

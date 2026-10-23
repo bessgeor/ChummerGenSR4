@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Parity.Cases;
 
@@ -209,6 +210,115 @@ public sealed class CaseFileLoaderTests : IDisposable
 
         CaseFileException error = Assert.Throws<CaseFileException>(() => _loader.Load(path));
         Assert.Contains("not a readable character file", error.Message);
+    }
+
+    [Fact]
+    public void Entry_with_a_scenario_runs_its_own_actions_under_its_own_name()
+    {
+        JsonArray characters = Characters((BuildFixture, "build"), (BuildFixture, "build"));
+        characters[1]!["scenario"] = "improvements";
+        characters[1]!["actions"] = new JsonArray(Action("selectTab", "name", "Improvements"), Action("capture", "name", "improvements"));
+        CaseSuite suite = _loader.Load(WriteCaseFile(characters));
+
+        Assert.Equal(["build-Diego_v_alpha2_by_bessgeor", "build-Diego_v_alpha2_by_bessgeor@improvements"], suite.Cases.Select(item => item.Name));
+        Assert.Equal([new CaptureAction("common")], suite.Cases[0].Actions);
+        Assert.Equal([new SelectTabAction("Improvements", Optional: false), new CaptureAction("improvements")], suite.Cases[1].Actions);
+        Assert.Equal(BuildFixture, suite.Cases[1].CharacterFile);
+    }
+
+    [Fact]
+    public void Entry_actions_expand_sequences_and_name_their_location()
+    {
+        JsonObject document = MinimalCaseFile(Characters((BuildFixture, "build")));
+        document["sequences"] = new JsonObject { ["skills"] = new JsonArray(Action("selectTab", "name", "Skills")) };
+        JsonNode entry = ((JsonArray)document["characters"]!)[0]!;
+        entry["scenario"] = "skills";
+        entry["actions"] = new JsonArray(Action("include", "name", "skills"), Action("waitFor", "name", "x"));
+
+        CaseFileException error = Assert.Throws<CaseFileException>(() => _loader.Load(Write(document)));
+        Assert.Contains("characters[0].actions[1]: 'waitFor' does not take 'name'", error.Message);
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public void Scenario_and_actions_come_together(bool scenario, bool actions)
+    {
+        JsonArray characters = Characters((BuildFixture, "build"));
+        if (scenario) characters[0]!["scenario"] = "alone";
+        if (actions) characters[0]!["actions"] = new JsonArray(Action("capture", "name", "common"));
+
+        CaseFileException error = Assert.Throws<CaseFileException>(() => _loader.Load(WriteCaseFile(characters)));
+        Assert.Contains("characters[0]: 'scenario' and 'actions' are given together or not at all", error.Message);
+    }
+
+    [Fact]
+    public void Scenario_name_must_be_lower_case_letters_digits_and_dashes()
+    {
+        JsonArray characters = Characters((BuildFixture, "build"));
+        characters[0]!["scenario"] = "Upper Case";
+        characters[0]!["actions"] = new JsonArray(Action("capture", "name", "common"));
+
+        CaseFileException error = Assert.Throws<CaseFileException>(() => _loader.Load(WriteCaseFile(characters)));
+        Assert.Contains("scenario 'Upper Case'", error.Message);
+
+        JsonArray trailing = Characters((BuildFixture, "build"));
+        trailing[0]!["scenario"] = "calendar\n";
+        trailing[0]!["actions"] = new JsonArray(Action("capture", "name", "common"));
+        Assert.Contains("scenario 'calendar\n'", Assert.Throws<CaseFileException>(() => _loader.Load(WriteCaseFile(trailing))).Message);
+    }
+
+    [Fact]
+    public void Scenario_with_no_action_fails()
+    {
+        JsonArray characters = Characters((BuildFixture, "build"));
+        characters[0]!["scenario"] = "empty";
+        characters[0]!["actions"] = new JsonArray();
+
+        CaseFileException error = Assert.Throws<CaseFileException>(() => _loader.Load(WriteCaseFile(characters)));
+        Assert.Contains("characters[0]: 'actions' holds no action", error.Message);
+    }
+
+    [Theory]
+    [InlineData("pets", true)]
+    [InlineData("0-day", true)]
+    [InlineData("a", true)]
+    [InlineData("-pets", false)]
+    [InlineData("Pets", false)]
+    [InlineData("pets_2", false)]
+    [InlineData("pets\n", false)]
+    [InlineData("", false)]
+    public void Scenario_names_are_accepted_as_the_schema_pattern_says(string scenario, bool accepted)
+    {
+        string pattern = JsonNode.Parse(File.ReadAllText(Path.Combine(RepositoryPaths.Contracts, "schemas", "parity-cases.schema.json")))!
+            ["definitions"]!["CharacterEntry"]!["properties"]!["scenario"]!["pattern"]!.GetValue<string>();
+        Assert.Equal(accepted, new Regex(pattern.Replace("$", "\\z", StringComparison.Ordinal), RegexOptions.CultureInvariant).IsMatch(scenario));
+
+        JsonArray characters = Characters((BuildFixture, "build"));
+        characters[0]!["scenario"] = scenario;
+        characters[0]!["actions"] = new JsonArray(Action("capture", "name", "common"));
+        if (accepted)
+        {
+            Assert.Equal($"build-Diego_v_alpha2_by_bessgeor@{scenario}", _loader.Load(WriteCaseFile(characters)).Cases.Single().Name);
+        }
+        else
+        {
+            Assert.Throws<CaseFileException>(() => _loader.Load(WriteCaseFile(characters)));
+        }
+    }
+
+    [Fact]
+    public void Two_entries_with_one_scenario_name_fail()
+    {
+        JsonArray characters = Characters((BuildFixture, "build"), (BuildFixture, "build"));
+        foreach (JsonNode? entry in characters)
+        {
+            entry!["scenario"] = "same";
+            entry["actions"] = new JsonArray(Action("capture", "name", "common"));
+        }
+
+        CaseFileException error = Assert.Throws<CaseFileException>(() => _loader.Load(WriteCaseFile(characters)));
+        Assert.Contains("case name 'build-Diego_v_alpha2_by_bessgeor@same'", error.Message);
     }
 
     [Fact]

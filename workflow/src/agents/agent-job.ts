@@ -1,6 +1,6 @@
 import type { z } from "zod";
 
-export const jobKinds = ["hypothesis", "challenge", "grade", "repair"] as const;
+export const jobKinds = ["hypothesis", "challenge", "grade", "repair", "rank", "scenario"] as const;
 export type JobKind = (typeof jobKinds)[number];
 
 export const providers = ["claude", "codex"] as const;

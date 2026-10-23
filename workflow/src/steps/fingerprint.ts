@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { createReadStream, existsSync, readdirSync, statSync } from "node:fs";
+import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { SetupError } from "../host/setup-error.js";
 
@@ -20,6 +20,11 @@ export function sha256File(path: string): Promise<string> {
       .on("data", (chunk) => hash.update(chunk))
       .on("end", () => resolve(hash.digest("hex")));
   });
+}
+
+/** SHA-256 of a small file, read at once. */
+export function sha256FileSync(path: string): string {
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
 /** Relative paths with forward slashes of the files under a folder, ordinally sorted. */
