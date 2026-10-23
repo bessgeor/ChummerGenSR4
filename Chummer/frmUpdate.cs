@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Compression;
 using System.Net;
 using System.Text;
 using System.Windows.Forms;
@@ -574,6 +575,34 @@ namespace Chummer
 			pgbFileProgress.Left = lblFileProgress.Left + intWidth + 6;
 			pgbFileProgress.Width = this.Width - pgbFileProgress.Left - 19;
 		}
+
+		/// <summary>
+		/// Decompress byte array to a new byte array.
+		/// </summary>
+		private static byte[] Decompress(byte[] gzip)
+		{
+			// Create a GZIP stream with decompression mode.
+			// ... Then create a buffer and write into while reading from the GZIP stream.
+			using (GZipStream stream = new GZipStream(new MemoryStream(gzip), CompressionMode.Decompress))
+			{
+				const int size = 4096;
+				byte[] buffer = new byte[size];
+				using (MemoryStream memory = new MemoryStream())
+				{
+					int count = 0;
+					do
+					{
+						count = stream.Read(buffer, 0, size);
+						if (count > 0)
+						{
+							memory.Write(buffer, 0, count);
+						}
+					}
+					while (count > 0);
+					return memory.ToArray();
+				}
+			}
+		}
 		#endregion
 
 		#region AsyncDownload Events
@@ -639,13 +668,12 @@ namespace Chummer
 				bool blnUnzipSuccess = true;
 
 				// Unzip the data files that have been downloaded.
-				OmaeHelper objHelper = new OmaeHelper();
 				foreach (string strFile in Directory.GetFiles(Path.Combine(Application.StartupPath, "data"), "*.zip"))
 				{
 					try
 					{
 						byte[] bytFile = File.ReadAllBytes(strFile);
-						bytFile = objHelper.Decompress(bytFile);
+						bytFile = Decompress(bytFile);
 						File.WriteAllBytes(strFile.Replace(".zip", ".xml"), bytFile);
 						if (!strFile.Contains("\\Debug\\"))
 							File.Delete(strFile);

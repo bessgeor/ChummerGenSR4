@@ -68,7 +68,7 @@ function run() {
   const msbuild = findMsbuild();
   const build = spawnSync(msbuild, [
     project,
-    "-nologo", "-verbosity:minimal", "-p:Configuration=Release",
+    "-restore", "-nologo", "-verbosity:minimal", "-p:Configuration=Release",
     `-p:OutputPath=${outputDir}`,
     `-p:BaseIntermediateOutputPath=${intermediateDir}`,
     ...(options.log === null ? [] : ["-fileLogger", `-fileLoggerParameters:LogFile=${options.log};Verbosity=normal;Encoding=UTF-8`]),

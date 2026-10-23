@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "itemId": "d-2e08f56e132cf5a2-a255fb3c41b4",
+  "kind": "fix",
+  "discrepancy": {
+    "clusterId": "d-2e08f56e132cf5a2",
+    "imageHash": "36a3a2f4665abbd9a22c8185313fae155c0aba9e623e9e8eefceff6c43e944f9",
+    "cases": [
+      "build-facemage_Sam"
+    ],
+    "captures": [
+      "right-other-info"
+    ],
+    "members": [
+      {
+        "case": "build-facemage_Sam",
+        "capture": "right-other-info"
+      }
+    ]
+  },
+  "base": {
+    "commit": "e7728e491f43c0f4bdbcce78373cfc34d74e5649"
+  },
+  "fix": {
+    "commit": "a255fb3c41b48e6b404419a895cc32f8cf3ba64c",
+    "committedUtc": "2026-10-02T11:30:31.000Z",
+    "mechanism": "rendering",
+    "patch": "diff --git a/Chummer/app.config b/Chummer/app.config\nindex cb5f072..5bb6b3d 100644\n--- a/Chummer/app.config\n+++ b/Chummer/app.config\n@@ -1,4 +1,8 @@\n <?xml version=\"1.0\"?>\r\n <configuration>\r\n <startup><supportedRuntime version=\"v4.0\" sku=\".NETFramework,Version=v4.8.1\"/></startup>\r\n+<runtime>\r\n+<!-- Keep the Windows Forms accessibility behaviour of .NET Framework 4.0, which the app was made for; the newer behaviour that targeting 4.8.1 turns on changes how the app looks, for example focus rectangles on tabs. -->\r\n+<AppContextSwitchOverrides value=\"Switch.UseLegacyAccessibilityFeatures=true;Switch.UseLegacyAccessibilityFeatures.2=true;Switch.UseLegacyAccessibilityFeatures.3=true;Switch.UseLegacyAccessibilityFeatures.4=true;Switch.UseLegacyAccessibilityFeatures.5=true\"/>\r\n+</runtime>\r\n </configuration>\r\n",
+    "files": [
+      {
+        "path": "Chummer/app.config",
+        "hunks": [
+          {
+            "oldStart": 1,
+            "oldLines": 4,
+            "header": "",
+            "removed": [],
+            "added": [
+              "<runtime>",
+              "<!-- Keep the Windows Forms accessibility behaviour of .NET Framework 4.0, which the app was made for; the newer behaviour that targeting 4.8.1 turns on changes how the app looks, for example focus rectangles on tabs. -->",
+              "<AppContextSwitchOverrides value=\"Switch.UseLegacyAccessibilityFeatures=true;Switch.UseLegacyAccessibilityFeatures.2=true;Switch.UseLegacyAccessibilityFeatures.3=true;Switch.UseLegacyAccessibilityFeatures.4=true;Switch.UseLegacyAccessibilityFeatures.5=true\"/>",
+              "</runtime>"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "regression": {
+    "commit": "e7728e491f43c0f4bdbcce78373cfc34d74e5649"
+  },
+  "provenance": {
+    "threadId": "wf-20261002T093646Z-57d7ea3a"
+  }
+}
