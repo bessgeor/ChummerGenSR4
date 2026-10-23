@@ -31,6 +31,7 @@ import { buildSourceInventory, designerPaths } from "../src/inventory/source-inv
 import type { WorkflowPaths } from "../src/paths.js";
 import type { InputFingerprints } from "../src/steps/input-fingerprints.js";
 import { nodes, tabItem, writeRun, type CaseSpec } from "./inventory-fixtures.js";
+import type { DispatchedTuning } from "../src/tuning/tuning.js";
 
 const designer = `namespace Chummer
 {
@@ -223,7 +224,11 @@ export type Harness = {
 /** A discovery graph on the synthetic repository with fake agents, a fake capture and the real service. */
 export async function discoveryHarness(
   reply: (job: AgentJob<unknown>, attempt: number) => Reply, treeFor: (caseName: string, capture: string) => UiNode[] = (_, capture) => formTree(capture === "common" ? "Common" : "Skills"),
-  options: { capture?: ConstructorParameters<typeof FakeCapture>[2]; budgetMinutes?: number; repository?: Awaited<ReturnType<typeof discoveryRepository>>; environment?: string } = {},
+  options: {
+    capture?: ConstructorParameters<typeof FakeCapture>[2]; budgetMinutes?: number; repository?: Awaited<ReturnType<typeof discoveryRepository>>; environment?: string;
+    /** The active configurations a new thread stores in its options. */
+    tuning?: DispatchedTuning;
+  } = {},
 ): Promise<Harness> {
   const { root, paths, out } = options.repository ?? await discoveryRepository();
   const agents = new FakeAgents(reply);
@@ -252,7 +257,7 @@ export async function discoveryHarness(
   const settings = resolveAgentSettings({ runBudgetMinutes: options.budgetMinutes ?? 120 });
   const resolveOptions = (args: DiscoverArguments): DiscoveryOptions => ({
     from: args.from, caseFile: args.caseFile ?? join(root, "parity", "cases", "characters.json"), settingsOverlay: null, threshold: null, canonicalCache: null, canonicalCacheSource: "off",
-    targets: args.targets, unattended: false, agents: settings, certificates: join(out, "certificates"),
+    targets: args.targets, unattended: false, agents: settings, certificates: join(out, "certificates"), ...(options.tuning === undefined ? {} : { tuning: options.tuning }),
   });
   const dependencies = { graph, resolveOptions, certificateProblems: () => [], log, now };
   return {

@@ -4,6 +4,7 @@ import type { AgentSettings } from "../agents/agent-settings.js";
 import type { JobAnswer, QuotaWaitMark } from "../diagnosis/cluster-diagnosis.js";
 import type { RunOptions } from "../options/run-options.js";
 import type { InputFingerprints } from "../steps/input-fingerprints.js";
+import type { DispatchedTuning } from "../tuning/tuning.js";
 import type { Ranking, RankOutput, ScenarioOutput } from "./job-schemas.js";
 import type { ScenarioProof } from "./proof.js";
 
@@ -21,6 +22,8 @@ export type DiscoveryOptions = {
   readonly unattended: boolean;
   readonly agents: AgentSettings;
   readonly certificates: string;
+  /** The active tuning configurations when the thread started; absent in a thread stored before tuning existed, which uses none. */
+  readonly tuning?: DispatchedTuning;
 };
 
 /** Where one model job stands: its answer, a usage-limit wait, a failure, or a budget that was spent before it could start. */

@@ -1,5 +1,5 @@
 import { SetupError } from "../host/setup-error.js";
-import { itemShares, readRun, type RunSettings, type Sample } from "./eval-run.js";
+import { itemShares, missingSamples, readRun, type RunSettings, type Sample } from "./eval-run.js";
 import { requireMetric, type Metric } from "./metrics.js";
 import { mean, pairedStatistics, type Interval } from "./statistics.js";
 
@@ -28,6 +28,8 @@ export type Comparison = {
   readonly metric: Metric;
   /** Items where both runs have a value of the metric; repetitions of an item are one pair. */
   readonly pairs: number;
+  /** Items on which the candidate has a value of the metric on fewer repetitions than the baseline (an abstention or a failure); an item with some of them stays in `pairs`. */
+  readonly unpaired: number;
   readonly baselineRate: number | null;
   readonly candidateRate: number | null;
   readonly meanDifference: number | null;
@@ -44,7 +46,7 @@ export type Comparison = {
 function completeRun(folder: string): { settings: RunSettings; samples: Map<string, Sample> } {
   const { settings, samples } = readRun(folder);
   const byKey = new Map(samples.map((sample) => [sample.key, sample]));
-  const missing = settings.samples.filter((key) => !byKey.has(key));
+  const missing = missingSamples(settings, samples);
   if (missing.length > 0) throw new SetupError(`Eval run ${settings.runId} is not complete: ${missing.length} samples are missing; resume it first.`);
   return { settings, samples: byKey };
 }
@@ -54,6 +56,15 @@ function configuration(settings: RunSettings): Record<string, string> {
     provider: settings.choice.provider, model: settings.choice.model ?? "default", effort: settings.choice.effort,
     timeoutMinutes: String(settings.choice.timeoutMinutes), promptVersion: settings.promptVersion, modelPool: String(settings.modelPool), name: settings.name ?? "",
   };
+}
+
+/** The number of repetitions of each item that have a value of the metric; an item without one is left out. */
+function valuedRepetitions(samples: readonly Sample[], metric: Metric): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const sample of samples) {
+    if (sample[metric] !== null) counts.set(sample.itemId, (counts.get(sample.itemId) ?? 0) + 1);
+  }
+  return counts;
 }
 
 /** Pairs two complete runs on the same dataset, job kind, partition and samples, and compares one metric. */
@@ -75,6 +86,9 @@ export function compareRuns(baselineFolder: string, candidateFolder: string, met
     candidate: itemShares([...candidate.samples.values()], (sample) => sample[metric]),
   };
   const valued = [...shares.baseline].filter(([itemId]) => shares.candidate.has(itemId)).map(([itemId, share]) => ({ baseline: share, candidate: shares.candidate.get(itemId)! }));
+  const valuedBaseline = valuedRepetitions([...baseline.samples.values()], metric);
+  const valuedCandidate = valuedRepetitions([...candidate.samples.values()], metric);
+  const unpaired = [...valuedBaseline].filter(([itemId, count]) => (valuedCandidate.get(itemId) ?? 0) < count).length;
   const rate = (side: "baseline" | "candidate") => mean(valued.map((pair) => pair[side]));
   const statistics = pairedStatistics(valued.map((pair) => pair.candidate - pair.baseline));
   const verdict = verdictOf(statistics.interval);
@@ -84,7 +98,7 @@ export function compareRuns(baselineFolder: string, candidateFolder: string, met
   return {
     schemaVersion: 1, baseline: baseline.settings.runId, candidate: candidate.settings.runId,
     dataset: { name: baseline.settings.dataset.name, version: baseline.settings.dataset.version, hash: baseline.settings.dataset.hash },
-    jobKind: baseline.settings.jobKind, partition: baseline.settings.partition, metric, pairs: statistics.count,
+    jobKind: baseline.settings.jobKind, partition: baseline.settings.partition, metric, pairs: statistics.count, unpaired,
     baselineRate: rate("baseline"), candidateRate: rate("candidate"), meanDifference: statistics.mean, standardError: statistics.standardError,
     interval: statistics.interval, verdict,
     modelTime: { meanDifferenceMs: mean(pairs.map((pair) => pair.candidate.durationMs - pair.baseline.durationMs)) },
@@ -99,7 +113,7 @@ const number = (value: number | null, digits = 3) => (value === null ? "n/a" : v
 export function comparisonLines(comparison: Comparison): string[] {
   return [
     `Comparison of ${comparison.candidate} against ${comparison.baseline} on ${comparison.dataset.name} v${comparison.dataset.version} (${comparison.jobKind}, ${comparison.partition}), metric ${comparison.metric}:`,
-    `  ${comparison.pairs} item pairs; pass rate ${number(comparison.baselineRate)} -> ${number(comparison.candidateRate)}; mean paired difference ${number(comparison.meanDifference)}, `
+    `  ${comparison.pairs} item pairs${comparison.unpaired === 0 ? "" : ` (${comparison.unpaired} items on which the candidate has a value on fewer repetitions than the baseline)`}; pass rate ${number(comparison.baselineRate)} -> ${number(comparison.candidateRate)}; mean paired difference ${number(comparison.meanDifference)}, `
       + `standard error ${number(comparison.standardError)}, 95% t interval ${comparison.interval === null ? "n/a" : `[${number(comparison.interval.low)}, ${number(comparison.interval.high)}]`}: ${comparison.verdict}`,
     `  model time: mean paired difference ${number(comparison.modelTime.meanDifferenceMs === null ? null : comparison.modelTime.meanDifferenceMs / 1000, 1)} s; `
       + `cost: mean paired difference ${number(comparison.cost.meanDifferenceUsd, 4)} USD over ${comparison.cost.pairs} pairs with both costs known`,

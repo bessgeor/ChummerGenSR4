@@ -2,19 +2,16 @@ import type { BaseStore } from "@langchain/langgraph-checkpoint";
 import { z } from "zod";
 import { efforts, providers, type AgentRunner } from "../agents/agent-job.js";
 import type { AgentSettings } from "../agents/agent-settings.js";
-import { challengePromptVersion, hypothesisPromptVersion } from "../diagnosis/job-schemas.js";
 import type { QuotaWaiter } from "../diagnosis/quota-waiter.js";
-import { rankPromptVersion, scenarioPromptVersion } from "../discovery/job-schemas.js";
+import { TuningSchema } from "../tuning/tuning.js";
+import { evaluatedJobKinds } from "./evaluated-job-kinds.js";
 import type { ScratchFolder } from "../host/scratch-folder.js";
 import { recordNamespace } from "./eval-record.js";
 
 export const runPartitions = ["test", "development", "all"] as const;
 export type RunPartition = (typeof runPartitions)[number];
 
-/** The job kinds evaluation runs, scores and certifies, with the prompt version the code has for each. */
-export const promptVersions = { hypothesis: hypothesisPromptVersion, challenge: challengePromptVersion, rank: rankPromptVersion, scenario: scenarioPromptVersion } as const;
-export const evaluatedJobKinds = ["hypothesis", "challenge", "rank", "scenario"] as const;
-export type EvaluatedJobKind = (typeof evaluatedJobKinds)[number];
+export { evaluatedJobKinds, promptVersions, type EvaluatedJobKind } from "./evaluated-job-kinds.js";
 
 const ChoiceSchema = z.strictObject({ provider: z.enum(providers), model: z.string().nullable(), effort: z.enum(efforts), timeoutMinutes: z.number().positive() });
 
@@ -29,6 +26,8 @@ export const RunSettingsSchema = z.strictObject({
   repeat: z.number().int().positive(),
   choice: ChoiceSchema,
   promptVersion: z.string(),
+  /** The tuning configuration the run measures; none for the code's prompt, and none in a run stored before tuning existed. */
+  tuning: TuningSchema.nullable().default(null),
   modelPool: z.number().int().positive(),
   executables: z.strictObject({ claude: z.string(), codex: z.string().nullable() }),
   /** Every sample the run has to finish: `<item>-<repetition>`. */

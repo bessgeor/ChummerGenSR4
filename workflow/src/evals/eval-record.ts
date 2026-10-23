@@ -97,8 +97,8 @@ export const EvalRecordSchema = z.strictObject({
   schemaVersion: z.literal(2),
   ...common,
   origin: z.enum(origins),
-  /** A cluster, a graded record, a discovery thread (rank) or a discovery target (scenario). */
-  subject: z.strictObject({ kind: z.enum(["discrepancy-cluster", "eval-record", "discovery-thread", "discovery-target"]), id: z.string().min(1) }),
+  /** A cluster, a graded record, a discovery thread (rank), a discovery target (scenario) or the eval run a tuning proposal was made from. */
+  subject: z.strictObject({ kind: z.enum(["discrepancy-cluster", "eval-record", "discovery-thread", "discovery-target", "eval-run"]), id: z.string().min(1) }),
   /** For a workflow challenge: the ID of the hypothesis record it challenged; null for every other job. */
   challenged: z.string().min(1).nullable().default(null),
   labels: LabelsSchema,

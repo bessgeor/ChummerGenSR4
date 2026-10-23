@@ -99,7 +99,7 @@ async function main(): Promise<number> {
     return await runDiscovery(command, {
       graph, log, now, signal: interruptSignal(log),
       resolveOptions: (args) => resolveDiscoveryOptions(args, profile, process.env, repositoryRoot),
-      certificateProblems: (options) => (options.unattended ? certificateProblems(options.certificates, ["rank", "scenario"], options.agents) : []),
+      certificateProblems: (options) => (options.unattended ? certificateProblems(options.certificates, ["rank", "scenario"], options.agents, options.tuning) : []),
     });
   } finally {
     store.close();

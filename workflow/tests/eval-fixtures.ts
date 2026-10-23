@@ -78,9 +78,12 @@ export function fixRepository() {
 export function evalContext(overrides: Partial<EvalContext> = {}): EvalContext & { readonly lines: string[] } {
   const lines: string[] = [];
   const agents = new FakeAgents();
+  const tuning = join(scratch("workflow-tuning-"), "tuning");
+  const certificates = join(scratch("workflow-certificates-"), "certificates");
   return {
     paths: workflowPaths(scratch("workflow-eval-")), store: new InMemoryStore(), git: () => "", now: () => new Date("2026-10-02T09:00:00Z"),
-    log: (line) => lines.push(line), agentSettings: () => resolveAgentSettings(undefined), agents: () => agents, certificatesFolder: () => join(scratch("workflow-certificates-"), "certificates"),
+    log: (line) => lines.push(line), agentSettings: () => resolveAgentSettings(undefined), agents: () => agents, certificatesFolder: () => certificates,
+    tuningFolder: () => tuning,
     quota: new QuotaWaiter("p", async () => undefined), createScratchFolder, lines,
     ...overrides,
   };

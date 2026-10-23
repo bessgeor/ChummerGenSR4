@@ -31,6 +31,7 @@ import { WideningService, type WideningDependencies } from "../src/widening/wide
 import { LoopService } from "../src/loop/loop-service.js";
 import { fixesRootOf, openSpecArchiver, processOpenSpecCli, type FixChangeArchiver } from "../src/fixes/fix-archiver.js";
 import { plannedCase, readReport, repository, runFolders, scratch, triageDocument, type Spot } from "./diagnosis-fixtures.js";
+import type { DispatchedTuning } from "../src/tuning/tuning.js";
 
 export const hypothesisAnswer = (claim = "The Skills tab label moved in frmCreate."): HypothesisOutput => ({
   outcome: "hypothesis", reason: "The crops show a shifted label.",
@@ -99,13 +100,13 @@ export class FakeAgents implements AgentRunner {
     await this.place();
     this.peak = Math.max(this.peak, this.running);
     if (job.mayStart?.() === false) {
-      this.refusedWithCopy.push(existsSync(job.workspace.folder) || existsSync(job.workspace.readOnly[0]!));
+      this.refusedWithCopy.push(existsSync(job.workspace.folder) || (job.workspace.readOnly[0] !== undefined && existsSync(job.workspace.readOnly[0])));
       this.release();
       return notStarted;
     }
     const call: JobCall = {
       kind: job.kind, cluster: job.label.split(" ")[1]!, prompt: job.prompt, images: job.images, provider: job.choice.provider,
-      workspace: { ...job.workspace, contextFiles: readdirSync(job.workspace.folder), snapshotFiles: readdirSync(job.workspace.readOnly[0]!) },
+      workspace: { ...job.workspace, contextFiles: readdirSync(job.workspace.folder), snapshotFiles: job.workspace.readOnly[0] === undefined ? [] : readdirSync(job.workspace.readOnly[0]) },
     };
     this.calls.push(call);
     const attempt = this.calls.filter((other) => other.kind === call.kind && other.cluster === call.cluster).length;
@@ -169,6 +170,8 @@ export type HarnessOptions = {
   readonly candidateSource?: string;
   /** Runs after triage, before diagnosis, with the fixture repository's folder: an edit made between the build and the diagnosis. */
   readonly afterTriage?: (repository: string) => void;
+  /** The active configurations a new thread stores in its options. */
+  readonly tuning?: DispatchedTuning;
   /** Turns repair on (it is off by default here), with this deadline and fake host for builds and narrow checks. */
   readonly repair?: { readonly deadlineMinutes: number; readonly maxAttempts?: number; readonly host: (root: string) => FakeRepairHost };
   /**
@@ -276,7 +279,7 @@ export function diagnosisHarness(options: HarnessOptions) {
       diagnosis: !command.arguments.noDiagnosis, agents: settings, unattended: command.arguments.unattended, certificates: join(root, "certificates"),
       repair: options.repair === undefined || command.arguments.noRepair ? null : { deadlineMinutes: options.repair.deadlineMinutes, maxAttempts: options.repair.maxAttempts ?? 1 },
       widening: options.repair !== undefined && options.widening !== undefined && !command.arguments.noRepair && !command.arguments.noWidening,
-      fixChanges: command.arguments.fixChanges,
+      fixChanges: command.arguments.fixChanges, ...(options.tuning === undefined ? {} : { tuning: options.tuning }),
     }),
     planCases: () => ({ cases: cases.filter((item) => folders[item.name] !== undefined), excluded: [] }),
     readCase: () => details,

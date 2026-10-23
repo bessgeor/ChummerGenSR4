@@ -1,11 +1,14 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { efforts, providers, type JobKind } from "../agents/agent-job.js";
 import type { AgentSettings } from "../agents/agent-settings.js";
+import { SetupError } from "../host/setup-error.js";
 import type { RunOptions } from "../options/run-options.js";
+import { writeDocument } from "../steps/write-document.js";
+import { dispatchedJobKinds, tunedPromptVersion, tuningOf, type DispatchedTuning } from "../tuning/tuning.js";
 import { metrics, requireMetric, type Metric } from "./metrics.js";
-import { evaluatedJobKinds, promptVersions, readRun, summarize, type EvaluatedJobKind } from "./eval-run.js";
+import { evaluatedJobKinds, missingSamples, promptVersions, readRun, summarize, type EvaluatedJobKind } from "./eval-run.js";
 
 /** A job kind's configuration, certified by an eval run on a test partition for unattended runs. */
 export const CertificateSchema = z.strictObject({
@@ -36,11 +39,38 @@ export function certificatePath(folder: string, jobKind: JobKind): string {
 
 /** Issues a certificate from a complete test-partition run that meets the thresholds, or returns every reason it does not. */
 export function certify(runFolder: string, thresholds: Thresholds, certificatesFolder: string, now: Date): { certificate: Certificate } | { refused: string[] } {
+  const outcome = certificateFor(runFolder, thresholds, now);
+  if ("refused" in outcome) return outcome;
+  writeCertificate(certificatesFolder, outcome.certificate);
+  return outcome;
+}
+
+/** The job kind's certificate in the folder, or null without one; an unreadable or invalid file is a setup error. */
+export function readCertificate(certificatesFolder: string, jobKind: EvaluatedJobKind): Certificate | null {
+  const path = certificatePath(certificatesFolder, jobKind);
+  if (!existsSync(path)) return null;
+  let parsed;
+  try {
+    parsed = CertificateSchema.safeParse(JSON.parse(readFileSync(path, "utf8")));
+  } catch (error) {
+    throw new SetupError(`The certificate ${path} cannot be read: ${(error as Error).message}`);
+  }
+  if (!parsed.success || parsed.data.jobKind !== jobKind) throw new SetupError(`The certificate ${path} is not a valid ${jobKind} certificate.`);
+  return parsed.data;
+}
+
+/** Writes a certificate over its job kind's earlier one. */
+export function writeCertificate(certificatesFolder: string, certificate: Certificate): void {
+  writeDocument(certificatePath(certificatesFolder, certificate.jobKind), CertificateSchema.parse(certificate));
+}
+
+/** The certificate a complete test-partition run that meets the thresholds earns, or every reason it does not; nothing is written. */
+export function certificateFor(runFolder: string, thresholds: Thresholds, now: Date): { certificate: Certificate } | { refused: string[] } {
   const { settings, samples } = readRun(runFolder);
   requireMetric(settings.jobKind, thresholds.metric);
   const summary = summarize(settings.runId, settings.jobKind, samples, now);
   const reasons: string[] = [];
-  const missing = settings.samples.filter((key) => !samples.some((sample) => sample.key === key)).length;
+  const missing = missingSamples(settings, samples).length;
   if (missing > 0) reasons.push(`the run is not complete: ${missing} samples are missing`);
   if (settings.partition !== "test") reasons.push(`the run used the ${settings.partition} partition, not test`);
   const metric = summary.metrics[thresholds.metric];
@@ -62,16 +92,14 @@ export function certify(runFolder: string, thresholds: Thresholds, certificatesF
     metric: thresholds.metric, items: metric.count, passes: metric.passes, rate: metric.rate, interval: metric.interval,
     thresholds: { minPass: thresholds.minPass, maxMeanCostUsd: thresholds.maxMeanCostUsd }, meanCostUsd, issuedUtc: now.toISOString(),
   });
-  mkdirSync(certificatesFolder, { recursive: true });
-  writeFileSync(certificatePath(certificatesFolder, settings.jobKind), `${JSON.stringify(certificate, null, 2)}\n`);
   return { certificate };
 }
 
 /**
  * Why each job kind may not be dispatched unattended: no certificate, an invalid one, or one for another agent
- * choice or prompt version than the run's. An empty list lets the run start.
+ * choice or prompt version than the run's (the tuned version when the run dispatches a configuration). An empty list lets the run start.
  */
-export function certificateProblems(folder: string, jobKinds: readonly EvaluatedJobKind[], agents: AgentSettings): string[] {
+export function certificateProblems(folder: string, jobKinds: readonly EvaluatedJobKind[], agents: AgentSettings, tuning?: DispatchedTuning): string[] {
   const problems: string[] = [];
   for (const jobKind of jobKinds) {
     const path = certificatePath(folder, jobKind);
@@ -96,19 +124,13 @@ export function certificateProblems(folder: string, jobKinds: readonly Evaluated
       ["provider", certified.agent.provider, choice.provider],
       ["model", certified.agent.model ?? "default", choice.model ?? "default"],
       ["effort", certified.agent.effort, choice.effort],
-      ["prompt version", certified.promptVersion, promptVersions[jobKind]],
+      ["prompt version", certified.promptVersion, tunedPromptVersion(promptVersions[jobKind], tuningOf(tuning, jobKind))],
     ].filter(([, left, right]) => left !== right);
     if (differences.length > 0) {
       problems.push(`${jobKind}: the certificate is for ${differences.map(([field, left, right]) => `${field} ${left}, the run uses ${right}`).join("; ")}`);
     }
   }
   return problems;
-}
-
-/** The job kinds a run's diagnosis dispatches: none without diagnosis or with --only of an earlier node. */
-export function dispatchedJobKinds(options: Pick<RunOptions, "diagnosis" | "only">): ("hypothesis" | "challenge")[] {
-  if (!options.diagnosis || (options.only !== null && options.only !== "diagnose")) return [];
-  return ["hypothesis", "challenge"];
 }
 
 /** The one field of a run's stored options the gate reads; options that do not state `unattended` are not unattended. */
@@ -122,7 +144,7 @@ export function dispatchesRepair(options: Pick<RunOptions, "diagnosis" | "only" 
 /** Why an unattended run may not start; empty for a run that is not unattended. No certificate covers repair jobs. */
 export function unattendedProblems(options: RunOptions): string[] {
   if (!UnattendedFlagSchema.parse(options).unattended) return [];
-  const problems = certificateProblems(options.certificates, dispatchedJobKinds(options), options.agents);
+  const problems = certificateProblems(options.certificates, dispatchedJobKinds(options), options.agents, options.tuning);
   if (dispatchesRepair(options)) problems.push("repair: no certificate covers repair jobs, so an unattended run cannot repair; add --no-repair");
   return problems;
 }

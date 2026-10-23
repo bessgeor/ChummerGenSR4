@@ -12,6 +12,8 @@ export const ProfileSchema = z.strictObject({
   agents: AgentsProfileSchema.optional(),
   /** The folder of the certificates that unattended runs need. */
   certificates: z.string().min(1).optional(),
+  /** The folder of the active tuning configurations and the holdout ledger. */
+  tuning: z.string().min(1).optional(),
   repair: z.strictObject({
     /** How long a repair attempt's model job and build may take together, in minutes; capped like a job's time limit. */
     deadlineMinutes: z.number().positive().max(35_000).optional(),

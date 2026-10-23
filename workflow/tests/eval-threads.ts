@@ -59,7 +59,7 @@ export function writeRun(folder: string, settings: Partial<RunSettings>, values:
   const keys = values.flatMap((_, index) => repetitions.map((repetition) => `i${index}-${repetition}`));
   const full: RunSettings = {
     schemaVersion: 1, runId: folder.split(/[\\/]/).pop()!, name: null, dataset: { folder: "d", name: "d", version: 1, hash: "h" }, jobKind: "hypothesis", partition: "test",
-    repeat, choice: { provider: "claude", model: null, effort: "medium", timeoutMinutes: 30 }, promptVersion: "hypothesis-v2", modelPool: 2,
+    repeat, choice: { provider: "claude", model: null, effort: "medium", timeoutMinutes: 30 }, promptVersion: "hypothesis-v2", tuning: null, modelPool: 2,
     executables: { claude: "claude", codex: null }, samples: keys, startedUtc: "t", ...settings,
   };
   writeFileSync(runFolders(folder).settings, JSON.stringify(full));

@@ -2,8 +2,9 @@ import type { PromptPaths } from "../diagnosis/prompts.js";
 import type { RankContext, ScenarioContext } from "./discovery-context.js";
 import { rankPromptVersion, scenarioPromptVersion } from "./job-schemas.js";
 import { maximumActions, maximumCaptures, maximumWaitMilliseconds } from "./plan-validator.js";
+import { contextSection, guidanceSection, printsContext, tunedPromptVersion, type Tuning } from "../tuning/tuning.js";
 
-function situation(paths: PromptPaths, extra: string): string[] {
+function situation(paths: PromptPaths, extra: string, contextPrinted: boolean): string[] {
   const folders = paths.compiledFolders.map((folder) => `${folder}/`);
   return [
     "ChummerGenSR4 is a Windows Forms character generator. A test suite opens character files in the app (build mode in frmCreate, career mode",
@@ -18,7 +19,7 @@ function situation(paths: PromptPaths, extra: string): string[] {
     "select rows, edit values or open dialogs. Whatever a control needs beyond that is out of reach.",
     "",
     "What you can read (read only; never change, create or delete a file):",
-    `- ${paths.contextFolder}: your working folder. context.json is the sealed context printed below${extra}; fixtures/ holds each fixture`,
+    `- ${paths.contextFolder}: your working folder. context.json is the sealed context${contextPrinted ? " printed below" : " (read it: it is not printed here)"}${extra}; fixtures/ holds each fixture`,
     "  case's character file (fixtures[].copy.path). Read a file for the traits the code checks before it shows a page or control.",
     `- ${paths.snapshotFolder}: the app's source snapshot (${folders.join(" and ")} ${folders.length === 1 ? "is" : "are"} the C# source with the designer files,`,
     "  bin/data/ and bin/lang/ its data and translations). Read the code that shows, hides, renames or fills a page or control.",
@@ -43,11 +44,11 @@ function priorsSection(value: RankContext, paths: PromptPaths): string[] {
   ];
 }
 
-/** The prompt of the rank job: the versioned instructions and the sealed context with every target. */
-export function rankPrompt(value: RankContext, paths: PromptPaths): string {
+/** The prompt of the rank job: the versioned instructions, the tuned guidance and the sealed context with every target. */
+export function rankPrompt(value: RankContext, paths: PromptPaths, tuning: Tuning | null = null): string {
   return [
-    `PROMPT_VERSION=${rankPromptVersion}`,
-    ...situation(paths, ""),
+    `PROMPT_VERSION=${tunedPromptVersion(rankPromptVersion, tuning)}`,
+    ...situation(paths, "", printsContext(tuning)),
     "",
     "Rank every target in targets[] exactly once by how likely a scenario of these actions, on one of the fixture cases, shows it.",
     `Answer rankings in the order of targets[]: ${value.targets.length} entries, the k-th for the k-th target; never repeat a targetId.`,
@@ -56,15 +57,16 @@ export function rankPrompt(value: RankContext, paths: PromptPaths): string {
     "fixture case you would use, or null) and reason (what in the source and the fixtures supports your score).",
     "The fixtures' selectedTabs and captures show what the suite already selects; tabTexts lists the tab texts a scenario may select.",
     ...priorsSection(value, paths),
-    ...context(value),
+    ...guidanceSection(tuning),
+    ...contextSection(tuning, context(value)),
   ].join("\n");
 }
 
-/** The prompt of a scenario job: the versioned instructions and its target's sealed context. */
-export function scenarioPrompt(value: ScenarioContext, paths: PromptPaths): string {
+/** The prompt of a scenario job: the versioned instructions, the tuned guidance and its target's sealed context. */
+export function scenarioPrompt(value: ScenarioContext, paths: PromptPaths, tuning: Tuning | null = null): string {
   return [
-    `PROMPT_VERSION=${scenarioPromptVersion}`,
-    ...situation(paths, "; labels.json lists every text a waitFor may name"),
+    `PROMPT_VERSION=${tunedPromptVersion(scenarioPromptVersion, tuning)}`,
+    ...situation(paths, "; labels.json lists every text a waitFor may name", printsContext(tuning)),
     "",
     "Propose one scenario that shows the target (target in the context; its rank says why it was chosen).",
     "Answer with outcome \"plan\", a reason and a plan, or with outcome \"abstain\", the reason and no plan when no scenario of these actions",
@@ -75,6 +77,7 @@ export function scenarioPrompt(value: ScenarioContext, paths: PromptPaths): stri
     `(name: lower-case letters, digits and dashes); every field the type does not take is null, and optional is always null; 1 to ${maximumCaptures}`,
     "captures with different names; the last action is a capture. The case starts with the character open on its first tab, as the fixture's",
     "own actions do; after a selectTab, wait for a label of the new page before you capture it.",
-    ...context(value),
+    ...guidanceSection(tuning),
+    ...contextSection(tuning, context(value)),
   ].join("\n");
 }

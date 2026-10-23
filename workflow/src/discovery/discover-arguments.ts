@@ -2,7 +2,8 @@ import { CommandOptions } from "../evals/command-options.js";
 import { SetupError } from "../host/setup-error.js";
 import type { Arguments } from "../options/arguments.js";
 import type { Environment, Profile } from "../options/profile.js";
-import { resolveRunOptions } from "../options/run-options.js";
+import { resolveRunOptions, tuningFolder } from "../options/run-options.js";
+import { readDispatchedTuning } from "../tuning/active-configuration.js";
 import type { DiscoveryOptions } from "./discovery-state.js";
 
 const discoverHelp = "npm run discover -- --help";
@@ -69,5 +70,6 @@ export function resolveDiscoveryOptions(args: DiscoverArguments, profile: Profil
   return {
     from: args.from, caseFile: resolved.caseFile, settingsOverlay: resolved.settingsOverlay, threshold: resolved.threshold, canonicalCache: resolved.canonicalCache,
     canonicalCacheSource: resolved.canonicalCacheSource, targets: args.targets, unattended: args.unattended, agents: resolved.agents, certificates: resolved.certificates,
+    tuning: readDispatchedTuning(tuningFolder(profile, repositoryRoot), ["rank", "scenario"]),
   };
 }

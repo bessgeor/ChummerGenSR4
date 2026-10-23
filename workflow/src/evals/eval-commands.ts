@@ -1,30 +1,27 @@
-import type { BaseStore } from "@langchain/langgraph-checkpoint";
 import { randomBytes } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import type { AgentSettings } from "../agents/agent-settings.js";
-import type { AgentRunners } from "../agents/agent-runners.js";
-import type { QuotaWaiter } from "../diagnosis/quota-waiter.js";
-import type { Git } from "../diagnosis/source-snapshot.js";
-import type { ScratchFolder } from "../host/scratch-folder.js";
 import { discoveryPaths } from "../discovery/discovery-paths.js";
 import { SetupError } from "../host/setup-error.js";
-import type { WorkflowPaths } from "../paths.js";
 import { addBenchmarkItem, checkBenchmarkItem, readBenchmark } from "./benchmark.js";
 import { CommandOptions } from "./command-options.js";
+import { runDependencies, type EvalContext } from "./eval-context.js";
 import { listRecords } from "./eval-record.js";
 import { certify as issueCertificate } from "./certificate.js";
 import { comparisonLines, compareRuns, metrics } from "./comparison.js";
 import { metricsOfJobKind } from "./metrics.js";
 import { freezeDataset } from "./dataset.js";
 import { freezeDiscoveryDataset } from "./discovery-dataset.js";
-import { readRun, resumeEvalRun, runPartitions, startEvalRun, summaryLines } from "./eval-run.js";
+import { datasetJobKind, readRun, resumeEvalRun, runPartitions, startEvalRun, summaryLines, type StartRun } from "./eval-run.js";
 import { gradeRecords } from "./grader.js";
 import { labelHindsight } from "./hindsight.js";
 import { recordSummary } from "./record-summary.js";
 import { snapshotBaseCheck } from "./snapshot-base.js";
 import { compareThreads, threadComparisonLines, threadMeasures } from "./thread-comparison.js";
 import { defaultQueueOptions, queueLines, reviewQueue } from "./review-queue.js";
+import { requireNoHoldoutExposure, selectedTuning } from "../tuning/run-tuning.js";
+import { activeOf, measuredOf } from "../tuning/holdout.js";
+import { runTuneCommand, tuneUsage } from "../tuning/tune-commands.js";
 
 export const evalUsage = `Usage: npm run eval -- <command> [options]
 
@@ -39,8 +36,9 @@ export const evalUsage = `Usage: npm run eval -- <command> [options]
                                   print the review queue (npm run review shows it)
   freeze --job <hypothesis|challenge|rank|scenario> --name <name> [--seed <text>] [--test-percent <0-100>] [--reason <text>]
                                   freeze the next version of a dataset under out/evals/datasets/<name>/
-  run --dataset <folder> [--partition test|development|all] [--repeat <n>] [--name <text>]
-                                  run the current prompt with the profile's agent choice on a dataset (out/evals/runs/<run>/)
+  run --dataset <folder> [--partition test|development|all] [--repeat <n>] [--name <text>] [--tuning active|none|<candidate>]
+                                  run the current prompt with the profile's agent choice on a dataset (out/evals/runs/<run>/),
+                                  with the active tuning configuration (default), the code's prompt or a candidate (not on test)
   run --resume <run>              finish a stopped eval run with its stored settings
   compare --baseline <run> --candidate <run> [--metric prediction|rootCause|valid|reached]  (default: prediction, or valid for rank and scenario runs)
                                   paired comparison of two eval runs with a 95% confidence interval
@@ -49,25 +47,11 @@ export const evalUsage = `Usage: npm run eval -- <command> [options]
                                   fix rate and model time, with 95% confidence intervals
   certify --run <run> --metric prediction|rootCause|valid|reached --min-pass <0-1> [--max-mean-cost-usd <usd>]
                                   certify the run's job kind configuration for unattended runs (npm start or npm run discover -- --unattended)
+${tuneUsage}
 
-Exit status: 0 done, 1 certificate refused, 2 a grader job failed, 3 setup error.`;
+Exit status: 0 done, 1 certificate, holdout or activation refused, 2 a grader or tune job failed, 3 setup error.`;
 
-/** What the evaluation commands use; the composition root makes the real ones. */
-export type EvalContext = {
-  readonly paths: WorkflowPaths;
-  readonly store: BaseStore;
-  readonly git: Git;
-  readonly now: () => Date;
-  readonly log: (line: string) => void;
-  /** The agent settings of the local profile, read when a command needs them. */
-  readonly agentSettings: () => AgentSettings;
-  /** The certificates folder of the local profile, or the repository's. */
-  readonly certificatesFolder: () => string;
-  readonly agents: AgentRunners;
-  readonly quota: QuotaWaiter;
-  readonly createScratchFolder: (prefix: string) => ScratchFolder;
-  readonly signal?: AbortSignal;
-};
+export type { EvalContext } from "./eval-context.js";
 
 type Command = (args: readonly string[], context: EvalContext) => Promise<number>;
 
@@ -171,29 +155,27 @@ async function freezeDiscovery(options: CommandOptions, jobKind: "rank" | "scena
   return 0;
 }
 
-function runDependencies(context: EvalContext) {
-  return {
-    store: context.store, agents: context.agents, quota: context.quota, runsFolder: join(context.paths.evalsFolder, "runs"),
-    createScratchFolder: context.createScratchFolder, now: context.now, log: context.log,
-    newRunId: () => `er-${context.now().toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "")}-${randomBytes(4).toString("hex")}`,
-    ...(context.signal === undefined ? {} : { signal: context.signal }),
-  };
+/** How `run` starts: the dataset, partition and repetitions, and the configuration `--tuning` names (a candidate never on the holdout). */
+function runStart(options: CommandOptions, context: EvalContext): StartRun {
+  const datasetFolder = resolve(options.required("dataset"));
+  const partition = options.choice("partition", runPartitions, "test");
+  const jobKind = datasetJobKind(datasetFolder);
+  const tuning = selectedTuning(options.text("tuning") ?? "active", jobKind, { tuningFolder: context.tuningFolder(), evalsFolder: context.paths.evalsFolder });
+  requireNoHoldoutExposure(tuning, jobKind, partition, context.tuningFolder());
+  return { datasetFolder, partition, repeat: options.number("repeat", 1, 1, 100, true), name: options.text("name"), settings: context.agentSettings(), tuning };
 }
 
 const run: Command = async (args, context) => {
-  const options = CommandOptions.parse("run", args, ["dataset", "partition", "repeat", "name", "resume"]);
+  const options = CommandOptions.parse("run", args, ["dataset", "partition", "repeat", "name", "resume", "tuning"]);
   const resumed = options.text("resume");
   if (resumed !== null) {
-    for (const other of ["dataset", "partition", "repeat", "name"]) {
+    for (const other of ["dataset", "partition", "repeat", "name", "tuning"]) {
       if (options.text(other) !== null) throw new SetupError(`--resume takes no --${other}: a run keeps the settings it started with.`);
     }
   }
   const { folder, summary } = resumed !== null
     ? await resumeEvalRun(runDependencies(context), resumed)
-    : await startEvalRun(runDependencies(context), {
-      datasetFolder: resolve(options.required("dataset")), partition: options.choice("partition", runPartitions, "test"),
-      repeat: options.number("repeat", 1, 1, 100, true), name: options.text("name"), settings: context.agentSettings(),
-    });
+    : await startEvalRun(runDependencies(context), runStart(options, context));
   for (const line of summaryLines(summary)) context.log(line);
   context.log(`Run folder: ${folder}`);
   return 0;
@@ -240,6 +222,13 @@ const certify: Command = async (args, context) => {
   options.required("metric");
   options.required("min-pass");
   const folder = context.certificatesFolder();
+  // A job kind's certificate covers what it dispatches: a candidate is certified by tune activate, and nothing else while a configuration is active.
+  const { settings } = readRun(join(context.paths.evalsFolder, "runs", options.required("run")));
+  const active = activeOf(context.tuningFolder(), settings.jobKind);
+  if (measuredOf(settings) !== active) {
+    context.log(`Certificate refused:\n  the run measured ${measuredOf(settings)}, but ${active} is active for ${settings.jobKind}; a candidate is certified by tune activate`);
+    return 1;
+  }
   const outcome = issueCertificate(join(context.paths.evalsFolder, "runs", options.required("run")), {
     metric: options.choice("metric", metrics, "prediction"), minPass: options.number("min-pass", 0, 0, 1),
     maxMeanCostUsd: options.text("max-mean-cost-usd") === null ? null : options.number("max-mean-cost-usd", 0, Number.MIN_VALUE, Number.MAX_VALUE),
@@ -255,7 +244,9 @@ const certify: Command = async (args, context) => {
   return 0;
 };
 
-const commands: Readonly<Record<string, Command>> = { records, benchmark, hindsight, grade, queue, freeze, run, compare, "compare-threads": compareThreadsCommand, certify };
+const commands: Readonly<Record<string, Command>> = {
+  records, benchmark, hindsight, grade, queue, freeze, run, compare, "compare-threads": compareThreadsCommand, certify, tune: runTuneCommand,
+};
 
 /** Runs one evaluation command and returns its exit status; a setup error is thrown. */
 export async function runEvalCommand(args: readonly string[], context: EvalContext): Promise<number> {
