@@ -11,7 +11,7 @@ namespace Chummer
 	/// <summary>
 	/// Character Attribute.
 	/// </summary>
-	public class Attribute
+	public class Attribute : IImprovementAttribute
 	{
 		private int _intMetatypeMin = 1;
 		private int _intMetatypeMax = 6;
@@ -1773,7 +1773,7 @@ namespace Chummer
 	/// <summary>
 	/// Object that represents a single Skill.
 	/// </summary>
-	public class Skill
+	public class Skill : IImprovementSkill
 	{
 		private string _strSkillGroup = "";
 		private string _strSkillCategory = "";

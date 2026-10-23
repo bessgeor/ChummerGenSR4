@@ -4177,7 +4177,7 @@ namespace Chummer
 	/// <summary>
 	/// A Weapon.
 	/// </summary>
-	public class Weapon
+	public class Weapon : IImprovementWeapon
 	{
 		private Guid _guiID = new Guid();
 		private string _strName = "";

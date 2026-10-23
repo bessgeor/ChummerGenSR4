@@ -42,5 +42,10 @@ namespace Chummer
 		/// </summary>
 		/// <param name="objObject">Object to translate.</param>
 		void TranslateControls(object objObject);
+
+		/// <summary>
+		/// The dialogs that ask the user for the selections of improvement bonuses.
+		/// </summary>
+		IImprovementDialogs ImprovementDialogs { get; }
 	}
 }
