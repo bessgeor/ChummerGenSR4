@@ -35,6 +35,37 @@ public sealed class SideExecutorTests : IDisposable
     }
 
     [Fact]
+    public void Rich_actions_reach_the_session_in_order()
+    {
+        SideRun run = Run(Case(
+            new CaptureAction("before"),
+            new SetValueAction("txtCharacterName", "Example"),
+            new SelectItemAction("treGear", "Commlink"),
+            new ContextMenuAction("treGear", "Add as Plugin"),
+            new ClickAction("cmdCancel"),
+            new CaptureAction("after")));
+
+        Assert.False(run.Failed);
+        Assert.All(run.Actions, action => Assert.Equal(OutcomeKind.Performed, action.Outcome));
+        Assert.Equal(
+            ["capture", "setValue:txtCharacterName=Example", "selectItem:treGear=Commlink", "contextMenu:treGear=Add as Plugin", "click:cmdCancel", "capture"],
+            _driver.Calls.Skip(1));
+    }
+
+    [Fact]
+    public void Failed_rich_action_stops_the_side()
+    {
+        _driver.MissingControls.Add("cmdAddGear");
+
+        SideRun run = Run(Case(new ClickAction("cmdAddGear"), new CaptureAction("dialog")));
+
+        Assert.True(run.Failed);
+        Assert.Equal([OutcomeKind.Failed, OutcomeKind.NotRun], run.Actions.Select(action => action.Outcome));
+        Assert.Equal("InvalidOperationException: No enabled control 'cmdAddGear' is on screen.", run.Actions[0].Reason);
+        Assert.Equal("action 0 (click:cmdAddGear): InvalidOperationException: No enabled control 'cmdAddGear' is on screen.", run.Failure);
+    }
+
+    [Fact]
     public void Absent_optional_tab_skips_its_wait_and_capture_but_not_the_next_tab()
     {
         _driver.Tabs.Add("Cyberware and Bioware");

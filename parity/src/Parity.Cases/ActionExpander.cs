@@ -76,6 +76,21 @@ public sealed class ActionExpander
             case CaseActionType.Capture:
                 Allow(action, location, name: true);
                 return new CaptureAction(action.Name!);
+            case CaseActionType.SetValue:
+                Allow(action, location, control: true, value: true);
+                return new SetValueAction(action.Control!, action.Value!);
+            case CaseActionType.Click:
+                Allow(action, location, control: true);
+                return new ClickAction(action.Control!);
+            case CaseActionType.SelectItem:
+                Allow(action, location, control: true, item: true);
+                return new SelectItemAction(action.Control!, action.Item!);
+            case CaseActionType.ContextMenu:
+                Allow(action, location, control: true, item: true);
+                return new ContextMenuAction(action.Control!, action.Item!);
+            case CaseActionType.SaveReload:
+                Allow(action, location);
+                return new SaveReloadAction();
             default:
                 throw new InvalidDataException($"{location}: action type {action.Type} cannot be mapped.");
         }
@@ -88,11 +103,17 @@ public sealed class ActionExpander
         bool name = false,
         bool label = false,
         bool milliseconds = false,
-        bool optional = false)
+        bool optional = false,
+        bool control = false,
+        bool value = false,
+        bool item = false)
     {
         Check(location, action.Type, "name", name, action.Name is not null);
         Check(location, action.Type, "label", label, action.Label is not null);
         Check(location, action.Type, "milliseconds", milliseconds, action.Milliseconds is not null);
+        Check(location, action.Type, "control", control, action.Control is not null);
+        Check(location, action.Type, "value", value, action.Value is not null);
+        Check(location, action.Type, "item", item, action.Item is not null);
         if (!optional && action.Optional is not null)
         {
             throw new InvalidDataException($"{location}: '{Wire(action.Type)}' does not take 'optional'.");
@@ -119,6 +140,11 @@ public sealed class ActionExpander
         CaseActionType.Wait => "wait",
         CaseActionType.Capture => "capture",
         CaseActionType.Include => "include",
+        CaseActionType.SetValue => "setValue",
+        CaseActionType.Click => "click",
+        CaseActionType.SelectItem => "selectItem",
+        CaseActionType.ContextMenu => "contextMenu",
+        CaseActionType.SaveReload => "saveReload",
         _ => type.ToString(),
     };
 }

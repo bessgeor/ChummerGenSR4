@@ -286,7 +286,7 @@ public sealed class CanonicalCaptureCacheTests : IDisposable
             Path.Combine(_root, "candidate.exe"),
             new string('1', 64),
             null,
-            new Dictionary<string, string> { [_case.Name] = _case.CharacterPath });
+            new Dictionary<string, CharacterCopy> { [_case.Name] = new(_case.CharacterPath, _case.CharacterPath) });
         CaseRunner runner = new(
             new SideExecutor(_driver),
             new VisualResultBuilder(new PixelComparer()),

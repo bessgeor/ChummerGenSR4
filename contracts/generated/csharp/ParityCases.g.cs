@@ -70,10 +70,28 @@ namespace Parity.Contracts.ParityCases
 
     /// <summary>
     /// One UI action. selectTab and capture use name; include uses name (a sequence); waitFor
-    /// uses label; wait uses milliseconds; optional applies to selectTab only.
+    /// uses label; wait uses milliseconds; optional applies to selectTab only. setValue uses
+    /// control and value; click uses control; selectItem and contextMenu use control and item;
+    /// saveReload takes no field.
     /// </summary>
     public partial class CaseAction
     {
+        /// <summary>
+        /// A control's WinForms name, which UI Automation reports as its automation ID.
+        /// </summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        [JsonPropertyName("control")]
+        [JsonConverter(typeof(MinMaxLengthCheckConverter))]
+        public string? Control { get; set; }
+
+        /// <summary>
+        /// The name of a list, combo box, tree or menu item, without accelerator ampersands.
+        /// </summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        [JsonPropertyName("item")]
+        [JsonConverter(typeof(MinMaxLengthCheckConverter))]
+        public string? Item { get; set; }
+
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         [JsonPropertyName("label")]
         [JsonConverter(typeof(MinMaxLengthCheckConverter))]
@@ -95,6 +113,13 @@ namespace Parity.Contracts.ParityCases
         [JsonRequired]
         [JsonPropertyName("type")]
         public CaseActionType Type { get; set; }
+
+        /// <summary>
+        /// The text setValue gives the control.
+        /// </summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        [JsonPropertyName("value")]
+        public string? Value { get; set; }
     }
 
     public partial class CharacterEntry
@@ -126,7 +151,7 @@ namespace Parity.Contracts.ParityCases
         public string? Scenario { get; set; }
     }
 
-    public enum CaseActionType { Capture, Include, SelectTab, Wait, WaitFor };
+    public enum CaseActionType { Capture, Click, ContextMenu, Include, SaveReload, SelectItem, SelectTab, SetValue, Wait, WaitFor };
 
     /// <summary>
     /// build: the character is still being created; career: &lt;created&gt; is True.
@@ -196,10 +221,20 @@ namespace Parity.Contracts.ParityCases
             {
                 case "capture":
                     return CaseActionType.Capture;
+                case "click":
+                    return CaseActionType.Click;
+                case "contextMenu":
+                    return CaseActionType.ContextMenu;
                 case "include":
                     return CaseActionType.Include;
+                case "saveReload":
+                    return CaseActionType.SaveReload;
+                case "selectItem":
+                    return CaseActionType.SelectItem;
                 case "selectTab":
                     return CaseActionType.SelectTab;
+                case "setValue":
+                    return CaseActionType.SetValue;
                 case "wait":
                     return CaseActionType.Wait;
                 case "waitFor":
@@ -215,11 +250,26 @@ namespace Parity.Contracts.ParityCases
                 case CaseActionType.Capture:
                     JsonSerializer.Serialize(writer, "capture", options);
                     return;
+                case CaseActionType.Click:
+                    JsonSerializer.Serialize(writer, "click", options);
+                    return;
+                case CaseActionType.ContextMenu:
+                    JsonSerializer.Serialize(writer, "contextMenu", options);
+                    return;
                 case CaseActionType.Include:
                     JsonSerializer.Serialize(writer, "include", options);
                     return;
+                case CaseActionType.SaveReload:
+                    JsonSerializer.Serialize(writer, "saveReload", options);
+                    return;
+                case CaseActionType.SelectItem:
+                    JsonSerializer.Serialize(writer, "selectItem", options);
+                    return;
                 case CaseActionType.SelectTab:
                     JsonSerializer.Serialize(writer, "selectTab", options);
+                    return;
+                case CaseActionType.SetValue:
+                    JsonSerializer.Serialize(writer, "setValue", options);
                     return;
                 case CaseActionType.Wait:
                     JsonSerializer.Serialize(writer, "wait", options);

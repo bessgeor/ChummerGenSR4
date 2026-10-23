@@ -1,12 +1,27 @@
 import { SetupError } from "../host/setup-error.js";
-import type { CoverageManifest, ExerciseProof, ManifestControl, ManifestInteraction, TupleStatus } from "./coverage-manifest-document.js";
-import type { CaptureObservation, RunObservation } from "./run-observations.js";
+import type { ActionProof, CoverageManifest, ExerciseProof, ManifestControl, ManifestInteraction, TabProof, TupleStatus } from "./coverage-manifest-document.js";
+import type { ActionObservation, CaptureObservation, RunObservation } from "./run-observations.js";
 import { checkScope, deferral, type Scope } from "./scope.js";
 import type { SourceInventory } from "./source-inventory-document.js";
 import { ClassIndex, isWindowless, matchTree, type TreeMatch } from "./tree-matching.js";
 
 /** The events a tab control raises when its selected page changes. */
 export const selectionEvents: ReadonlySet<string> = new Set(["SelectedIndexChanged", "Selected", "Selecting", "Deselecting", "Deselected"]);
+
+/** The events each acting action raises on its control; the capture runner fails the action when it changed nothing. */
+export const actionEvents: Readonly<Record<string, readonly string[]>> = {
+  setValue: ["TextChanged", "ValueChanged"],
+  click: ["Click"],
+  selectItem: ["SelectedIndexChanged", "SelectedValueChanged", "AfterSelect"],
+};
+
+/** Actions that may stand between an acting action and the capture that shows its control. */
+const passiveActions: readonly string[] = ["wait:", "waitFor:"];
+
+/** Whether an action changes the app other than by selecting a tab: it may change the visible page by itself. */
+function changesTheApp(action: string): boolean {
+  return actingTarget(action) !== null || action.startsWith("contextMenu:") || action === "saveReload";
+}
 
 /** A case as planned: its captures in action order. */
 export type PlannedCaptures = { readonly name: string; readonly mode: "build" | "career"; readonly captures: readonly string[] };
@@ -22,7 +37,12 @@ export type ManifestInput = {
 
 type Seen = { readonly case: string; readonly capture: string };
 /** A planned case's run with the case's captures and the action indexes of its tab selections. */
-type CaseRun = { readonly run: RunObservation; readonly captures: readonly CaptureObservation[]; readonly selectTabs: readonly number[] };
+type CaseRun = {
+  readonly run: RunObservation;
+  readonly captures: readonly CaptureObservation[];
+  readonly selectTabs: readonly number[];
+  readonly actions: readonly ActionObservation[];
+};
 type Matched = CaptureObservation & { readonly actionIndex: number; readonly match: TreeMatch };
 
 /** Each planned case's run; a case in two runs, or a run's case that no plan holds, is a setup error. */
@@ -34,7 +54,7 @@ function runsByCase(plan: readonly PlannedCaptures[], runs: readonly RunObservat
       if (!planned.has(item.case)) throw new SetupError(`The capture run ${run.runFolder} holds the case ${item.case}, which no plan holds.`);
       const other = found.get(item.case);
       if (other !== undefined) throw new SetupError(`The case ${item.case} is in two capture runs: ${other.run.runFolder} and ${run.runFolder}.`);
-      found.set(item.case, { run, captures: item.captures, selectTabs: item.selectTabs });
+      found.set(item.case, { run, captures: item.captures, selectTabs: item.selectTabs, actions: item.actions });
     }
   }
   return found;
@@ -46,18 +66,56 @@ function appendTo<Value>(map: Map<string, Value[]>, key: string, value: Value): 
   else list.push(value);
 }
 
-/** The proofs that a `selectTab` changed a tab control's visible page between two consecutive performed captures of a case. */
-function exerciseProofs(caseName: string, matched: readonly Matched[], selectTabs: readonly number[], into: Map<string, ExerciseProof[]>): void {
+/**
+ * The proofs that a `selectTab` changed a tab control's visible page between two consecutive performed captures of a
+ * case; an action between them that changes the app otherwise could have changed the page too, so it leaves no proof.
+ */
+function exerciseProofs(
+  caseName: string, matched: readonly Matched[], selectTabs: readonly number[], actions: readonly ActionObservation[], into: Map<string, TabProof[]>,
+): void {
   for (let position = 1; position < matched.length; position++) {
     const from = matched[position - 1]!;
     const to = matched[position]!;
     if (!selectTabs.some((index) => index > from.actionIndex && index < to.actionIndex)) continue;
+    if (actions.some((record) => record.index > from.actionIndex && record.index < to.actionIndex && changesTheApp(record.action))) continue;
     for (const [tabControl, toPage] of to.match.pages) {
       const fromPage = from.match.pages.get(tabControl);
       if (fromPage === undefined || fromPage === toPage) continue;
       appendTo(into, tabControl, { case: caseName, from: from.capture, to: to.capture, fromPage, toPage });
     }
   }
+}
+
+/** An acting action's type and control, from its description `<type>:<control>` or `<type>:<control>=<text>`. */
+function actingTarget(action: string): { readonly type: string; readonly control: string } | null {
+  const colon = action.indexOf(":");
+  const type = action.slice(0, colon);
+  if (colon < 0 || actionEvents[type] === undefined) return null;
+  const rest = action.slice(colon + 1);
+  const equals = rest.indexOf("=");
+  return { type, control: equals < 0 ? rest : rest.slice(0, equals) };
+}
+
+/**
+ * The proofs of performed `setValue`, `click` and `selectItem` actions, keyed `<Class>.<control>\n<event>`: the latest
+ * performed capture before the action, with only `wait` and `waitFor` actions after it, must have matched the control
+ * in exactly one class. With two, the runner acted on one of them, and the tree cannot tell which.
+ */
+function actionProofs(caseName: string, matched: readonly Matched[], actions: readonly ActionObservation[], into: Map<string, ActionProof[]>): void {
+  const byIndex = new Map(matched.map((item) => [item.actionIndex, item]));
+  actions.forEach((record, position) => {
+    const target = record.outcome === "performed" ? actingTarget(record.action) : null;
+    if (target === null) return;
+    let before = position - 1;
+    while (before >= 0 && passiveActions.some((prefix) => actions[before]!.action.startsWith(prefix))) before--;
+    const capture = before < 0 ? undefined : byIndex.get(actions[before]!.index);
+    if (capture === undefined) return;
+    const controls = [...capture.match.controls].filter((control) => control.slice(control.indexOf(".") + 1) === target.control);
+    if (controls.length !== 1) return;
+    for (const event of actionEvents[target.type]!) {
+      appendTo(into, `${controls[0]}\n${event}`, { case: caseName, capture: capture.capture, action: record.action, actionIndex: record.index });
+    }
+  });
 }
 
 /**
@@ -72,7 +130,8 @@ export function buildCoverageManifest(input: ManifestInput): CoverageManifest {
 
   const tuples: CoverageManifest["tuples"] = [];
   const seen = new Map<string, Seen[]>();
-  const proofs = new Map<string, ExerciseProof[]>();
+  const proofs = new Map<string, TabProof[]>();
+  const acted = new Map<string, ActionProof[]>();
   const unresolved: CoverageManifest["unresolved"] = [];
   for (const planned of input.plan) {
     const found = cases.get(planned.name);
@@ -92,7 +151,8 @@ export function buildCoverageManifest(input: ManifestInput): CoverageManifest {
       for (const control of item.match.controls) appendTo(seen, control, { case: planned.name, capture: item.capture });
       if (item.match.unresolved.length > 0) unresolved.push({ case: planned.name, capture: item.capture, automationIds: [...item.match.unresolved] });
     }
-    exerciseProofs(planned.name, matched, found.selectTabs, proofs);
+    exerciseProofs(planned.name, matched, found.selectTabs, found.actions, proofs);
+    actionProofs(planned.name, matched, found.actions, acted);
   }
 
   const controls: ManifestControl[] = [];
@@ -115,9 +175,12 @@ export function buildCoverageManifest(input: ManifestInput): CoverageManifest {
       };
       const why = deferral(scope, item.name, interaction.event);
       if (why !== null) return { ...base, status: "deferred", reason: why };
-      const proven = interaction.target !== null && interaction.member === null && selectionEvents.has(interaction.event)
-        ? proofs.get(`${item.name}.${interaction.target}`) : undefined;
-      return proven === undefined ? { ...base, status: "unexercised" } : { ...base, status: "exercised", proofs: proven };
+      const direct = interaction.target !== null && interaction.member === null;
+      const proven: ExerciseProof[] = [
+        ...(direct && selectionEvents.has(interaction.event) ? proofs.get(`${item.name}.${interaction.target}`) ?? [] : []),
+        ...(direct ? acted.get(`${item.name}.${interaction.target}\n${interaction.event}`) ?? [] : []),
+      ];
+      return proven.length === 0 ? { ...base, status: "unexercised" } : { ...base, status: "exercised", proofs: proven };
     });
     controls.push(...classControls);
     interactions.push(...classInteractions);

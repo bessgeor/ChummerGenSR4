@@ -46,7 +46,7 @@ export function knownTabTexts(className: string, inventory: SourceInventory, man
   const designer = item.controls.filter((control) => control.type.endsWith("TabPage")).map((control) => control.text ?? "");
   const language = strings.filter((entry) => entry.key.startsWith("Tab_")).map((entry) => entry.text);
   const proofs = manifest.interactions.flatMap((interaction) => (interaction.class === className && interaction.status === "exercised"
-    ? interaction.proofs.flatMap((proof) => [proof.fromPage, proof.toPage]) : []));
+    ? interaction.proofs.flatMap((proof) => ("fromPage" in proof ? [proof.fromPage, proof.toPage] : [])) : []));
   return sorted([...designer, ...language, ...proofs]);
 }
 

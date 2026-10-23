@@ -2,7 +2,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSyn
 import { extname, join } from "node:path";
 import { z } from "zod";
 import { captureNames, type PlannedCase } from "../cases/case-plan.js";
-import { canonicalJson } from "../diagnosis/context.js";
+import { canonicalJson, ContextActionSchema } from "../diagnosis/context.js";
 import type { SourceSnapshot } from "../diagnosis/source-snapshot.js";
 import { SetupError } from "../host/setup-error.js";
 import { sha256File, sha256FileSync, sha256Text } from "../steps/fingerprint.js";
@@ -10,10 +10,6 @@ import { feasibilities } from "./job-schemas.js";
 import { selectedTabNames } from "./plan-validator.js";
 import type { RankedPrior } from "./priors.js";
 import { formOfMode, TargetSchema } from "./targets.js";
-
-const action = z.strictObject({
-  type: z.string(), name: z.string().optional(), label: z.string().optional(), milliseconds: z.number().optional(), optional: z.boolean().optional(),
-});
 
 const FixtureSchema = z.strictObject({
   case: z.string().min(1),
@@ -27,7 +23,7 @@ const FixtureSchema = z.strictObject({
   /** The copy of its character file in the context folder (`fixtures/<file>`), with its SHA-256 so the context hash covers it. */
   copy: z.strictObject({ path: z.string().min(1), sha256: z.string() }),
   /** Its expanded actions; only a scenario context has them. */
-  actions: z.array(action).optional(),
+  actions: z.array(ContextActionSchema).optional(),
 });
 export type ContextFixture = z.infer<typeof FixtureSchema>;
 

@@ -3,18 +3,18 @@ using System.Windows.Automation;
 
 namespace Parity.Capture.Ui;
 
-/// <summary>Waits until a visible UI Automation element with an exact name exists under a window.</summary>
+/// <summary>Waits until a visible UI Automation element with an exact name exists under a window, which is looked up on every poll.</summary>
 internal sealed class LabelWaiter
 {
     public static readonly TimeSpan Timeout = TimeSpan.FromSeconds(5);
 
-    public void WaitForVisibleLabel(IntPtr mainWindow, string label)
+    public void WaitForVisibleLabel(Func<IntPtr> window, string label)
     {
         Condition condition = new PropertyCondition(AutomationElement.NameProperty, label);
         Stopwatch timer = Stopwatch.StartNew();
         while (timer.Elapsed < Timeout)
         {
-            AutomationElementCollection matches = AutomationElement.FromHandle(mainWindow).FindAll(TreeScope.Descendants, condition);
+            AutomationElementCollection matches = AutomationElement.FromHandle(window()).FindAll(TreeScope.Descendants, condition);
             foreach (AutomationElement match in matches)
             {
                 if (IsVisible(match))

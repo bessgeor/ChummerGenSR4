@@ -4,8 +4,8 @@ namespace Parity.Capture.Staging;
 
 /// <summary>
 /// Builds the run folder: each app gets its executable plus copies of the canonical data, language,
-/// settings, sheet and export files, then the optional overlay; the fixtures are copied too. The
-/// canonical executable is only read.
+/// settings, sheet and export files, then the optional overlay; the fixtures are copied too, once per side for a
+/// case that saves the character, so neither side opens what the other saved. The canonical executable is only read.
 /// </summary>
 internal sealed class RunStager(FileHasher hasher, CanonicalExecutableGuard guard, SettingsOverlayApplier overlayApplier)
 {
@@ -62,17 +62,27 @@ internal sealed class RunStager(FileHasher hasher, CanonicalExecutableGuard guar
         string canonicalHash = guard.Verify(canonicalStaged, "staged canonical executable");
         string candidateHash = hasher.Sha256(candidateStaged);
 
-        Dictionary<string, string> copies = new(StringComparer.Ordinal);
+        Dictionary<string, CharacterCopy> copies = new(StringComparer.Ordinal);
         foreach (ParityCase parityCase in cases)
         {
             // One folder per case: two fixtures may share a file name.
-            string copy = layout.CharacterCopy(parityCase.Name, parityCase.CharacterFile);
-            Directory.CreateDirectory(Path.GetDirectoryName(copy)!);
-            File.Copy(parityCase.CharacterPath, copy);
-            copies.Add(parityCase.Name, copy);
+            copies.Add(parityCase.Name, parityCase.Saves
+                ? new CharacterCopy(
+                    CopyFixture(parityCase, layout.CharacterCopy(parityCase.Name, RunLayout.CanonicalSide, parityCase.CharacterFile)),
+                    CopyFixture(parityCase, layout.CharacterCopy(parityCase.Name, RunLayout.CandidateSide, parityCase.CharacterFile)))
+                : new CharacterCopy(
+                    CopyFixture(parityCase, layout.CharacterCopy(parityCase.Name, parityCase.CharacterFile)),
+                    layout.CharacterCopy(parityCase.Name, parityCase.CharacterFile)));
         }
 
         return new StagedRun(canonicalStaged, canonicalHash, candidateStaged, candidateHash, overlay, copies);
+    }
+
+    private static string CopyFixture(ParityCase parityCase, string copy)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(copy)!);
+        File.Copy(parityCase.CharacterPath, copy);
+        return copy;
     }
 
     private static void CopySupport(string canonicalSource, string appDirectory)

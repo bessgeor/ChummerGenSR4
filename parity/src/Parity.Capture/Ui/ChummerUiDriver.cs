@@ -11,20 +11,34 @@ internal sealed class ChummerUiDriver(
     LabelWaiter labels,
     WindowCapturer capturer,
     PointerParker pointer,
-    UiTreeReader trees) : IUiDriver
+    UiTreeReader trees,
+    ActiveWindowResolver activeWindows,
+    ControlActions controls,
+    SaveReloader reloader,
+    MessageRoundTrip roundTrip,
+    Func<DialogSafeCaller> newCaller) : IUiDriver
 {
     public IAppSession Launch(string executablePath, string characterPath, UiTiming timing)
     {
-        ProcessStartInfo startInfo = new()
-        {
-            FileName = executablePath,
-            WorkingDirectory = Path.GetDirectoryName(executablePath)!,
-            UseShellExecute = false,
-        };
-        startInfo.ArgumentList.Add(characterPath);
-        Process process = Process.Start(startInfo)
-                          ?? throw new InvalidOperationException($"Could not start {executablePath}.");
-        ChummerSession session = new(process, timing, finder, activator, geometry, tabs, labels, capturer, pointer, trees);
+        Process process = Start(executablePath, characterPath);
+        ChummerSession session = new(
+            process,
+            () => Start(executablePath, characterPath),
+            characterPath,
+            timing,
+            finder,
+            activator,
+            geometry,
+            tabs,
+            labels,
+            capturer,
+            pointer,
+            trees,
+            activeWindows,
+            controls,
+            reloader,
+            roundTrip,
+            newCaller());
         try
         {
             session.WaitUntilReady();
@@ -35,5 +49,17 @@ internal sealed class ChummerUiDriver(
             session.Dispose();
             throw;
         }
+    }
+
+    private static Process Start(string executablePath, string characterPath)
+    {
+        ProcessStartInfo startInfo = new()
+        {
+            FileName = executablePath,
+            WorkingDirectory = Path.GetDirectoryName(executablePath)!,
+            UseShellExecute = false,
+        };
+        startInfo.ArgumentList.Add(characterPath);
+        return Process.Start(startInfo) ?? throw new InvalidOperationException($"Could not start {executablePath}.");
     }
 }

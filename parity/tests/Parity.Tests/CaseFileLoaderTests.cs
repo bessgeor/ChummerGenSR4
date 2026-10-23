@@ -59,6 +59,45 @@ public sealed class CaseFileLoaderTests : IDisposable
     }
 
     [Fact]
+    public void Rich_scenario_file_loads_with_the_suite_timing_and_a_capture_before_each_acting_action()
+    {
+        CaseSuite suite = _loader.Load(RepositoryPaths.RichScenarioFile);
+        CaseSuite characters = _loader.Load(RepositoryPaths.CaseFile);
+
+        Assert.Equal(characters.StartupDelaySeconds, suite.StartupDelaySeconds);
+        Assert.Equal(characters.SettleMilliseconds, suite.SettleMilliseconds);
+        Assert.Equal(
+            [
+                "build-Diego_v_alpha2_by_bessgeor@edit-name",
+                "build-Diego_v_alpha2_by_bessgeor@raise-body",
+                "build-Diego_v_alpha2_by_bessgeor@add-gear",
+                "build-Diego_v_alpha2_by_bessgeor@plugin-menu",
+                "build-Diego_v_alpha2_by_bessgeor@save-reload",
+                "career-facemage_Sam_career@save-reload",
+            ],
+            suite.Cases.Select(item => item.Name));
+        Assert.Equal(["build-Diego_v_alpha2_by_bessgeor@save-reload", "career-facemage_Sam_career@save-reload"], suite.Cases.Where(item => item.Saves).Select(item => item.Name));
+        IEnumerable<ParityAction> all = suite.Cases.SelectMany(item => item.Actions);
+        Assert.Contains(all, action => action is SetValueAction);
+        Assert.Contains(all, action => action is ClickAction);
+        Assert.Contains(all, action => action is SelectItemAction);
+        Assert.Contains(all, action => action is ContextMenuAction);
+        foreach (ParityCase parityCase in suite.Cases)
+        {
+            for (int index = 0; index < parityCase.Actions.Count; index++)
+            {
+                if (parityCase.Actions[index] is not (SetValueAction or ClickAction or SelectItemAction))
+                {
+                    continue;
+                }
+
+                ParityAction? before = parityCase.Actions.Take(index).LastOrDefault(action => action is not (WaitAction or WaitForAction));
+                Assert.True(before is CaptureAction, $"{parityCase.Name}: action {index} ({parityCase.Actions[index].Describe()}) follows no capture.");
+            }
+        }
+    }
+
+    [Fact]
     public void Fixtures_link_no_other_character_file()
     {
         foreach (string fixture in Directory.GetFiles(Path.Combine(RepositoryPaths.Root, "parity", "fixtures", "characters"), "*.chum"))
@@ -170,6 +209,54 @@ public sealed class CaseFileLoaderTests : IDisposable
 
         CaseFileException error = Assert.Throws<CaseFileException>(() => _loader.Load(Write(document)));
         Assert.Contains("'capture' does not take 'optional'", error.Message);
+    }
+
+    [Fact]
+    public void Rich_actions_map_with_their_fields_and_descriptions()
+    {
+        JsonObject document = MinimalCaseFile(Characters((BuildFixture, "build")));
+        document["buildActions"] = new JsonArray(
+            new JsonObject { ["type"] = "setValue", ["control"] = "txtCharacterName", ["value"] = "" },
+            new JsonObject { ["type"] = "click", ["control"] = "cmdAddGear" },
+            new JsonObject { ["type"] = "selectItem", ["control"] = "lstGear", ["item"] = "Commlink" },
+            new JsonObject { ["type"] = "contextMenu", ["control"] = "treGear", ["item"] = "Add as Plugin" },
+            new JsonObject { ["type"] = "saveReload" });
+
+        IReadOnlyList<ParityAction> actions = _loader.Load(Write(document)).Cases[0].Actions;
+
+        Assert.Equal(
+            [
+                new SetValueAction("txtCharacterName", ""),
+                new ClickAction("cmdAddGear"),
+                new SelectItemAction("lstGear", "Commlink"),
+                new ContextMenuAction("treGear", "Add as Plugin"),
+                new SaveReloadAction(),
+            ],
+            actions);
+        Assert.Equal(
+            ["setValue:txtCharacterName=", "click:cmdAddGear", "selectItem:lstGear=Commlink", "contextMenu:treGear=Add as Plugin", "saveReload"],
+            actions.Select(action => action.Describe()));
+        Assert.All(actions, action => Assert.True(action.Required));
+    }
+
+    [Theory]
+    [InlineData("""{ "type": "setValue", "control": "a" }""", "'setValue' requires 'value'")]
+    [InlineData("""{ "type": "setValue", "value": "a" }""", "'setValue' requires 'control'")]
+    [InlineData("""{ "type": "click", "control": "a", "item": "b" }""", "'click' does not take 'item'")]
+    [InlineData("""{ "type": "click", "name": "a" }""", "'click' does not take 'name'")]
+    [InlineData("""{ "type": "selectItem", "control": "a" }""", "'selectItem' requires 'item'")]
+    [InlineData("""{ "type": "contextMenu", "item": "a" }""", "'contextMenu' requires 'control'")]
+    [InlineData("""{ "type": "contextMenu", "control": "a", "item": "b", "value": "c" }""", "'contextMenu' does not take 'value'")]
+    [InlineData("""{ "type": "saveReload", "control": "a" }""", "'saveReload' does not take 'control'")]
+    [InlineData("""{ "type": "saveReload", "optional": true }""", "'saveReload' does not take 'optional'")]
+    [InlineData("""{ "type": "capture", "name": "a", "control": "b" }""", "'capture' does not take 'control'")]
+    public void Rich_action_fields_must_match_the_type(string action, string message)
+    {
+        JsonObject document = MinimalCaseFile(Characters((BuildFixture, "build")));
+        document["buildActions"] = new JsonArray(JsonNode.Parse(action));
+
+        CaseFileException error = Assert.Throws<CaseFileException>(() => _loader.Load(Write(document)));
+        Assert.Contains($"buildActions[0]: {message}", error.Message);
     }
 
     [Fact]

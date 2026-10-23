@@ -1,0 +1,100 @@
+{
+  "startupDelaySeconds": 3,
+  "settleMilliseconds": 300,
+  "sequences": {
+    "gear-tab": [
+      { "type": "selectTab", "name": "Street Gear" },
+      { "type": "selectTab", "name": "Gear" },
+      { "type": "waitFor", "label": "Selected Gear" },
+      { "type": "capture", "name": "gear" }
+    ],
+    "character-info-tab": [
+      { "type": "selectTab", "name": "Character Info" },
+      { "type": "waitFor", "label": "Description:" }
+    ]
+  },
+  "buildActions": [],
+  "careerActions": [],
+  "characters": [
+    {
+      "path": "../fixtures/characters/Diego_v_alpha2_by_bessgeor.chum",
+      "mode": "build",
+      "scenario": "edit-name",
+      "actions": [
+        { "type": "include", "name": "character-info-tab" },
+        { "type": "capture", "name": "character-info" },
+        { "type": "setValue", "control": "txtCharacterName", "value": "Diego Parity" },
+        { "type": "capture", "name": "name-edited" }
+      ]
+    },
+    {
+      "path": "../fixtures/characters/Diego_v_alpha2_by_bessgeor.chum",
+      "mode": "build",
+      "scenario": "raise-body",
+      "actions": [
+        { "type": "capture", "name": "common" },
+        { "type": "setValue", "control": "nudBOD", "value": "5" },
+        { "type": "capture", "name": "body-raised" }
+      ]
+    },
+    {
+      "path": "../fixtures/characters/Diego_v_alpha2_by_bessgeor.chum",
+      "mode": "build",
+      "scenario": "add-gear",
+      "actions": [
+        { "type": "include", "name": "gear-tab" },
+        { "type": "click", "control": "cmdAddGear" },
+        { "type": "waitFor", "label": "Search:" },
+        { "type": "capture", "name": "select-gear" },
+        { "type": "selectItem", "control": "cboCategory", "item": "Commlink" },
+        { "type": "capture", "name": "commlinks" },
+        { "type": "selectItem", "control": "lstGear", "item": "Hermes Ikon" },
+        { "type": "capture", "name": "commlink-selected" },
+        { "type": "click", "control": "cmdOK" },
+        { "type": "waitFor", "label": "Add Gear" },
+        { "type": "capture", "name": "gear-added" }
+      ]
+    },
+    {
+      "path": "../fixtures/characters/Diego_v_alpha2_by_bessgeor.chum",
+      "mode": "build",
+      "scenario": "plugin-menu",
+      "actions": [
+        { "type": "include", "name": "gear-tab" },
+        { "type": "selectItem", "control": "treGear", "item": "Hermes Ikon" },
+        { "type": "contextMenu", "control": "treGear", "item": "Add as Plugin" },
+        { "type": "waitFor", "label": "Search:" },
+        { "type": "capture", "name": "select-plugin" },
+        { "type": "click", "control": "cmdCancel" },
+        { "type": "waitFor", "label": "Selected Gear" },
+        { "type": "capture", "name": "plugin-cancelled" }
+      ]
+    },
+    {
+      "path": "../fixtures/characters/Diego_v_alpha2_by_bessgeor.chum",
+      "mode": "build",
+      "scenario": "save-reload",
+      "actions": [
+        { "type": "include", "name": "character-info-tab" },
+        { "type": "capture", "name": "character-info" },
+        { "type": "setValue", "control": "txtCharacterName", "value": "Diego Saved" },
+        { "type": "saveReload" },
+        { "type": "include", "name": "character-info-tab" },
+        { "type": "capture", "name": "reloaded" }
+      ]
+    },
+    {
+      "path": "../fixtures/characters/facemage_Sam_career.chum",
+      "mode": "career",
+      "scenario": "save-reload",
+      "actions": [
+        { "type": "include", "name": "character-info-tab" },
+        { "type": "capture", "name": "character-info" },
+        { "type": "setValue", "control": "txtCharacterName", "value": "Sam Saved" },
+        { "type": "saveReload" },
+        { "type": "include", "name": "character-info-tab" },
+        { "type": "capture", "name": "reloaded" }
+      ]
+    }
+  ]
+}

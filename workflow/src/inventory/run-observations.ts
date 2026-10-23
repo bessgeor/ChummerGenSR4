@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { CaptureSummarySchema } from "../../../contracts/generated/typescript/parity-capture-summary.js";
+import { CaptureSummarySchema, type ActionOutcome } from "../../../contracts/generated/typescript/parity-capture-summary.js";
 import { ExecutionCoverageSchema, type Outcome } from "../../../contracts/generated/typescript/parity-execution-coverage.js";
 import { UiTreeSchema, type UiNode } from "../../../contracts/generated/typescript/parity-ui-tree.js";
 import { SetupError } from "../host/setup-error.js";
@@ -16,11 +16,16 @@ export type CaptureObservation = {
   readonly nodes: readonly UiNode[] | null;
 };
 
+/** One action of the candidate side as its summary records it. */
+export type ActionObservation = { readonly index: number; readonly action: string; readonly outcome: ActionOutcome };
+
 export type CaseObservation = {
   readonly case: string;
   readonly captures: readonly CaptureObservation[];
   /** The indexes of the candidate side's performed `selectTab` actions. */
   readonly selectTabs: readonly number[];
+  /** Every action of the candidate side in index order. */
+  readonly actions: readonly ActionObservation[];
 };
 
 export type RunObservation = {
@@ -59,7 +64,7 @@ function readTrees(runFolder: string, folder: string, runId: string): Map<string
 
 /**
  * Reads what a capture run made with `--ui-tree` shows about its candidate side: each planned capture's outcome with
- * its tree, and the performed `selectTab` actions. A run without trees, a performed capture without its tree, or a
+ * its tree, the performed `selectTab` actions and every action with its outcome. A run without trees, a performed capture without its tree, or a
  * tree for a capture that was not performed is a setup error.
  */
 export function readRunObservation(runFolder: string): RunObservation {
@@ -86,7 +91,8 @@ export function readRunObservation(runFolder: string): RunObservation {
       return { capture: capture.capture, outcome: capture.outcome, actionIndex: action?.index ?? null, nodes };
     });
     const selectTabs = actions.filter((entry) => entry.action.startsWith("selectTab:") && entry.outcome === "performed").map((entry) => entry.index);
-    return { case: item.case, captures, selectTabs };
+    const recorded = actions.map((entry) => ({ index: entry.index, action: entry.action, outcome: entry.outcome })).sort((left, right) => left.index - right.index);
+    return { case: item.case, captures, selectTabs, actions: recorded };
   });
   const stray = [...trees.keys()].filter((key) => !used.has(key));
   if (stray.length > 0) throw new SetupError(`The capture run ${runFolder} has UI trees for captures it did not plan: ${stray.map((key) => key.replace("\n", "/")).join(", ")}.`);

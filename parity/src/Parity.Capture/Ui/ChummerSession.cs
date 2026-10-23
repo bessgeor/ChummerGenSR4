@@ -6,10 +6,13 @@ namespace Parity.Capture.Ui;
 
 /// <summary>
 /// One running app process. Keeps the main window handle and resolved tab items, and re-resolves
-/// them when the app recreates its window or tab controls.
+/// them when the app recreates its window or tab controls. Every action applies to the active window: the
+/// main window, or the modal dialog it shows. A save and reload replaces the process with a new one on the same file.
 /// </summary>
 internal sealed class ChummerSession(
     Process process,
+    Func<Process> restart,
+    string characterPath,
     UiTiming timing,
     WindowFinder finder,
     WindowActivator activator,
@@ -18,7 +21,12 @@ internal sealed class ChummerSession(
     LabelWaiter labels,
     WindowCapturer capturer,
     PointerParker pointer,
-    UiTreeReader trees) : IAppSession
+    UiTreeReader trees,
+    ActiveWindowResolver activeWindows,
+    ControlActions controls,
+    SaveReloader reloader,
+    MessageRoundTrip roundTrip,
+    DialogSafeCaller caller) : IAppSession
 {
     private static readonly TimeSpan WindowTimeout = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan LiveWindowTimeout = TimeSpan.FromSeconds(10);
@@ -26,12 +34,15 @@ internal sealed class ChummerSession(
     private static readonly TimeSpan FirstSelectionCheck = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan SelectionTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan CharacterFormTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan ActiveWindowTimeout = TimeSpan.FromSeconds(10);
 
     private readonly Dictionary<string, AccessibleTab> _tabCache = new(StringComparer.Ordinal);
+    private IntPtr _tabWindow;
     private IntPtr _mainWindow;
     private IntPtr _stableWindow;
     private Rectangle? _stableBounds;
     private Point _pointerSpot;
+    private Process _process = process;
 
     /// <summary>
     /// Waits for a window and input idle, then maximizes and activates the largest window, waits
@@ -40,25 +51,36 @@ internal sealed class ChummerSession(
     /// </summary>
     public void WaitUntilReady()
     {
-        finder.WaitForMainWindow(process, WindowTimeout);
+        finder.WaitForMainWindow(_process, WindowTimeout);
         WaitForInputIdle();
-        _mainWindow = finder.WaitForMainWindow(process, WindowTimeout);
+        _mainWindow = finder.WaitForMainWindow(_process, WindowTimeout);
         NativeMethods.ShowWindow(_mainWindow, NativeMethods.SwMaximize);
         activator.Activate(_mainWindow);
         WaitForInputIdle();
         _pointerSpot = pointer.Park(WaitForStableBounds());
         Thread.Sleep(timing.StartupDelay);
-        process.Refresh();
+        _process.Refresh();
         WaitForInputIdle();
         WaitForStableBounds();
         EnsureCharacterOpen();
     }
 
-    public void Activate() => activator.Activate(LiveWindow());
+    /// <summary>Raises the failure of an earlier action's call that ended after its action, then activates the active window.</summary>
+    public void Activate()
+    {
+        caller.CheckKeptCalls(TryActiveWindow);
+        activator.Activate(ActiveWindow());
+    }
 
     public void SelectTab(string tabName)
     {
-        IntPtr window = LiveWindow();
+        IntPtr window = ActiveWindow();
+        if (window != _tabWindow)
+        {
+            _tabCache.Clear();
+            _tabWindow = window;
+        }
+
         if (!_tabCache.TryGetValue(tabName, out AccessibleTab? tab))
         {
             tab = tabs.Find(window, tabName);
@@ -94,47 +116,80 @@ internal sealed class ChummerSession(
     public void WaitForLabel(string label)
     {
         WaitForStableBounds();
-        labels.WaitForVisibleLabel(LiveWindow(), label);
+        labels.WaitForVisibleLabel(ActiveWindow, label);
         Thread.Sleep(timing.Settle);
     }
 
     public void Wait(int milliseconds) => Thread.Sleep(milliseconds);
 
+    public void SetValue(string control, string value) => controls.SetValue(Acting(), control, value);
+
+    public void Click(string control) => controls.Click(Acting(), control);
+
+    public void SelectItem(string control, string item) => controls.SelectItem(Acting(), control, item);
+
+    public void ContextMenu(string control, string item) => controls.ContextMenu(Acting(), control, item);
+
+    /// <summary>
+    /// Saves from the character form, closes the app, which must exit by itself, and opens the saved file in a new
+    /// process, waiting for it as at startup.
+    /// </summary>
+    public void SaveReload()
+    {
+        IntPtr main = LiveWindow();
+        reloader.SaveAndClose(
+            new SaveTarget(main, ActiveWindow(), characterPath, () => roundTrip.Wait(main), () => ControlFinder.Title(ActiveWindow())),
+            new ProcessApp(_process));
+        Process next = restart();
+        _process.Dispose();
+        _process = next;
+        _tabCache.Clear();
+        _tabWindow = IntPtr.Zero;
+        _stableWindow = IntPtr.Zero;
+        _stableBounds = null;
+        WaitUntilReady();
+    }
+
+    /// <summary>Captures the active window; only the character form has a status bar to move the focus to.</summary>
     public Bitmap Capture()
     {
         Rectangle bounds = WaitForStableBounds();
-        IntPtr window = LiveWindow();
+        IntPtr window = ActiveWindow();
         activator.Activate(window);
-        capturer.FocusStatusBar(window);
+        if (window == LiveWindow())
+        {
+            capturer.FocusStatusBar(window);
+        }
+
         pointer.EnsureAt(_pointerSpot);
         return capturer.Capture(window, bounds);
     }
 
-    public IReadOnlyList<Parity.Contracts.UiTree.UiNode> DescribeTree() => trees.Read(LiveWindow());
+    public IReadOnlyList<Parity.Contracts.UiTree.UiNode> DescribeTree() => trees.Read(ActiveWindow());
 
     public void Dispose()
     {
         try
         {
-            if (!process.HasExited)
+            if (!_process.HasExited)
             {
-                process.CloseMainWindow();
-                if (!process.WaitForExit(500))
+                _process.CloseMainWindow();
+                if (!_process.WaitForExit(500))
                 {
-                    process.Kill(entireProcessTree: true);
-                    process.WaitForExit();
+                    _process.Kill(entireProcessTree: true);
+                    _process.WaitForExit();
                 }
             }
         }
         finally
         {
-            process.Dispose();
+            _process.Dispose();
         }
     }
 
     private IntPtr LiveWindow()
     {
-        if (finder.IsLiveWindow(_mainWindow, process.Id))
+        if (finder.IsLiveWindow(_mainWindow, _process.Id))
         {
             return _mainWindow;
         }
@@ -142,13 +197,13 @@ internal sealed class ChummerSession(
         Stopwatch timer = Stopwatch.StartNew();
         while (timer.Elapsed < LiveWindowTimeout)
         {
-            process.Refresh();
-            if (process.HasExited)
+            _process.Refresh();
+            if (_process.HasExited)
             {
-                throw new InvalidOperationException($"The app exited with code {process.ExitCode} during the case.");
+                throw new InvalidOperationException($"The app exited with code {_process.ExitCode} during the case.");
             }
 
-            IntPtr handle = finder.FindMainWindow(process.Id);
+            IntPtr handle = finder.FindMainWindow(_process.Id);
             if (handle != IntPtr.Zero)
             {
                 _mainWindow = handle;
@@ -162,17 +217,55 @@ internal sealed class ChummerSession(
         throw new TimeoutException($"The app's main window disappeared for more than {LiveWindowTimeout.TotalSeconds:0} s.");
     }
 
-    /// <summary>Returns the cached bounds when the same window still has them; otherwise waits for stability.</summary>
+    private ActionContext Acting() => new(ActiveWindow, TryActiveWindow, caller, Settle, _process.Id);
+
+    /// <summary>
+    /// After an acting call: the app handles a message, so its handlers have run; a call whose dialog has closed has
+    /// returned; then the settle time passes for the app to paint.
+    /// </summary>
+    private void Settle()
+    {
+        roundTrip.Wait(LiveWindow());
+        caller.CheckKeptCalls(TryActiveWindow);
+        Thread.Sleep(timing.Settle);
+    }
+
+    /// <summary>The active window as it is now, or <see cref="IntPtr.Zero"/> while a disabled window shows none yet.</summary>
+    private IntPtr TryActiveWindow() => activeWindows.Resolve(LiveWindow());
+
+    /// <summary>The active window; a disabled window that owns no enabled one for <see cref="ActiveWindowTimeout"/> is a failure.</summary>
+    private IntPtr ActiveWindow()
+    {
+        Stopwatch timer = Stopwatch.StartNew();
+        while (true)
+        {
+            IntPtr window = TryActiveWindow();
+            if (window != IntPtr.Zero)
+            {
+                return window;
+            }
+
+            if (timer.Elapsed >= ActiveWindowTimeout)
+            {
+                throw new InvalidOperationException(
+                    $"The app's window is disabled and has no enabled dialog for {ActiveWindowTimeout.TotalSeconds:0} s.");
+            }
+
+            Thread.Sleep(100);
+        }
+    }
+
+    /// <summary>Returns the cached bounds when the active window is the same and still has them; otherwise waits for stability.</summary>
     private Rectangle WaitForStableBounds()
     {
-        IntPtr window = LiveWindow();
+        IntPtr window = ActiveWindow();
         if (_stableWindow == window && _stableBounds is { } cached && geometry.GetVisibleBounds(window) == cached)
         {
             return cached;
         }
 
-        Rectangle bounds = geometry.WaitForStableBounds(LiveWindow, timing.Settle);
-        _stableWindow = LiveWindow();
+        Rectangle bounds = geometry.WaitForStableBounds(ActiveWindow, timing.Settle);
+        _stableWindow = ActiveWindow();
         _stableBounds = bounds;
         return bounds;
     }
@@ -201,7 +294,7 @@ internal sealed class ChummerSession(
 
     private void WaitForInputIdle()
     {
-        if (!process.WaitForInputIdle(InputIdleTimeout))
+        if (!_process.WaitForInputIdle(InputIdleTimeout))
         {
             throw new TimeoutException($"The app did not become idle within {InputIdleTimeout.TotalSeconds:0} s.");
         }

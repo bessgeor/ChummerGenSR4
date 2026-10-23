@@ -45,7 +45,12 @@ const ControlSchema = z.discriminatedUnion("status", [
 export type ManifestControl = z.infer<typeof ControlSchema>;
 
 /** Two consecutive performed captures of a case between which a `selectTab` changed the tab control's visible page. */
-const ProofSchema = z.strictObject({ case: z.string().min(1), from: z.string().min(1), to: z.string().min(1), fromPage: z.string().min(1), toPage: z.string().min(1) });
+const TabProofSchema = z.strictObject({ case: z.string().min(1), from: z.string().min(1), to: z.string().min(1), fromPage: z.string().min(1), toPage: z.string().min(1) });
+export type TabProof = z.infer<typeof TabProofSchema>;
+/** A performed `setValue`, `click` or `selectItem` on the control, with the capture before it that showed the control. */
+const ActionProofSchema = z.strictObject({ case: z.string().min(1), capture: z.string().min(1), action: z.string().min(1), actionIndex: z.number().int().nonnegative() });
+export type ActionProof = z.infer<typeof ActionProofSchema>;
+const ProofSchema = z.union([TabProofSchema, ActionProofSchema]);
 export type ExerciseProof = z.infer<typeof ProofSchema>;
 
 const interactionFields = {

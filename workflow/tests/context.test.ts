@@ -120,6 +120,31 @@ test("a sealed context holds the members, scenarios, vocabulary and source ident
   equal(sealed.hash, contextHash(manifest));
 });
 
+test("a sealed context keeps a scenario's value edits, clicks, item selections, context menus and save/reload", async () => {
+  const root = scratch();
+  const input = contextInput(root);
+  const rich = input.cases.map((item) => item.name !== "build-alpha" ? item : {
+    ...item,
+    actions: [
+      { type: "setValue" as const, control: "txtCharacterName", value: "" },
+      { type: "click" as const, control: "cmdAddGear" },
+      { type: "selectItem" as const, control: "lstGear", item: "Hermes Ikon" },
+      { type: "contextMenu" as const, control: "treGear", item: "Add as Plugin" },
+      { type: "saveReload" as const },
+      ...item.actions,
+    ],
+  });
+  const sealed = await sealContext({ ...input, cases: rich }, join(root, "diagnosis", "d-0000000000000100"));
+
+  deepStrictEqual(sealed.manifest.scenarios[0]!.actions.slice(0, 5), [
+    { type: "setValue", control: "txtCharacterName", value: "" },
+    { type: "click", control: "cmdAddGear" },
+    { type: "selectItem", control: "lstGear", item: "Hermes Ikon" },
+    { type: "contextMenu", control: "treGear", item: "Add as Plugin" },
+    { type: "saveReload" },
+  ]);
+});
+
 test("sealing again from the same run gives the same hash; other evidence another", async () => {
   const root = scratch();
   const input = contextInput(root);

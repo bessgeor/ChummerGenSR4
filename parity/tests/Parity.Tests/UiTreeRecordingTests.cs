@@ -93,7 +93,7 @@ public sealed class UiTreeRecordingTests : IDisposable
             Path.Combine(_root, "candidate.exe"),
             new string('1', 64),
             null,
-            new Dictionary<string, string> { [Case.Name] = Path.Combine(_root, "test.chum") });
+            new Dictionary<string, CharacterCopy> { [Case.Name] = new(Path.Combine(_root, "test.chum"), Path.Combine(_root, "test.chum")) });
         FileHasher hasher = new();
         CaseRunner runner = new(
             new SideExecutor(_driver),
