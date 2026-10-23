@@ -136,7 +136,7 @@ class FakeLoop implements LoopSteps {
 
 const baseArguments: Arguments = {
   cases: [], captures: [], settingsOverlay: null, threshold: null, caseFile: null, canonicalCache: null,
-  liveCanonical: false, noOcr: false, tessdata: null, only: null, recapture: false, noDiagnosis: false, noRepair: false, noWidening: false, unattended: false,
+  liveCanonical: false, noOcr: false, tessdata: null, only: null, recapture: false, noDiagnosis: false, noRepair: false, noWidening: false, unattended: false, fixChanges: false,
 };
 
 function harness(cases: string[], steps = new FakeSteps(), checkpointer = new MemorySaver(), signal?: AbortSignal) {

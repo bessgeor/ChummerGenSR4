@@ -15,6 +15,7 @@
     "build:candidate": "node parity/scripts/build-candidate.mjs",
     "parity:test": "dotnet test parity/Parity.slnx",
     "openspec:validate": "openspec validate --all --strict",
+    "fixes:validate": "cd fixes && openspec validate --all --strict && openspec validate --archived",
     "contracts:generate": "node contracts/scripts/generate.mjs",
     "contracts:check": "node contracts/scripts/generate.mjs --check",
     "contracts:test": "tsc -p contracts && node --import tsx --test \"contracts/tests/*.test.ts\"",

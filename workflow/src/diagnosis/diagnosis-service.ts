@@ -6,6 +6,8 @@ import type { AgentRunners } from "../agents/agent-runners.js";
 import type { PlannedCase } from "../cases/case-plan.js";
 import { CaptureResultsSchema } from "../../../contracts/generated/typescript/parity-capture-results.js";
 import { ExecutionCoverageSchema } from "../../../contracts/generated/typescript/parity-execution-coverage.js";
+import { fixArchiveOf, fixesRootOf } from "../fixes/fix-archiver.js";
+import { readArchivedFixes } from "../fixes/retrieval.js";
 import { labelRecordById, nextRecordId, noLabels, putRecord, type EvalRecord } from "../evals/eval-record.js";
 import type { ScratchFolder } from "../host/scratch-folder.js";
 import { SetupError } from "../host/setup-error.js";
@@ -19,10 +21,10 @@ import { diagnosisDocument, writeDiagnosisDocument } from "./diagnosis-document.
 import { ContextManifestSchema, contextHash, sealContext, type ContextManifest } from "./context.js";
 import { jobFolderIn, stageJobFolder } from "./job-folder.js";
 import {
-  ChallengeOutputSchema, challengePromptVersion, HypothesisOutputSchema, hypothesisPromptVersion,
+  ChallengeOutputSchema, challengePromptVersion, HypothesisOutputSchema,
   type ChallengeOutput, type Explanation, type HypothesisOutput,
 } from "./job-schemas.js";
-import { challengePrompt, hypothesisPrompt } from "./prompts.js";
+import { challengePrompt, hypothesisPrompt, hypothesisPromptVersionOf } from "./prompts.js";
 import type { QuotaWaiter } from "./quota-waiter.js";
 import { unrecordedSource } from "./candidate-source.js";
 import { createSourceSnapshot, type Git } from "./source-snapshot.js";
@@ -50,7 +52,11 @@ export type DiagnosisDependencies = {
   readonly log: (line: string) => void;
 };
 
-export type PrepareInput = { readonly threadId: string; readonly triagePath: string; readonly caseFile: string; readonly candidate: string; readonly candidateSource: string };
+export type PrepareInput = {
+  readonly threadId: string; readonly triagePath: string; readonly caseFile: string; readonly candidate: string; readonly candidateSource: string;
+  /** Whether the thread works in fix changes: then the repository's archived fixes are ranked into each context as priors. */
+  readonly fixChanges: boolean;
+};
 
 export type JobInput = {
   readonly threadId: string;
@@ -104,9 +110,12 @@ export class DiagnosisService {
       }
       return report;
     };
+    // Read from the working tree the snapshot was taken from, once for every cluster.
+    const fixes = input.fixChanges ? readArchivedFixes(fixArchiveOf(fixesRootOf(this.dependencies.repositoryRoot))) : null;
+    if (fixes !== null) this.dependencies.log(`Diagnosis: ${fixes.length} archived fix changes to rank as priors.`);
     const clusters: Record<string, ClusterDiagnosis> = {};
     for (const cluster of triage.clusters) {
-      const sealed = await sealContext({ triage, clusterId: cluster.id, cases, readReport, snapshot, candidate: input.candidate },
+      const sealed = await sealContext({ triage, clusterId: cluster.id, cases, readReport, snapshot, candidate: input.candidate, fixes },
         folders.cluster(cluster.id));
       clusters[cluster.id] = {
         clusterId: cluster.id, contextFolder: sealed.folder, contextHash: sealed.hash, status: "pending",
@@ -214,7 +223,7 @@ export class DiagnosisService {
         // copy is made only now, so jobs that wait or are refused hold none.
         mayStart: () => {
           if (budgetSpent()) return false;
-          stageJobFolder(staged, cluster.contextFolder, folders.source);
+          stageJobFolder(staged, cluster.contextFolder, folders.source, kind === "challenge");
           started = this.dependencies.now();
           return true;
         },
@@ -241,7 +250,7 @@ export class DiagnosisService {
     const record: EvalRecord = {
       schemaVersion: 2, recordId, jobKind: kind, origin: "workflow", threadId: input.threadId, subject: { kind: "discrepancy-cluster", id: cluster.clusterId },
       challenged: kind === "challenge" ? cluster.hypothesis!.recordId : null,
-      contextHash: cluster.contextHash, promptVersion: kind === "hypothesis" ? hypothesisPromptVersion : challengePromptVersion,
+      contextHash: cluster.contextHash, promptVersion: kind === "hypothesis" ? hypothesisPromptVersionOf(manifest) : challengePromptVersion,
       agent: { provider: choice.provider, model: choice.model, effort: choice.effort },
       startedUtc: started.toISOString(), finishedUtc: finished.toISOString(), durationMs: measuredDuration(label, result),
       usage: result.usage,

@@ -23,6 +23,8 @@ export type Arguments = {
   readonly noWidening: boolean;
   /** Dispatch model jobs only under certificates for their configuration. */
   readonly unattended: boolean;
+  /** Work in fix changes: priors in diagnosis, planned repair and a fix change with every promotion. */
+  readonly fixChanges: boolean;
 };
 
 export type Command =
@@ -52,6 +54,8 @@ export const usage = `Usage: npm start -- [options]
     --no-widening              end the run after repair: no widening of the passed attempts and no accepted branch
     --unattended               start only when every job kind diagnosis dispatches has a certificate for its configuration
                                (repair has none, so it needs --no-repair)
+    --fix-changes              work in fix changes: archived fixes as priors for diagnosis, repair planned as subtasks,
+                               and every promoted fix archived as a fix change under fixes/ in its commit
     --resume <thread>          continue a thread that stopped, with the options it was started with
     --help
 
@@ -110,7 +114,7 @@ export function parseArguments(args: readonly string[]): Command {
   const captures: string[] = [];
   let parsed: Omit<Arguments, "cases" | "captures"> = {
     settingsOverlay: null, threshold: null, caseFile: null, canonicalCache: null,
-    liveCanonical: false, noOcr: false, tessdata: null, only: null, recapture: false, noDiagnosis: false, noRepair: false, noWidening: false, unattended: false,
+    liveCanonical: false, noOcr: false, tessdata: null, only: null, recapture: false, noDiagnosis: false, noRepair: false, noWidening: false, unattended: false, fixChanges: false,
   };
   for (let index = 0; index < args.length; index++) {
     const option = args[index]!;
@@ -130,6 +134,7 @@ export function parseArguments(args: readonly string[]): Command {
       case "--no-repair": parsed = { ...parsed, noRepair: true }; break;
       case "--no-widening": parsed = { ...parsed, noWidening: true }; break;
       case "--unattended": parsed = { ...parsed, unattended: true }; break;
+      case "--fix-changes": parsed = { ...parsed, fixChanges: true }; break;
       default:
         throw new SetupError(workflowOwned.has(option)
           ? `Option '${option}' is set by the workflow; run npm run parity to use it.`
@@ -145,6 +150,9 @@ export function parseArguments(args: readonly string[]): Command {
   }
   if (parsed.noDiagnosis && parsed.only === "diagnose") {
     throw new SetupError("--only diagnose and --no-diagnosis contradict each other; give one of them.");
+  }
+  if (parsed.fixChanges && parsed.unattended) {
+    throw new SetupError("--fix-changes and --unattended contradict each other: no certificate covers the prompts fix changes add.");
   }
   return { kind: "start", arguments: { ...parsed, cases, captures } };
 }

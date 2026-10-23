@@ -6,7 +6,7 @@ import type { CheckResult } from "../diagnosis/check.js";
 import type { CheckInput, JobInput, JobStep, PrepareInput } from "../diagnosis/diagnosis-service.js";
 import { SetupError } from "../host/setup-error.js";
 import type { NodeName } from "../options/arguments.js";
-import type { RunOptions } from "../options/run-options.js";
+import { usesFixChanges, type RunOptions } from "../options/run-options.js";
 import { nextRepairRoute, type ClusterRepair } from "../repair/cluster-repair.js";
 import type { RepairInput, RepairStep } from "../repair/repair-service.js";
 import type { Conclusion, ConcludeInput } from "../loop/loop-service.js";
@@ -185,6 +185,7 @@ export function buildWorkflowGraph(steps: WorkflowSteps, diagnosis: DiagnosisSte
       if (state.triageSummary === null || state.fingerprints === null) throw new Error("Diagnosis ran before triage.");
       const clusters = await diagnosis.prepare({
         threadId: state.threadId, triagePath: state.triageSummary.path, caseFile: state.options.caseFile, candidate: state.fingerprints.candidate, candidateSource: state.fingerprints.candidateSource,
+        fixChanges: usesFixChanges(state.options),
       });
       return { clusters };
     })

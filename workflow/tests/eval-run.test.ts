@@ -65,8 +65,8 @@ test("the prediction metric needs an observed prediction and every observed one 
 });
 
 /** A frozen dataset of the fixture threads and eval-run dependencies over a fake agent runner. */
-async function evalFixture(jobKind: "hypothesis" | "challenge" = "hypothesis", benchmark = false) {
-  const fixture = await twoThreads();
+async function evalFixture(jobKind: "hypothesis" | "challenge" = "hypothesis", benchmark = false, priors = false) {
+  const fixture = await twoThreads({ priors });
   const { folder } = await freezeDataset(await fixture.input({ jobKind, name: jobKind, testPercent: 100, ...(benchmark ? { benchmark: [benchmarkItem("d-0000000000000100", "2026-10-03T00:00:00.000Z")] } : {}) }));
   const runsFolder = join(scratch("workflow-runs-"), "runs");
   let counter = 0;
@@ -101,6 +101,21 @@ test("an eval run scores every sample of the partition, records each job and wri
   equal(records.length, 8);
   ok(records.every((record) => record.threadId === settings.runId && record.subject.kind === "discrepancy-cluster"));
   deepStrictEqual(JSON.parse(readFileSync(runFolders(folder).summary, "utf8")), summary);
+});
+
+test("a context frozen from a thread with fix changes is run without its priors, so the run measures the prompt version it records", async () => {
+  const run = await evalFixture("hypothesis", false, true);
+  ok(readdirSync(run.folder, { recursive: true }).some((path) => String(path).split(/[\\/]/).includes("priors")), "the frozen contexts hold priors");
+  const agents = new FakeAgents(() => ({ answer: hypothesisAnswer() }));
+  const { folder } = await startEvalRun(run.dependencies(agents), { datasetFolder: run.folder, partition: "test", repeat: 1, name: null, settings: resolveAgentSettings(undefined) });
+  ok(agents.calls.length > 0);
+  for (const call of agents.calls) {
+    ok(call.prompt.startsWith("PROMPT_VERSION=hypothesis-v1\n") && !call.prompt.includes("PRIOR FIXES") && !call.prompt.includes("fix-d-similar"), call.prompt.slice(0, 80));
+    ok(!call.workspace.contextFiles.includes("priors"));
+  }
+  equal(readRun(folder).settings.promptVersion, "hypothesis-v1");
+  const records = (await listRecords(run.fixture.store)).filter((record) => record.origin === "eval-run");
+  ok(records.length > 0 && records.every((record) => record.promptVersion === "hypothesis-v1"));
 });
 
 test("a stopped run resumes only its missing samples with the settings it started with", async () => {

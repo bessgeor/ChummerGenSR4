@@ -1,0 +1,17 @@
+schema: fix
+
+context: |
+  Fix changes of ChummerGenSR4, a Windows Forms character generator for
+  Shadowrun 4th Edition. The parity workflow writes one fix change for each
+  discrepancy it fixed: a difference in the raw pixels between the canonical
+  executable bin/ChummerGenSR4.exe and the candidate built from Chummer/.
+  The workflow renders each change from its fix.json record and archives it
+  with the fix commit; a fix change is never edited by hand.
+
+rules:
+  proposal:
+    - Describe the discrepancy from the captures and the comparer's report, and the hypothesis with the evidence that confirmed it.
+  tasks:
+    - List every subtask with the files it changed, the subtasks that blocked it and the record of the job that implemented it.
+  verification:
+    - List the narrow check and every widening level with its execution outcome apart from its visual result.

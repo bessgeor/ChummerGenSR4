@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { SetupError } from "../src/host/setup-error.js";
 import { parseArguments, type Arguments } from "../src/options/arguments.js";
 import { loadProfile } from "../src/options/profile.js";
-import { resolveRunOptions } from "../src/options/run-options.js";
+import { resolveRunOptions, usesFixChanges } from "../src/options/run-options.js";
 
 function start(args: string[]): Arguments {
   const command = parseArguments(args);
@@ -19,8 +19,20 @@ test("capture, compare and workflow options are parsed", () => {
     "--threshold", "0.5", "--case-file", "f.json", "--no-ocr", "--tessdata", "t", "--only", "compare"]);
   deepStrictEqual(parsed, {
     cases: ["a", "b", "c"], captures: ["common"], settingsOverlay: "o", threshold: 0.5, caseFile: "f.json",
-    canonicalCache: null, liveCanonical: false, noOcr: true, tessdata: "t", only: "compare", recapture: false, noDiagnosis: false, noRepair: false, noWidening: false, unattended: false,
+    canonicalCache: null, liveCanonical: false, noOcr: true, tessdata: "t", only: "compare", recapture: false, noDiagnosis: false, noRepair: false, noWidening: false, unattended: false, fixChanges: false,
   });
+});
+
+test("--fix-changes is stored with the thread, absent means off, and it contradicts --unattended", () => {
+  const root = scratch();
+  equal(start(["--fix-changes"]).fixChanges, true);
+  equal(resolveRunOptions(start(["--fix-changes", "--no-repair"]), {}, { LOCALAPPDATA: root }, root).fixChanges, true);
+  const stored = resolveRunOptions(start([]), {}, { LOCALAPPDATA: root }, root);
+  equal(stored.fixChanges, false);
+  const { fixChanges: _, ...older } = stored;
+  equal(usesFixChanges(older), false);
+  equal(usesFixChanges({ ...stored, fixChanges: true }), true);
+  throws(() => parseArguments(["--fix-changes", "--unattended", "--no-repair"]), (error: Error) => error instanceof SetupError && /contradict/.test(error.message));
 });
 
 test("options the workflow sets itself are rejected", () => {

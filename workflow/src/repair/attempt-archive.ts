@@ -7,6 +7,7 @@ import { SetupError } from "../host/setup-error.js";
 import type { CheckRow } from "./attempt-host.js";
 import type { CheckExecution } from "./cluster-repair.js";
 import type { PatchFile } from "./patch.js";
+import type { PlannedWork } from "./planned-attempt.js";
 import type { RepairOutput } from "./repair-schemas.js";
 
 /** `attempt.json`: everything about one finished attempt. */
@@ -31,6 +32,8 @@ export type AttemptDocument = {
   readonly reason: string | null;
   readonly startedUtc: string;
   readonly finishedUtc: string;
+  /** In a thread with fix changes: the plan and each subtask; absent otherwise. */
+  readonly planned?: PlannedWork;
 };
 
 /** Where an attempt's archive is: `repair/<cluster>/attempt-<n>/` in the thread's folder. */
@@ -47,6 +50,8 @@ export type ArchiveInput = {
   readonly layout: string | null;
   /** The build's log file, or null when no build ran or it wrote none. */
   readonly buildLog: string | null;
+  /** More files by their path in the archive, such as the draft of a fix change. */
+  readonly extra?: Readonly<Record<string, string>>;
 };
 
 /**
@@ -66,6 +71,10 @@ export function writeArchive(input: ArchiveInput): void {
     }
   }
   if (input.buildLog !== null && existsSync(input.buildLog)) cpSync(input.buildLog, join(partial, "build.log"));
+  for (const [path, content] of Object.entries(input.extra ?? {})) {
+    mkdirSync(dirname(join(partial, path)), { recursive: true });
+    writeFileSync(join(partial, path), content);
+  }
   mkdirSync(dirname(input.folder), { recursive: true });
   renameSync(partial, input.folder);
 }

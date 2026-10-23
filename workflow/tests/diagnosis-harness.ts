@@ -29,6 +29,7 @@ import { captureNames } from "../src/cases/case-plan.js";
 import { processBranchGit, type BranchGit } from "../src/widening/accepted-branch.js";
 import { WideningService, type WideningDependencies } from "../src/widening/widening-service.js";
 import { LoopService } from "../src/loop/loop-service.js";
+import { fixesRootOf, openSpecArchiver, processOpenSpecCli, type FixChangeArchiver } from "../src/fixes/fix-archiver.js";
 import { plannedCase, readReport, repository, runFolders, scratch, triageDocument, type Spot } from "./diagnosis-fixtures.js";
 
 export const hypothesisAnswer = (claim = "The Skills tab label moved in frmCreate."): HypothesisOutput => ({
@@ -138,7 +139,7 @@ const fingerprints = (candidateSource: string): InputFingerprints => ({
 
 const baseArguments: Arguments = {
   cases: [], captures: [], settingsOverlay: null, threshold: null, caseFile: null, canonicalCache: null,
-  liveCanonical: false, noOcr: false, tessdata: null, only: null, recapture: false, noDiagnosis: false, noRepair: false, noWidening: false, unattended: false,
+  liveCanonical: false, noOcr: false, tessdata: null, only: null, recapture: false, noDiagnosis: false, noRepair: false, noWidening: false, unattended: false, fixChanges: false,
 };
 
 const details: CaseDetails = {
@@ -180,6 +181,8 @@ export type HarnessOptions = {
     readonly git?: (git: BranchGit) => BranchGit;
     /** The environment and changed-input checks; by default nothing ever changes. */
     readonly inputs?: WideningDependencies["inputs"];
+    /** The fix change archiver; by default the real OpenSpec CLI with this checkout's fixes root. */
+    readonly archive?: FixChangeArchiver;
   };
 };
 
@@ -253,6 +256,8 @@ export function diagnosisHarness(options: HarnessOptions) {
   const widening = new WideningService({
     threadFolder: (threadId) => join(root, "threads", threadId), build: wideningHost.build, capture: wideningHost.capture, allCases: () => allCases,
     git: options.widening?.git?.(branchGit) ?? branchGit, now: () => new Date("2026-10-01T13:00:00Z"), log,
+    // The fixture repository has no fixes root; the real one of this checkout holds the schema.
+    fixes: { root: fixesRootOf(fixesRepository), archive: options.widening?.archive ?? openSpecArchiver(processOpenSpecCli(fixesRepository)) },
     inputs: options.widening?.inputs ?? { environment: async () => "environment-1", changed: async () => [] },
   });
   const checkpointer = options.checkpointer ?? new MemorySaver();
@@ -267,6 +272,7 @@ export function diagnosisHarness(options: HarnessOptions) {
       diagnosis: !command.arguments.noDiagnosis, agents: settings, unattended: command.arguments.unattended, certificates: join(root, "certificates"),
       repair: options.repair === undefined || command.arguments.noRepair ? null : { deadlineMinutes: options.repair.deadlineMinutes, maxAttempts: options.repair.maxAttempts ?? 1 },
       widening: options.repair !== undefined && options.widening !== undefined && !command.arguments.noRepair && !command.arguments.noWidening,
+      fixChanges: command.arguments.fixChanges,
     }),
     planCases: () => ({ cases: cases.filter((item) => folders[item.name] !== undefined), excluded: [] }),
     readCase: () => details,
@@ -285,6 +291,9 @@ export function diagnosisHarness(options: HarnessOptions) {
 }
 
 const examples = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "contracts", "examples");
+
+/** This checkout, whose `fixes/` root holds the `fix` schema and whose node_modules hold the OpenSpec CLI. */
+const fixesRepository = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 /** The hypothesis's predictions hold and the alternative's does not. */
 const defaultObserved: Readonly<Record<string, "passed" | "failed" | "missing-candidate" | "missing">> = { "build-alpha/skills": "failed", "career-beta/common": "passed" };

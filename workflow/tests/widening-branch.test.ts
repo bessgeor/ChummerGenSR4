@@ -1,6 +1,6 @@
 import { deepStrictEqual, equal, notEqual, ok, throws } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createSourceSnapshot, processGit } from "../src/diagnosis/source-snapshot.js";
@@ -124,4 +124,20 @@ test("a widened source that stages the accepted tree has nothing to commit", asy
   const branch = new AcceptedBranch(processBranchGit(repo), "wf-3", join(scratch(), "promote.index"));
   equal(promote({ branch, base: snapshot.commit, accepted: null, snapshotFolder: snapshot.folder, widenedSource: snapshot.folder, trailers: { thread: "wf-3", cluster: "d-1", record: "r" }, summary: "s" }), null);
   equal(branch.tip(), null);
+});
+
+test("a folder committed beside Chummer/ does not make an unchanged Chummer/ a change", async () => {
+  const repo = repository();
+  const snapshot = await createSourceSnapshot(repo, join(scratch(), "source"), processGit(repo));
+  const branch = new AcceptedBranch(processBranchGit(repo), "wf-4", join(scratch(), "promote.index"));
+  const widened = join(scratch(), "widened");
+  cpSync(snapshot.folder, widened, { recursive: true });
+  write(widened, "fixes/openspec/changes/archive/2026-10-02-fix-d-1/fix.json", "{}");
+  const promotion = { branch, base: snapshot.commit, accepted: null, snapshotFolder: snapshot.folder, widenedSource: widened, trailers: { thread: "wf-4", cluster: "d-1", record: "r" }, summary: "s" };
+  equal(promote({ ...promotion, alsoCommitted: ["fixes"] }), null);
+  equal(branch.tip(), null);
+  // With a change in Chummer/ the folder goes into the fix commit.
+  write(widened, "Chummer/frmCreate.cs", "class frmCreate { int restored; }");
+  const commit = committed({ ...promotion, alsoCommitted: ["fixes"] });
+  deepStrictEqual(git(repo, "diff", "--name-only", `${commit}~1`, commit).split("\n").sort(), ["Chummer/frmCreate.cs", "fixes/openspec/changes/archive/2026-10-02-fix-d-1/fix.json"]);
 });

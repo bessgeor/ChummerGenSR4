@@ -1,23 +1,27 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { BaseStore } from "@langchain/langgraph-checkpoint";
-import { wasNotStarted, type AgentFailure, type AgentResult, type NotStarted } from "../agents/agent-job.js";
 import type { AgentRunners } from "../agents/agent-runners.js";
 import type { CheckResult } from "../diagnosis/check.js";
 import type { ClusterDiagnosis, QuotaWaitMark } from "../diagnosis/cluster-diagnosis.js";
-import { measuredDuration, readSealedManifest } from "../diagnosis/diagnosis-service.js";
+import type { ContextManifest } from "../diagnosis/context.js";
+import { readSealedManifest } from "../diagnosis/diagnosis-service.js";
 import type { QuotaWaiter } from "../diagnosis/quota-waiter.js";
-import { nextRecordId, noLabels, putRecord, setLabels, type EvalRecord, type RepairStage } from "../evals/eval-record.js";
+import { nextRecordId, recordNamespace, setLabels, type RepairStage } from "../evals/eval-record.js";
+import { draftFiles, draftFixRecord } from "../fixes/fix-draft.js";
 import type { ScratchFolder } from "../host/scratch-folder.js";
 import { SetupError } from "../host/setup-error.js";
-import type { RunOptions } from "../options/run-options.js";
+import { usesFixChanges, type RunOptions } from "../options/run-options.js";
 import { attemptFolder, writeArchive, type AttemptDocument } from "./attempt-archive.js";
 import { judgeNarrowCheck, type AttemptBuild, type CheckRow, type NarrowCheck } from "./attempt-host.js";
 import type { AttemptSummary, CheckExecution, ClusterRepair, RepairStatus, RepairUpdate } from "./cluster-repair.js";
 import { computePatch, type Patch } from "./patch.js";
 import { guardPatch } from "./patch-guard.js";
-import { repairPrompt } from "./repair-prompt.js";
+import { PlannedAttempt, type JobsOutcome } from "./planned-attempt.js";
+import { repairPrompt, type RepairBrief } from "./repair-prompt.js";
+import { runRecordedJob, type AttemptJobs } from "./repair-job.js";
 import { repairDocument, writeRepairDocument } from "./repair-report.js";
+import { maximumSubtasks } from "./plan-schemas.js";
 import { RepairOutputSchema, repairPromptVersion, validateRepair, type RepairOutput } from "./repair-schemas.js";
 import { changesOutsideSource, stageWorkspace, workspaceIn, type AttemptWorkspace } from "./workspace.js";
 
@@ -46,7 +50,7 @@ export type RepairInput = {
 
 export type RepairStep = { readonly update: RepairUpdate; readonly chargedMs: number };
 
-/** How an attempt ended once its model job finished. */
+/** How an attempt ended once its model jobs finished. */
 type Ending = {
   readonly patch: Patch | null;
   readonly guard: readonly string[];
@@ -56,12 +60,17 @@ type Ending = {
   readonly reason: string | null;
 };
 
+type FinishedJobs = Extract<JobsOutcome, { kind: "finished" }>;
+
 /** The snapshot every attempt of a thread starts from: diagnosis's history-less copy of the source the candidate was built from. */
 function snapshotFolder(threadFolder: string): string {
   return join(threadFolder, "diagnosis", "source");
 }
 
-/** Repair on the real host: one attempt per confirmed cluster, judged by the patch guard, the build and the narrow check. */
+/**
+ * Repair on the real host: one attempt per confirmed cluster, made by one repair job, or with fix changes by a plan
+ * and its subtasks, and judged by the patch guard, the build and the narrow check.
+ */
 export class RepairService {
   /** Model time the attempts finished in this process charged to each thread, before the graph state has them. */
   private readonly charged = new Map<string, number>();
@@ -100,80 +109,78 @@ export class RepairService {
     if (budgetSpent()) return this.budgetExhausted(label, clusterId, options.agents.runBudgetMinutes);
     const manifest = readSealedManifest(diagnosis);
     const threadFolder = this.dependencies.threadFolder(input.threadId);
-    const { recordId, attempt, unlisted } = await nextRecordId(store, "repair", `${input.threadId}/${clusterId}/repair`, repair.records.length);
-    const records = [...repair.records, ...unlisted, recordId];
+    // A planned attempt lists its subtasks' records too; attempts are numbered by their own records only.
+    const listed = repair.records.filter((id) => /\/repair\/\d+$/.test(id)).length;
+    const { recordId, attempt, unlisted } = await nextRecordId(store, "repair", `${input.threadId}/${clusterId}/repair`, listed);
+    // An interrupted planned attempt stored its plan record and some of its subtasks' records `<attempt record>/task-<k>`.
+    const interrupted: string[] = [];
+    for (const id of unlisted) {
+      interrupted.push(id);
+      for (let task = 1; task <= maximumSubtasks; task++) {
+        if ((await store.get(recordNamespace("repair"), `${id}/task-${task}`)) !== null) interrupted.push(`${id}/task-${task}`);
+      }
+    }
+    const before = [...repair.records, ...interrupted];
     const deadlineMs = settings.deadlineMinutes * 60_000;
     const scratch = this.dependencies.createScratchFolder("workflow-repair-");
     const workspace = workspaceIn(scratch, clusterId);
-    let started = this.dependencies.now();
     try {
       const predicted = new Set([...(diagnosis.hypothesis?.output.explanation?.predictions ?? []), ...(diagnosis.challenge?.output.alternative?.predictions ?? [])]
         .map((prediction) => `${prediction.case}/${prediction.capture}`));
-      const brief = {
+      const brief: RepairBrief = {
         manifest, hypothesis: explanation, challenge: diagnosis.challenge?.output ?? null,
         observations: input.check.observations.filter((item) => predicted.has(`${item.case}/${item.capture}`)),
         earlier: (repair.earlier ?? []).map((item) => ({
           attempt: item.attempt, rejectedBy: item.rejectedBy, stage: item.stage, reason: item.reason, patch: patchText(item.archive),
         })),
       };
-      this.dependencies.log(`${label}: running on ${choice.provider} (${choice.model ?? "default model"}, effort ${choice.effort}), deadline ${settings.deadlineMinutes} min.`);
-      const ran: AgentResult<RepairOutput> | NotStarted = await this.dependencies.agents(options.agents).run<RepairOutput>({
-        kind: "repair", label, prompt: repairPrompt(brief, { sourceFolder: workspace.source, contextFolder: workspace.context }),
-        images: manifest.members.flatMap((member) => [join(workspace.context, member.canonicalCrop), join(workspace.context, member.candidateCrop)]),
-        schema: RepairOutputSchema, validate: validateRepair,
-        workspace: { folder: workspace.source, readOnly: [workspace.context], writable: true },
-        // The deadline starts with the model job, so the job may not run past it.
-        choice: { ...choice, timeoutMinutes: Math.min(choice.timeoutMinutes, settings.deadlineMinutes) },
-        logFile: join(threadFolder, "repair", "logs", `${clusterId}-repair-${attempt}.jsonl`),
-        mayStart: () => {
-          if (budgetSpent()) return false;
-          stageWorkspace(workspace, diagnosis.contextFolder, snapshotFolder(threadFolder));
-          started = this.dependencies.now();
-          return true;
-        },
-        onResult: (outcome) => this.charge(input.threadId, input.spentMs, chargedMilliseconds(label, outcome)),
+      const jobs: AttemptJobs = {
+        runner: this.dependencies.agents(options.agents), store, threadId: input.threadId, clusterId, contextHash: diagnosis.contextHash, choice,
+        now: this.dependencies.now, budgetSpent, charge: (milliseconds) => this.charge(input.threadId, input.spentMs, milliseconds),
         ...(input.signal === undefined ? {} : { signal: input.signal }),
-      });
-      if (wasNotStarted(ran)) return this.budgetExhausted(label, clusterId, options.agents.runBudgetMinutes);
-      // Only the source copy may change: a job that touched the context copy or the scratch folder fails as infra, whichever provider ran it.
-      const outside = await changesOutsideSource(workspace, diagnosis.contextFolder);
-      const result: AgentResult<RepairOutput> = outside.length === 0 ? ran
-        : { ok: false, failure: { kind: "infra", message: `${label}: the job changed files outside its source copy: ${outside.join("; ")}.` }, usage: ran.usage, durationMs: ran.durationMs, sessionId: ran.sessionId };
-      const finished = this.dependencies.now();
-      const record: EvalRecord = {
-        schemaVersion: 2, recordId, jobKind: "repair", origin: "workflow", threadId: input.threadId, subject: { kind: "discrepancy-cluster", id: clusterId },
-        challenged: null, contextHash: diagnosis.contextHash, promptVersion: repairPromptVersion,
-        agent: { provider: choice.provider, model: choice.model, effort: choice.effort },
-        startedUtc: started.toISOString(), finishedUtc: finished.toISOString(), durationMs: measuredDuration(label, result), usage: result.usage,
-        result: result.ok ? { status: "succeeded", message: null } : { status: result.failure.kind, message: result.failure.message },
-        output: result.ok ? result.output : null, labels: noLabels,
       };
-      await putRecord(store, record);
-      const failure: AgentFailure | null = result.ok ? null : result.failure;
-      if (failure?.kind === "quota_exhausted") {
-        this.dependencies.log(`${label}: ${failure.kind}: ${failure.message}`);
-        const waiting: QuotaWaitMark = { job: "repair", provider: choice.provider, since: finished.toISOString(), processId: this.dependencies.quota.processId, message: failure.message };
-        return { update: { clusterId, waiting, records }, chargedMs: 0 };
+      const logFile = (suffix: string) => join(threadFolder, "repair", "logs", `${clusterId}-repair-${attempt}${suffix}.jsonl`);
+      const planned = usesFixChanges(options);
+      this.dependencies.log(`${label}: running ${planned ? "a plan and its subtasks " : ""}on ${choice.provider} (${choice.model ?? "default model"}, effort ${choice.effort}), deadline ${settings.deadlineMinutes} min.`);
+      const outcome: JobsOutcome = planned
+        ? await new PlannedAttempt({
+          label, jobs, recordId, brief, manifest, workspace, contextFolder: diagnosis.contextFolder, snapshotFolder: snapshotFolder(threadFolder), logFile, deadlineMs,
+          createScratchFolder: this.dependencies.createScratchFolder, log: this.dependencies.log,
+        }).run()
+        : await this.singleJob(label, jobs, recordId, brief, workspace, diagnosis.contextFolder, snapshotFolder(threadFolder), logFile(""), settings.deadlineMinutes);
+      if (outcome.kind === "not-started" && outcome.records.length === 0) return this.budgetExhausted(label, clusterId, options.agents.runBudgetMinutes);
+      if (outcome.kind === "quota") {
+        this.dependencies.log(`${label}: ${outcome.failure.kind}: ${outcome.failure.message}`);
+        const waiting: QuotaWaitMark = { job: "repair", provider: choice.provider, since: this.dependencies.now().toISOString(), processId: this.dependencies.quota.processId, message: outcome.failure.message };
+        return { update: { clusterId, waiting, records: [...before, ...outcome.records] }, chargedMs: outcome.chargedMs };
       }
-      if (failure?.kind === "infra") throw new SetupError(`${label} failed: ${failure.message} (record ${recordId})`);
-      if (result.ok) this.dependencies.quota.reset();
-      const answer = result.ok ? result.output : null;
-      const ending = await this.judge(label, input, workspace, answer, failure, started.getTime() + deadlineMs);
-      const folder = attemptFolder(threadFolder, clusterId, attempt);
-      const document: AttemptDocument = {
-        schemaVersion: 1, threadId: input.threadId, clusterId, attempt, recordId, contextHash: diagnosis.contextHash, snapshotIdentity: manifest.source.identity,
-        hypothesisRecord: diagnosis.hypothesis!.recordId, agent: record.agent, answer, failure,
-        patch: ending.patch === null ? null : { files: ending.patch.files, added: ending.patch.added, removed: ending.patch.removed },
-        guard: ending.guard, build: ending.build, check: ending.check === null ? null : { ...ending.check.execution, rows: ending.check.rows },
-        outcome: ending.stage === null ? "passed" : "rejected", stage: ending.stage, reason: ending.reason,
-        startedUtc: started.toISOString(), finishedUtc: this.dependencies.now().toISOString(),
+      // A budget that stopped the attempt after some of its jobs finished: those jobs are archived like any rejected attempt.
+      const stoppedByBudget = outcome.kind === "not-started";
+      const finished: FinishedJobs = outcome.kind === "finished" ? outcome : {
+        kind: "finished", answer: null, failure: null, records: outcome.records, started: outcome.started ?? this.dependencies.now(), planned: outcome.planned,
+        rejection: { stage: "model", reason: `the run budget of ${options.agents.runBudgetMinutes} min was spent after ${outcome.records.length} of the attempt's jobs finished, before the next could start` },
       };
-      writeArchive({ folder, document, patchText: ending.patch?.text ?? "", layout: ending.patch === null ? null : workspace.patch, buildLog: ending.build === null ? null : workspace.buildLog });
-      await setLabels(store, record, { repair: { outcome: document.outcome, stage: ending.stage, reason: ending.reason, labelledUtc: this.dependencies.now().toISOString() } });
+      if (finished.failure === null && !stoppedByBudget) this.dependencies.quota.reset();
+      const ending = await this.judge(label, input, workspace, finished, finished.started.getTime() + deadlineMs);
+      const document = this.document(input, manifest, attempt, recordId, finished, ending);
+      const folder = attemptFolder(threadFolder, clusterId, attempt);
+      const draft = finished.planned !== null && document.outcome === "passed"
+        ? draftFiles(draftFixRecord({
+          threadId: input.threadId, manifest, diagnosis, check: input.check, observations: brief.observations, planned: finished.planned,
+          patch: ending.patch!, narrowCheck: ending.check!.execution,
+        }))
+        : {};
+      writeArchive({
+        folder, document, patchText: ending.patch?.text ?? "", layout: ending.patch === null ? null : workspace.patch,
+        buildLog: ending.build === null ? null : workspace.buildLog, extra: draft,
+      });
+      const labels = { repair: { outcome: document.outcome, stage: ending.stage, reason: ending.reason, labelledUtc: this.dependencies.now().toISOString() } };
+      for (const record of finished.records) await setLabels(store, record, labels);
       this.dependencies.log(`${label}: ${document.outcome}${ending.stage === null ? "" : ` at ${ending.stage}: ${ending.reason}`}; ${folder}`);
       const summary: AttemptSummary = { attempt, recordId, folder, outcome: document.outcome, stage: ending.stage, reason: ending.reason, check: ending.check?.execution ?? null };
-      const status: RepairStatus = failure !== null && failure.kind !== "timeout" ? "failed" : document.outcome;
-      return { update: { clusterId, status, attempt: summary, records }, chargedMs: record.durationMs };
+      const status: RepairStatus = stoppedByBudget ? "budget_exhausted" : finished.failure !== null && finished.failure.kind !== "timeout" ? "failed" : document.outcome;
+      const records = [...before, ...finished.records.map((record) => record.recordId)];
+      return { update: { clusterId, status, attempt: summary, records }, chargedMs: finished.records.reduce((sum, record) => sum + record.durationMs, 0) };
     } finally {
       // A leftover copy is not a failure of the attempt: its result is still recorded, and the copy is named for the operator.
       try {
@@ -184,11 +191,49 @@ export class RepairService {
     }
   }
 
-  /** The guard, the build and the narrow check of an attempt whose model job finished, each only when the step before passed. */
-  private async judge(label: string, input: RepairInput, workspace: AttemptWorkspace, answer: RepairOutput | null, failure: AgentFailure | null, deadline: number): Promise<Ending> {
+  /** The single repair job of an attempt in a thread without fix changes, in the attempt's writable copy. */
+  private async singleJob(label: string, jobs: AttemptJobs, recordId: string, brief: RepairBrief, workspace: AttemptWorkspace,
+    contextFolder: string, snapshot: string, logFile: string, deadlineMinutes: number): Promise<JobsOutcome> {
+    const ran = await runRecordedJob<RepairOutput>(jobs, {
+      label, recordId, promptVersion: repairPromptVersion, prompt: repairPrompt(brief, { sourceFolder: workspace.source, contextFolder: workspace.context }),
+      images: brief.manifest.members.flatMap((member) => [join(workspace.context, member.canonicalCrop), join(workspace.context, member.candidateCrop)]),
+      schema: RepairOutputSchema, validate: validateRepair,
+      workspace: { folder: workspace.source, readOnly: [workspace.context], writable: true },
+      // The deadline starts with the model job, so the job may not run past it.
+      timeoutMinutes: () => Math.min(jobs.choice.timeoutMinutes, deadlineMinutes), logFile,
+      stage: () => stageWorkspace(workspace, contextFolder, snapshot),
+      outside: () => changesOutsideSource(workspace, contextFolder),
+    });
+    if (ran === null) return { kind: "not-started", records: [], started: null, planned: null };
+    const { record, result } = ran;
+    if (!result.ok && result.failure.kind === "quota_exhausted") return { kind: "quota", failure: result.failure, records: [record.recordId], chargedMs: 0 };
+    return {
+      kind: "finished", answer: result.ok ? result.output : null, failure: result.ok ? null : result.failure, rejection: null, records: [record],
+      started: new Date(record.startedUtc), planned: null,
+    };
+  }
+
+  /** `attempt.json` of a finished attempt. */
+  private document(input: RepairInput, manifest: ContextManifest, attempt: number, recordId: string, outcome: FinishedJobs, ending: Ending): AttemptDocument {
+    return {
+      schemaVersion: 1, threadId: input.threadId, clusterId: input.repair.clusterId, attempt, recordId, contextHash: input.diagnosis.contextHash,
+      snapshotIdentity: manifest.source.identity, hypothesisRecord: input.diagnosis.hypothesis!.recordId, agent: outcome.records[0]!.agent,
+      answer: outcome.answer, failure: outcome.failure,
+      patch: ending.patch === null ? null : { files: ending.patch.files, added: ending.patch.added, removed: ending.patch.removed },
+      guard: ending.guard, build: ending.build, check: ending.check === null ? null : { ...ending.check.execution, rows: ending.check.rows },
+      outcome: ending.stage === null ? "passed" : "rejected", stage: ending.stage, reason: ending.reason,
+      startedUtc: outcome.started.toISOString(), finishedUtc: this.dependencies.now().toISOString(),
+      ...(outcome.planned === null ? {} : { planned: outcome.planned }),
+    };
+  }
+
+  /** The guard, the build and the narrow check of an attempt whose model jobs finished, each only when the step before passed. */
+  private async judge(label: string, input: RepairInput, workspace: AttemptWorkspace, jobs: FinishedJobs, deadline: number): Promise<Ending> {
+    const { answer, failure } = jobs;
     const patch = computePatch(snapshotFolder(this.dependencies.threadFolder(input.threadId)), workspace.source, workspace.patch);
     const rejected = (stage: RepairStage, reason: string, rest: Partial<Ending> = {}): Ending => ({ patch, guard: [], build: null, check: null, ...rest, stage, reason });
     if (failure !== null) return rejected(failure.kind === "timeout" ? "deadline" : "model", `${failure.kind}: ${failure.message}`);
+    if (jobs.rejection !== null) return rejected(jobs.rejection.stage, jobs.rejection.reason);
     if (answer === null) throw new Error(`${label}: a finished job without a failure has an answer.`);
     if (answer.outcome === "no_patch") return rejected("model", `no_patch: ${answer.reason}`);
     const guard = guardPatch(patch, answer.files);
@@ -232,6 +277,7 @@ export class RepairService {
     this.charged.set(threadId, this.spentMs(threadId, stateMs) + milliseconds);
   }
 
+  /** The cluster out of budget before an attempt's first job could start. */
   private budgetExhausted(label: string, clusterId: string, budgetMinutes: number): RepairStep {
     this.dependencies.log(`${label}: the run budget of ${budgetMinutes} min is spent; not started.`);
     return { update: { clusterId, status: "budget_exhausted" }, chargedMs: 0 };
@@ -248,9 +294,4 @@ function patchText(archive: string): string {
 /** The build log's name in the archive, or null when the build wrote none. */
 function logName(workspace: AttemptWorkspace): string | null {
   return existsSync(workspace.buildLog) ? "build.log" : null;
-}
-
-/** The model time a result charges to the run budget: not a usage limit, and an infra failure ends the run. */
-function chargedMilliseconds(label: string, result: AgentResult<unknown>): number {
-  return !result.ok && (result.failure.kind === "quota_exhausted" || result.failure.kind === "infra") ? 0 : measuredDuration(label, result);
 }

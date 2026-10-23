@@ -42,16 +42,18 @@ export class AcceptedBranch {
   }
 
   /**
-   * A commit on `parent` whose `Chummer/` is the one of `sourceFolder`, staged as `git add` would, or null when that
-   * is the parent's own tree.
+   * A commit on `parent` whose `Chummer/` (and the other `paths` of `sourceFolder`) is the one of `sourceFolder`,
+   * staged as `git add` would, or null when the staged tree is the parent's own tree within `changing` (the `paths` by
+   * default): a folder staged only to accompany the change does not make it one.
    */
-  commitSource(parent: string, sourceFolder: string, message: string): string | null {
+  commitSource(parent: string, sourceFolder: string, message: string, paths: readonly string[] = [compiledFolder], changing: readonly string[] = paths): string | null {
     const env = { GIT_INDEX_FILE: this.indexFile };
     try {
       this.git(["read-tree", parent], { env });
-      this.git([`--work-tree=${sourceFolder}`, "add", "--all", "--", compiledFolder], { cwd: sourceFolder, env });
+      this.git([`--work-tree=${sourceFolder}`, "add", "--all", "--", ...paths], { cwd: sourceFolder, env });
       const tree = this.git(["write-tree"], { env }).trim();
-      if (tree === this.git(["rev-parse", `${parent}^{tree}`]).trim()) return null;
+      const changed = this.git(["diff-tree", "-r", "--name-only", `${parent}^{tree}`, tree, "--", ...changing]).trim();
+      if (changed.length === 0) return null;
       return this.git(["commit-tree", tree, "-p", parent, "-F", "-"], { env, input: message }).trim();
     } finally {
       rmSync(this.indexFile, { force: true });
@@ -61,6 +63,12 @@ export class AcceptedBranch {
   /** Moves the branch from `expected` (null: it must not exist) to `commit`; another value of the branch fails. */
   move(commit: string, expected: string | null): void {
     this.git(["update-ref", "-m", `workflow: accept ${commit}`, this.ref, commit, expected ?? ""]);
+  }
+
+  /** Whether the branch's tip carries a repair record: a promotion of that attempt was committed before an interruption. */
+  promotedRecord(record: string): boolean {
+    const tip = this.tip();
+    return tip !== null && this.repairRecord(tip) === record;
   }
 
   /** The `Repair-Record` trailer of a commit, or null when it has none. */
@@ -80,6 +88,8 @@ export type Promotion = {
   readonly widenedSource: string;
   readonly trailers: FixTrailers;
   readonly summary: string;
+  /** Folders of the widened source the fix commit holds besides `Chummer/`, such as the archived fix change. */
+  readonly alsoCommitted?: readonly string[];
 };
 
 /**
@@ -97,7 +107,7 @@ export function promote(promotion: Promotion): string | null {
     throw new SetupError(`${branch.ref} is at ${tip ?? "nothing"}, not at the accepted ${promotion.accepted ?? "nothing"}; something else moved it or it was deleted, and a thread that can still be resumed needs the branch where it left it.`);
   }
   const parent = promotion.accepted ?? branch.commitSource(promotion.base, promotion.snapshotFolder, sourceMessage(branch.threadId)) ?? promotion.base;
-  const fix = branch.commitSource(parent, promotion.widenedSource, fixMessage(trailers, promotion.summary));
+  const fix = branch.commitSource(parent, promotion.widenedSource, fixMessage(trailers, promotion.summary), [compiledFolder, ...(promotion.alsoCommitted ?? [])], [compiledFolder]);
   if (fix === null) return null;
   branch.move(fix, tip);
   return fix;

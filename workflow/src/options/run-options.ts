@@ -31,7 +31,14 @@ export type RunOptions = {
   readonly repair: RepairSettings | null;
   /** Whether passed repair attempts are widened and promoted (false with --no-widening or --no-repair). */
   readonly widening: boolean;
+  /** Whether the thread works in fix changes (--fix-changes); absent in a thread stored before it existed, which works without. */
+  readonly fixChanges?: boolean;
 };
+
+/** Whether a thread works in fix changes: priors in diagnosis, planned repair and a fix change with every promotion. */
+export function usesFixChanges(options: RunOptions): boolean {
+  return options.fixChanges === true;
+}
 
 export type RepairSettings = {
   readonly deadlineMinutes: number;
@@ -78,5 +85,6 @@ export function resolveRunOptions(args: Arguments, profile: Profile, env: Enviro
       maxAttempts: profile.repair?.maxAttempts ?? defaultRepairMaxAttempts,
     },
     widening: !args.noRepair && !args.noWidening,
+    fixChanges: args.fixChanges,
   };
 }
