@@ -24,6 +24,10 @@ import type { InputFingerprints } from "../src/steps/input-fingerprints.js";
 import type { StepOutcome } from "../src/steps/step-outcome.js";
 import { RepairService } from "../src/repair/repair-service.js";
 import { FakeRepairHost } from "./repair-fixtures.js";
+import { FakeWideningHost } from "./widening-fixtures.js";
+import { captureNames } from "../src/cases/case-plan.js";
+import { processBranchGit, type BranchGit } from "../src/widening/accepted-branch.js";
+import { WideningService, type WideningDependencies } from "../src/widening/widening-service.js";
 import { plannedCase, readReport, repository, runFolders, scratch, triageDocument, type Spot } from "./diagnosis-fixtures.js";
 
 export const hypothesisAnswer = (claim = "The Skills tab label moved in frmCreate."): HypothesisOutput => ({
@@ -128,12 +132,12 @@ export class FakeAgents implements AgentRunner {
 }
 
 const fingerprints = (candidateSource: string): InputFingerprints => ({
-  canonicalExecutable: "e", canonicalSupport: "s", canonicalSupportStat: "ss", tessdata: "default", candidate: "candidate", overlay: "none", captureTools: "ct", compareTools: "mt", candidateSource,
+  canonicalExecutable: "e", canonicalSupport: "s", canonicalSupportStat: "ss", tessdata: "default", candidate: "candidate", overlay: "none", captureTools: "ct", compareTools: "mt", candidateSource, environment: "environment-1",
 });
 
 const baseArguments: Arguments = {
   cases: [], captures: [], settingsOverlay: null, threshold: null, caseFile: null, canonicalCache: null,
-  liveCanonical: false, noOcr: false, tessdata: null, only: null, recapture: false, noDiagnosis: false, noRepair: false, unattended: false,
+  liveCanonical: false, noOcr: false, tessdata: null, only: null, recapture: false, noDiagnosis: false, noRepair: false, noWidening: false, unattended: false,
 };
 
 const details: CaseDetails = {
@@ -150,6 +154,8 @@ export type HarnessOptions = {
   readonly sleep?: Sleep;
   readonly budgetMinutes?: number;
   readonly root?: string;
+  /** The fixture repository the candidate is built from; by default a new one. */
+  readonly repository?: string;
   readonly signal?: AbortSignal;
   readonly extraSteps?: Partial<WorkflowSteps>;
   /** What the check capture observes per `case/capture`; anything not named passes. */
@@ -163,12 +169,23 @@ export type HarnessOptions = {
   readonly afterTriage?: (repository: string) => void;
   /** Turns repair on (it is off by default here), with this deadline and fake host for builds and narrow checks. */
   readonly repair?: { readonly deadlineMinutes: number; readonly host: (root: string) => FakeRepairHost };
+  /**
+   * Turns widening on (with repair; off by default here), with a fake host for builds and captures, more build cases
+   * for the case file, and a wrapper around the git of the accepted branch.
+   */
+  readonly widening?: {
+    readonly host: (root: string, captureNames: (caseName: string) => readonly string[]) => FakeWideningHost;
+    readonly extraCases?: readonly string[];
+    readonly git?: (git: BranchGit) => BranchGit;
+    /** The environment and changed-input checks; by default nothing ever changes. */
+    readonly inputs?: WideningDependencies["inputs"];
+  };
 };
 
 /** A workflow whose host steps are fakes over fixture run folders, with the real diagnosis service and fake agents. */
 export function diagnosisHarness(options: HarnessOptions) {
   const root = options.root ?? scratch();
-  const sourceRepository = repository();
+  const sourceRepository = options.repository ?? repository();
   const folders = runFolders(root, options.spots);
   const cases: PlannedCase[] = [plannedCase(root, "alpha"), plannedCase(root, "beta", "career")];
   const triagePath = join(root, "triage.json");
@@ -228,9 +245,18 @@ export function diagnosisHarness(options: HarnessOptions) {
     threadFolder: (threadId) => join(root, "threads", threadId), agents: () => agents, quota, build: repairHost.build, narrowCheck: repairHost.narrowCheck,
     createScratchFolder: options.createScratchFolder ?? createScratchFolder, now: () => new Date(), log,
   });
+  const allCases = [...cases, ...(options.widening?.extraCases ?? []).map((name) => plannedCase(root, name))];
+  const caseCaptures = (caseName: string) => captureNames(allCases.find((item) => item.name === caseName)!);
+  const wideningHost = options.widening?.host(root, caseCaptures) ?? new FakeWideningHost(root, caseCaptures);
+  const branchGit = processBranchGit(sourceRepository);
+  const widening = new WideningService({
+    threadFolder: (threadId) => join(root, "threads", threadId), build: wideningHost.build, capture: wideningHost.capture, allCases: () => allCases,
+    git: options.widening?.git?.(branchGit) ?? branchGit, now: () => new Date("2026-10-01T13:00:00Z"), log,
+    inputs: options.widening?.inputs ?? { environment: async () => "environment-1", changed: async () => [] },
+  });
   const checkpointer = options.checkpointer ?? new MemorySaver();
   const store = options.store ?? new InMemoryStore();
-  const graph = buildWorkflowGraph(steps, diagnosis, repair).compile({ checkpointer, store });
+  const graph = buildWorkflowGraph(steps, diagnosis, repair, widening).compile({ checkpointer, store });
   const settings = resolveAgentSettings({ ...(options.budgetMinutes === undefined ? {} : { runBudgetMinutes: options.budgetMinutes }) });
   const dependencies: RunDependencies = {
     graph,
@@ -239,6 +265,7 @@ export function diagnosisHarness(options: HarnessOptions) {
       canonicalCacheSource: "default", noOcr: false, tessdata: null, only: command.arguments.only, recapture: false,
       diagnosis: !command.arguments.noDiagnosis, agents: settings, unattended: command.arguments.unattended, certificates: join(root, "certificates"),
       repair: options.repair === undefined || command.arguments.noRepair ? null : { deadlineMinutes: options.repair.deadlineMinutes },
+      widening: options.repair !== undefined && options.widening !== undefined && !command.arguments.noRepair && !command.arguments.noWidening,
     }),
     planCases: () => ({ cases: cases.filter((item) => folders[item.name] !== undefined), excluded: [] }),
     readCase: () => details,
@@ -248,7 +275,7 @@ export function diagnosisHarness(options: HarnessOptions) {
     ...(options.signal === undefined ? {} : { signal: options.signal }),
   };
   return {
-    root, agents, sleeps, checks, reportReads, lines, store, checkpointer, graph, repairHost,
+    root, agents, sleeps, checks, reportReads, lines, store, checkpointer, graph, repairHost, wideningHost, sourceRepository,
     start: (overrides: Partial<Arguments> = {}) => runWorkflow({ kind: "start", arguments: { ...baseArguments, ...overrides } }, dependencies),
     resume: (threadId: string) => runWorkflow({ kind: "resume", threadId }, dependencies),
     threadId: () => /Thread (wf-\S+):/.exec(lines.join("\n"))?.[1] ?? "",

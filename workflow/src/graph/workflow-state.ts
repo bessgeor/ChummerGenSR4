@@ -6,6 +6,7 @@ import type { RunOptions } from "../options/run-options.js";
 import { mergeRepairs, type ClusterRepair, type RepairUpdate } from "../repair/cluster-repair.js";
 import type { InputFingerprints } from "../steps/input-fingerprints.js";
 import type { StepOutcome } from "../steps/step-outcome.js";
+import { mergeWidenings, type AcceptedState, type ClusterWidening, type WideningUpdate } from "../widening/cluster-widening.js";
 
 /** What triage reports back to the graph; the full result is in its `triage.json`. */
 export type TriageSummary = {
@@ -53,6 +54,15 @@ export const WorkflowState = Annotation.Root({
   }),
   /** The thread's `repair.json`, once repair finished. */
   repairPath: Annotation<string | null>(),
+  /** Each passed repair attempt's widening, by cluster ID; widening nodes update the cluster they ran. */
+  widenings: Annotation<Record<string, ClusterWidening>, Record<string, WideningUpdate>>({
+    reducer: mergeWidenings,
+    default: () => ({}),
+  }),
+  /** The source accepted so far, which the next widening starts from; null until widening starts or when nothing is widened. */
+  accepted: Annotation<AcceptedState | null>(),
+  /** The thread's `widening.json`, once widening finished. */
+  wideningPath: Annotation<string | null>(),
 });
 
 export type WorkflowStateValue = typeof WorkflowState.State;
@@ -61,5 +71,5 @@ export type WorkflowStateUpdate = typeof WorkflowState.Update;
 /** The payload `Send` gives the capture and compare nodes: the state plus the index of their case. */
 export type CaseTask = WorkflowStateValue & { readonly index: number };
 
-/** The payload `Send` gives a diagnosis job node or a repair node: the state plus the cluster it works on. */
+/** The payload `Send` gives a diagnosis job node, a repair node or a widening node: the state plus the cluster it works on. */
 export type ClusterTask = WorkflowStateValue & { readonly clusterId: string };

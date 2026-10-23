@@ -128,7 +128,7 @@ test("a run killed during a narrow check resumes with a new attempt and does not
 test("an unattended run that would repair is refused; --no-repair, --no-diagnosis and --only lift it", () => {
   const options = (overrides: Partial<RunOptions>): RunOptions => ({
     caseFile: "c", cases: [], captures: [], settingsOverlay: null, threshold: null, canonicalCache: null, canonicalCacheSource: "off", noOcr: false, tessdata: null,
-    only: null, recapture: false, diagnosis: true, agents: resolveAgentSettings(undefined), unattended: true, certificates: scratch(), repair: { deadlineMinutes: 60 }, ...overrides,
+    only: null, recapture: false, diagnosis: true, agents: resolveAgentSettings(undefined), unattended: true, certificates: scratch(), repair: { deadlineMinutes: 60 }, widening: true, ...overrides,
   });
   ok(unattendedProblems(options({})).some((problem) => /^repair: .*add --no-repair/.test(problem)));
   ok(!unattendedProblems(options({ repair: null })).some((problem) => problem.startsWith("repair")));

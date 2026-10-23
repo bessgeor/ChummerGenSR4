@@ -4,12 +4,13 @@ import type { PlannedCase } from "./cases/case-plan.js";
 import type { TriageInput, WorkflowSteps } from "./graph/workflow-graph.js";
 import type { TriageSummary } from "./graph/workflow-state.js";
 import type { HostRunner } from "./host/host-runner.js";
+import type { ScratchFolder } from "./host/scratch-folder.js";
 import { recordCandidateSource } from "./diagnosis/candidate-source.js";
 import { compiledSourceIdentity, processGit } from "./diagnosis/source-snapshot.js";
 import { SetupError } from "./host/setup-error.js";
 import type { RunOptions } from "./options/run-options.js";
 import type { WorkflowPaths } from "./paths.js";
-import type { CaptureStep } from "./steps/capture-step.js";
+import { readEnvironmentFingerprint, type CaptureStep } from "./steps/capture-step.js";
 import { requireCurrentReport, type CompareStep } from "./steps/compare-step.js";
 import { fingerprintInputs, type InputFingerprints } from "./steps/input-fingerprints.js";
 import type { StepContext, StepOutcome } from "./steps/step-outcome.js";
@@ -27,6 +28,7 @@ export class HostSteps implements WorkflowSteps {
     private readonly compareStep: CompareStep,
     private readonly stepStore: StepStore,
     private readonly now: () => Date,
+    private readonly createScratchFolder: (prefix: string) => ScratchFolder,
   ) {}
 
   async build(options: RunOptions, buildCandidate: boolean, signal?: AbortSignal): Promise<InputFingerprints> {
@@ -37,7 +39,8 @@ export class HostSteps implements WorkflowSteps {
     for (const build of [candidateBuild, toolBuilds]) {
       if (build.status === "rejected") throw build.reason;
     }
-    return fingerprintInputs(this.paths, options);
+    const environment = await readEnvironmentFingerprint(this.paths, this.host, this.createScratchFolder, "environment thread", signal);
+    return fingerprintInputs(this.paths, options, environment);
   }
 
   /** Builds the candidate and records the compiled source it was built from, taken before the build so an edit during it shows. */

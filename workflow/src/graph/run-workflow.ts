@@ -4,6 +4,7 @@ import { SetupError } from "../host/setup-error.js";
 import type { Command } from "../options/arguments.js";
 import type { RunOptions } from "../options/run-options.js";
 import { describeRepair, repairStatus } from "../repair/repair-report.js";
+import { describeWidening, wideningStatus } from "../widening/widening-report.js";
 import type { CaseDetails } from "../steps/case-details.js";
 import { describeCase } from "./case-report.js";
 import { describeDiagnosis, diagnosisStatus } from "./diagnosis-report.js";
@@ -47,10 +48,10 @@ function config(threadId: string, signal: AbortSignal | undefined) {
   };
 }
 
-/** The highest finished status of every capture and compare, of the diagnosis and of the repair. */
-export function exitStatus(state: Pick<WorkflowStateValue, "captures" | "compares"> & Partial<Pick<WorkflowStateValue, "clusters" | "diagnosisCheck" | "repairs">>): number {
+/** The highest finished status of every capture and compare, of the diagnosis, of the repair and of the widening. */
+export function exitStatus(state: Pick<WorkflowStateValue, "captures" | "compares"> & Partial<Pick<WorkflowStateValue, "clusters" | "diagnosisCheck" | "repairs" | "widenings">>): number {
   const statuses = [...Object.values(state.captures), ...Object.values(state.compares)].map((outcome) => outcome.status);
-  return Math.max(0, ...statuses, diagnosisStatus(state.clusters ?? {}, state.diagnosisCheck ?? null), repairStatus(state.repairs ?? {}));
+  return Math.max(0, ...statuses, diagnosisStatus(state.clusters ?? {}, state.diagnosisCheck ?? null), repairStatus(state.repairs ?? {}), wideningStatus(state.widenings ?? {}));
 }
 
 function report(state: WorkflowStateValue, readCase: RunDependencies["readCase"], log: (line: string) => void): void {
@@ -68,6 +69,7 @@ function report(state: WorkflowStateValue, readCase: RunDependencies["readCase"]
   // A thread checkpointed before diagnosis existed has no such fields at all.
   for (const line of describeDiagnosis(state.clusters ?? {}, state.diagnosisCheck ?? null, state.diagnosisPath ?? null)) log(line);
   for (const line of describeRepair(state.repairs ?? {}, state.repairPath ?? null)) log(line);
+  for (const line of describeWidening(state.widenings ?? {}, state.accepted ?? null, state.wideningPath ?? null)) log(line);
 }
 
 async function start(command: Extract<Command, { kind: "start" }>, dependencies: RunDependencies): Promise<{ threadId: string; input: WorkflowStateValue }> {
@@ -80,7 +82,7 @@ async function start(command: Extract<Command, { kind: "start" }>, dependencies:
   dependencies.log(`Thread ${threadId}: ${plan.cases.length} cases, canonical cache ${cache}.`);
   const input: WorkflowStateValue = {
     threadId, options, plan: [...plan.cases], fingerprints: null, captures: {}, lastCaptured: -1, compares: {}, triageSummary: null,
-    clusters: {}, agentMilliseconds: 0, diagnosisCheck: null, diagnosisPath: null, repairs: {}, repairPath: null,
+    clusters: {}, agentMilliseconds: 0, diagnosisCheck: null, diagnosisPath: null, repairs: {}, repairPath: null, widenings: {}, accepted: null, wideningPath: null,
   };
   return { threadId, input };
 }

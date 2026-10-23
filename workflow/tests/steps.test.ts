@@ -20,13 +20,13 @@ import { StepStore } from "../src/steps/step-store.js";
 
 const fingerprints: InputFingerprints = {
   canonicalExecutable: "exe", canonicalSupport: "support", canonicalSupportStat: "stat", tessdata: "default", candidate: "candidate", overlay: "none",
-  captureTools: "ct", compareTools: "mt", candidateSource: "src",
+  captureTools: "ct", compareTools: "mt", candidateSource: "src", environment: "env",
 };
 
 const options: RunOptions = {
   caseFile: "cases.json", cases: [], captures: [], settingsOverlay: null, threshold: null, canonicalCache: "C:/cache",
   canonicalCacheSource: "option", noOcr: false, tessdata: null, only: null, recapture: false,
-  diagnosis: false, agents: resolveAgentSettings(undefined), unattended: false, certificates: "certificates", repair: null,
+  diagnosis: false, agents: resolveAgentSettings(undefined), unattended: false, certificates: "certificates", repair: null, widening: false,
 };
 
 function scratch(): string {
@@ -119,7 +119,7 @@ test("the capture key changes with every input", () => {
     captureKey(item, "fixture", "f".repeat(64), options, fingerprints),
     captureKey(item, "fixture", environment, { ...options, threshold: 0.1 }, fingerprints),
     captureKey(item, "fixture", environment, { ...options, canonicalCache: null }, fingerprints),
-    ...(Object.keys(fingerprints) as (keyof InputFingerprints)[]).filter((name) => name !== "compareTools" && name !== "tessdata" && name !== "canonicalSupportStat" && name !== "candidateSource")
+    ...(Object.keys(fingerprints) as (keyof InputFingerprints)[]).filter((name) => name !== "compareTools" && name !== "tessdata" && name !== "canonicalSupportStat" && name !== "candidateSource" && name !== "environment")
       .map((name) => captureKey(item, "fixture", environment, options, { ...fingerprints, [name]: "changed" })),
   ];
   for (const variant of variants) notEqual(variant.key, base);
@@ -128,6 +128,8 @@ test("the capture key changes with every input", () => {
   equal(captureKey(item, "fixture", environment, options, { ...fingerprints, canonicalSupportStat: "changed" }).key, base);
   // The recorded source guards diagnosis only; it is not part of a step key, so recorded steps stay valid.
   equal(captureKey(item, "fixture", environment, options, { ...fingerprints, candidateSource: "changed" }).key, base);
+  // The environment enters a key as its own argument, read again for every capture; the thread's is only a guard for later runs.
+  equal(captureKey(item, "fixture", environment, options, { ...fingerprints, environment: "changed" }).key, base);
   const compareBase = compareKey("k", "r", "c", options, fingerprints).key;
   for (const variant of [compareKey("x", "r", "c", options, fingerprints), compareKey("k", "x", "c", options, fingerprints),
     compareKey("k", "r", "x", options, fingerprints), compareKey("k", "r", "c", { ...options, noOcr: true }, fingerprints),

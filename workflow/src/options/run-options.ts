@@ -29,6 +29,8 @@ export type RunOptions = {
    * Whether confirmed clusters are repaired (null with --no-repair) and each attempt's deadline.
    */
   readonly repair: RepairSettings | null;
+  /** Whether passed repair attempts are widened and promoted (false with --no-widening or --no-repair). */
+  readonly widening: boolean;
 };
 
 export type RepairSettings = { readonly deadlineMinutes: number };
@@ -67,5 +69,6 @@ export function resolveRunOptions(args: Arguments, profile: Profile, env: Enviro
     unattended: args.unattended,
     certificates: resolve(repositoryRoot, profile.certificates ?? join("workflow", "evals", "certificates")),
     repair: args.noRepair ? null : { deadlineMinutes: profile.repair?.deadlineMinutes ?? defaultRepairDeadlineMinutes },
+    widening: !args.noRepair && !args.noWidening,
   };
 }

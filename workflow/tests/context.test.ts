@@ -70,7 +70,7 @@ test("the candidate build records the compiled source it started from, only when
       return status;
     },
   };
-  const steps = new HostSteps(paths, host, undefined as never, undefined as never, undefined as never, () => new Date());
+  const steps = new HostSteps(paths, host, undefined as never, undefined as never, undefined as never, () => new Date(), undefined as never);
   await rejects(steps.buildCandidate(), SetupError);
   equal(recordedCandidateSource(paths), unrecordedSource);
   // A failed build records nothing. The next build records the source as it is when that build starts.

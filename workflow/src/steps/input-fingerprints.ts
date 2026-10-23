@@ -86,6 +86,8 @@ export type InputFingerprints = { readonly [Name in ChangeableInput]: string } &
   readonly canonicalSupport: string;
   /** The compiled source the candidate was built from, as its build recorded it (`unrecorded` when it recorded none). */
   readonly candidateSource: string;
+  /** The capture runner's fingerprint of the machine and app environment, which decides the pixels, when the thread started. */
+  readonly environment: string;
 };
 
 export async function currentFingerprints<Name extends ChangeableInput>(
@@ -98,8 +100,11 @@ export async function currentFingerprints<Name extends ChangeableInput>(
   return result as { readonly [N in Name]: string };
 }
 
-export async function fingerprintInputs(paths: WorkflowPaths, options: Pick<RunOptions, "settingsOverlay" | "tessdata">): Promise<InputFingerprints> {
+export async function fingerprintInputs(
+  paths: WorkflowPaths, options: Pick<RunOptions, "settingsOverlay" | "tessdata">, environment: string,
+): Promise<InputFingerprints> {
   return {
+    environment,
     ...(await currentFingerprints(paths, options, Object.keys(changeable) as ChangeableInput[])) as { readonly [N in ChangeableInput]: string },
     canonicalSupport: await canonicalSupport(paths.canonicalApp),
     candidateSource: recordedCandidateSource(paths),
