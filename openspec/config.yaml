@@ -1,0 +1,39 @@
+schema: spec-driven
+
+context: |
+  ChummerGenSR4 is a legacy character generator for Shadowrun 4th Edition:
+  a Windows Forms desktop app on .NET Framework (Chummer/). It stays on
+  .NET Framework; net481 is its target once its build is modernized. The app
+  builds into bin/, which also holds tracked game data, translations,
+  settings, print sheets and sample saves.
+
+  The tracked build bin/ChummerGenSR4.exe is the reference for correct
+  behavior and is never modified. The code is modernized in small steps:
+  one OpenSpec change per pull request, each with its own verification
+  record.
+
+rules:
+  proposal:
+    - State which area the change touches (the Chummer app, its tooling, or only process and docs) and what evidence will show it works.
+  specs:
+    - Specify failure behavior explicitly. No requirement may let a failed step be reported as success, skipped silently, or replaced by a placeholder result.
+    - When a run drives the UI, keep execution outcomes (did every action run) separate from visual outcomes (does the UI look as expected) in requirements and scenarios.
+  design:
+    - Treat bin/ChummerGenSR4.exe as immutable canonical input. A design must never rebuild, replace, copy over or edit it, and every live run records its SHA-256 before and after.
+    - Say which behavior fixture tests prove and which only a live run can prove.
+  tasks:
+    - Keep tasks small, about eight per change at most, each verifiable on its own.
+    - Name the evidence needed to mark each task done.
+    - Finish with a task that writes verification.md and a task that archives the change.
+
+operations:
+  apply:
+    guidance:
+      - Preserve real failures. Do not add broad catches, fake success statuses, silent skips or other fail-soft behavior to make a run look green.
+      - Report execution failures separately from visual differences. A visual difference is not an execution failure, and a clean visual result does not prove that every action ran.
+      - Keep fixture-tested scope separate from live evidence in verification.md. When a live dependency is unavailable, record that gate as unverified; fixture results never stand in for it.
+      - Never rebuild, replace or copy over bin/ChummerGenSR4.exe, and record its SHA-256 before and after every live run.
+  archive:
+    guidance:
+      - Archive only when verification.md holds the evidence for every requirement and names what remains unverified.
+      - Run npm run openspec:validate before archiving and again after the specs are merged.

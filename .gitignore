@@ -2,9 +2,26 @@
 
 ### Local Directories and Subdirectories ###
 [Oo]bj/
+TestResults/
+
+# Build output of projects other than the app. The root bin/ holds tracked
+# data, lang, settings, sheets and saves, so it stays visible.
+[Bb]in/
+!/bin/
+
+# Node dependencies and run output
+node_modules/
+/out/
 
 # Visual Studio 2015 cache/options directory
 .vs/
+
+# Rider and ReSharper
+.idea/
+*.DotSettings.user
+
+# Local Claude Code settings
+.claude/settings.local.json
 
 ### Global File Patterns ###
 *.exe
