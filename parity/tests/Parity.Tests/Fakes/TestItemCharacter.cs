@@ -4,14 +4,18 @@ using Attribute = Chummer.Attribute;
 namespace Parity.Tests.Fakes;
 
 /// <summary>
-/// A character for the character's items that holds its improvements and cyberware in memory.
+/// A character for the character's items that holds its improvements, its cyberware and the gear its searches find in memory.
 /// Every member the tests do not use throws, so a test cannot pass on a value it never set.
 /// </summary>
-internal sealed class TestItemCharacter : ICharacter
+public class TestItemCharacter : ICharacter
 {
     public List<Improvement> Improvements { get; } = [];
     public List<TestCyberware> CyberwareList { get; } = [];
     public IEnumerable<ICharacterCyberware> Cyberware => CyberwareList;
+    public bool? IgnoreRulesValue { get; set; }
+    public Dictionary<string, Gear> GearById { get; } = [];
+    public Dictionary<string, Gear> VehicleGearById { get; } = [];
+    public List<string> GearSearches { get; } = [];
 
     public CharacterOptions Options => throw Unused();
     public string SettingsFile => throw Unused();
@@ -22,6 +26,9 @@ internal sealed class TestItemCharacter : ICharacter
     public string Metatype => throw Unused();
     public bool OverrideSpecialAttributeEssenceLoss => throw Unused();
     public int EssencePenalty => throw Unused();
+    public bool IgnoreRules => IgnoreRulesValue ?? throw Unused();
+    public Attribute BOD => throw Unused();
+    public Attribute STR => throw Unused();
     public Attribute CHA => throw Unused();
     public Attribute INT => throw Unused();
     public Attribute LOG => throw Unused();
@@ -55,7 +62,16 @@ internal sealed class TestItemCharacter : ICharacter
     public Attribute GetAttribute(string strAttribute) => throw Unused();
     IImprovementAttribute IImprovementCharacter.GetAttribute(string strAttribute) => throw Unused();
     public string GetObjectName(Improvement objImprovement) => throw Unused();
+    public Gear FindGear(string strGuid) => Search("gear", GearById, strGuid);
+    public Gear FindGearByWeaponID(string strGuid) => throw Unused();
+    public Gear FindVehicleGear(string strGuid) => Search("vehicle gear", VehicleGearById, strGuid);
     public void ConvertAdapsinGrades() => throw Unused();
+
+    private Gear Search(string strWhere, Dictionary<string, Gear> gearById, string strGuid)
+    {
+        GearSearches.Add(strWhere + " " + strGuid);
+        return gearById.TryGetValue(strGuid, out Gear? gear) ? gear : null!;
+    }
 
     private static NotSupportedException Unused() => new("The test character does not provide this member.");
 }

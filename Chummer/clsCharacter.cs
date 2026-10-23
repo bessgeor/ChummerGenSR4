@@ -4421,6 +4421,25 @@ namespace Chummer
 			}
 		}
 
+		Gear ICharacter.FindGear(string strGuid)
+		{
+			CommonFunctions objFunctions = new CommonFunctions(this);
+			return objFunctions.FindGear(strGuid, _lstGear);
+		}
+
+		Gear ICharacter.FindGearByWeaponID(string strGuid)
+		{
+			CommonFunctions objFunctions = new CommonFunctions(this);
+			return objFunctions.FindGearByWeaponID(strGuid, _lstGear);
+		}
+
+		Gear ICharacter.FindVehicleGear(string strGuid)
+		{
+			CommonFunctions objFunctions = new CommonFunctions(this);
+			Vehicle objFoundVehicle;
+			return objFunctions.FindVehicleGear(strGuid, _lstVehicles, out objFoundVehicle);
+		}
+
 		/// <summary>
 		/// Vehicles.
 		/// </summary>

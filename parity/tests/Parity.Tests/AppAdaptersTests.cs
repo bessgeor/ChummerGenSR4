@@ -126,10 +126,10 @@ public sealed class AppAdaptersTests
     }
 
     [Fact]
-    public void Included_armor_mods_get_a_new_node_with_the_context_menu_in_a_tree_node_view()
+    public void Included_items_get_a_new_node_with_the_context_menu_in_a_tree_node_view()
     {
         using ContextMenuStrip menu = new();
-        Func<ITreeNodeView> createNode = ArmorModNodes.Create(menu);
+        Func<ITreeNodeView> createNode = ContextMenuNodes.Create(menu);
 
         TreeNodeView first = Assert.IsType<TreeNodeView>(createNode());
         TreeNodeView second = Assert.IsType<TreeNodeView>(createNode());
@@ -139,6 +139,49 @@ public sealed class AppAdaptersTests
         Assert.Same(menu, second.Node.ContextMenuStrip);
         Assert.Null(first.Node.Parent);
         Assert.Equal("", first.Text);
+    }
+
+    [Fact]
+    public void Included_items_without_a_context_menu_get_a_new_node_without_one()
+    {
+        Func<ITreeNodeView> createNode = ContextMenuNodes.Create(null!);
+
+        TreeNodeView node = Assert.IsType<TreeNodeView>(createNode());
+
+        Assert.Null(node.Node.ContextMenuStrip);
+        Assert.Null(node.Node.Parent);
+    }
+
+    [Fact]
+    public void A_tree_node_view_shows_the_children_of_its_node_in_order_as_tree_node_views()
+    {
+        TreeNode node = new("Vehicle");
+        TreeNode mount = new("Weapon Mount") { Tag = "mount" };
+        TreeNode gear = new("Sensor") { Tag = "sensor" };
+        node.Nodes.Add(mount);
+        node.Nodes.Add(gear);
+        ITreeNodeView view = new TreeNodeView(node);
+
+        List<ITreeNodeView> children = view.Children.ToList();
+
+        Assert.Equal([mount, gear], children.Select(child => Assert.IsType<TreeNodeView>(child).Node));
+        Assert.Equal(["mount", "sensor"], children.Select(child => child.Tag));
+        Assert.Empty(new TreeNodeView(mount).Children);
+    }
+
+    [Fact]
+    public void A_child_found_through_the_children_gets_its_own_children_in_the_tree()
+    {
+        TreeNode node = new("Vehicle");
+        TreeNode mount = new("Weapon Mount") { Tag = "mount" };
+        node.Nodes.Add(mount);
+        ITreeNodeView view = new TreeNodeView(node);
+        ITreeNodeView weapon = view.NewNode();
+
+        Assert.Single(view.Children).Add(weapon);
+
+        Assert.Same(((TreeNodeView)weapon).Node, Assert.Single(mount.Nodes.Cast<TreeNode>()));
+        Assert.Single(node.Nodes);
     }
 
     [Fact]

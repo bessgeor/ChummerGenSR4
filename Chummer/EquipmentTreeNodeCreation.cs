@@ -5,7 +5,7 @@ using System.Xml;
 namespace Chummer
 {
 	/// <summary>
-	/// Creates and copies armor, cyberware and gear and shows each in a Windows Forms tree node, adding the Weapons they grant to the caller's lists.
+	/// Creates and copies equipment and shows each item in a Windows Forms tree node, giving the nodes of included items their context menus and adding the Weapons that armor, cyberware and gear grant to the caller's lists.
 	/// </summary>
 	public static class EquipmentTreeNodeCreation
 	{
@@ -35,7 +35,7 @@ namespace Chummer
 		/// <param name="blnCreateChildren">Whether or not child items should be created.</param>
 		public static void Create(this Armor objArmor, XmlNode objXmlArmorNode, TreeNode objNode, ContextMenuStrip cmsArmorMod, bool blnSkipCost = false, bool blnCreateChildren = true)
 		{
-			objArmor.Create(objXmlArmorNode, View(objNode), ArmorModNodes.Create(cmsArmorMod), blnSkipCost, blnCreateChildren);
+			objArmor.Create(objXmlArmorNode, View(objNode), ContextMenuNodes.Create(cmsArmorMod), blnSkipCost, blnCreateChildren);
 		}
 
 		/// <summary>
@@ -146,6 +146,85 @@ namespace Chummer
 		public static void Copy(this OperatingSystem objCopy, OperatingSystem objGear, TreeNode objNode, List<Weapon> objWeapons, List<TreeNode> objWeaponNodes)
 		{
 			objCopy.Copy(objGear, View(objNode), GrantedWeaponLists.Add(objWeapons, objWeaponNodes));
+		}
+
+		/// <summary>
+		/// Create a Weapon from an XmlNode and populate its TreeNode.
+		/// </summary>
+		/// <param name="objWeapon">Weapon to create.</param>
+		/// <param name="objXmlWeapon">XmlNode to create the object from.</param>
+		/// <param name="objCharacter">Character that the Weapon is being added to.</param>
+		/// <param name="objNode">TreeNode to populate a TreeView.</param>
+		/// <param name="cmsWeapon">ContextMenuStrip to use for Weapons.</param>
+		/// <param name="cmsWeaponAccessory">ContextMenuStrip to use for Accessories.</param>
+		/// <param name="cmsWeaponMod">ContextMenuStrip to use for Weapon Mods.</param>
+		/// <param name="blnCreateChildren">Whether or not child items should be created.</param>
+		public static void Create(this Weapon objWeapon, XmlNode objXmlWeapon, Character objCharacter, TreeNode objNode, ContextMenuStrip cmsWeapon, ContextMenuStrip cmsWeaponAccessory, ContextMenuStrip cmsWeaponMod, bool blnCreateChildren = true)
+		{
+			objWeapon.Create(objXmlWeapon, objCharacter, View(objNode), ContextMenuNodes.Create(cmsWeapon), ContextMenuNodes.Create(cmsWeaponAccessory), ContextMenuNodes.Create(cmsWeaponMod), blnCreateChildren);
+		}
+
+		/// <summary>
+		/// Create a Weapon Accessory from an XmlNode and populate its TreeNode.
+		/// </summary>
+		/// <param name="objAccessory">Weapon Accessory to create.</param>
+		/// <param name="objXmlAccessory">XmlNode to create the object from.</param>
+		/// <param name="objNode">TreeNode to populate a TreeView.</param>
+		/// <param name="strMount">Mount slot that the Weapon Accessory will consume.</param>
+		public static void Create(this WeaponAccessory objAccessory, XmlNode objXmlAccessory, TreeNode objNode, string strMount)
+		{
+			objAccessory.Create(objXmlAccessory, View(objNode), strMount);
+		}
+
+		/// <summary>
+		/// Create a Weapon Modification from an XmlNode and populate its TreeNode.
+		/// </summary>
+		/// <param name="objMod">Weapon Modification to create.</param>
+		/// <param name="objXmlMod">XmlNode to create the object from.</param>
+		/// <param name="objNode">TreeNode to populate a TreeView.</param>
+		public static void Create(this WeaponMod objMod, XmlNode objXmlMod, TreeNode objNode)
+		{
+			objMod.Create(objXmlMod, View(objNode));
+		}
+
+		/// <summary>
+		/// Create a Lifestyle from an XmlNode and populate its TreeNode.
+		/// </summary>
+		/// <param name="objLifestyle">Lifestyle to create.</param>
+		/// <param name="objXmlLifestyle">XmlNode to create the object from.</param>
+		/// <param name="objNode">TreeNode to populate a TreeView.</param>
+		public static void Create(this Lifestyle objLifestyle, XmlNode objXmlLifestyle, TreeNode objNode)
+		{
+			objLifestyle.Create(objXmlLifestyle, View(objNode));
+		}
+
+		/// <summary>
+		/// Create a Vehicle Modification from an XmlNode and populate its TreeNode.
+		/// </summary>
+		/// <param name="objMod">Vehicle Modification to create.</param>
+		/// <param name="objXmlMod">XmlNode to create the object from.</param>
+		/// <param name="objNode">TreeNode to populate a TreeView.</param>
+		/// <param name="intRating">Selected Rating for the Vehicle Modification.</param>
+		public static void Create(this VehicleMod objMod, XmlNode objXmlMod, TreeNode objNode, int intRating)
+		{
+			objMod.Create(objXmlMod, View(objNode), intRating);
+		}
+
+		/// <summary>
+		/// Create a Vehicle from an XmlNode and populate its TreeNode.
+		/// </summary>
+		/// <param name="objVehicle">Vehicle to create.</param>
+		/// <param name="objXmlVehicle">XmlNode of the Vehicle to create.</param>
+		/// <param name="objNode">TreeNode to add to a TreeView.</param>
+		/// <param name="cmsVehicle">ContextMenuStrip to attach to Weapon Mounts.</param>
+		/// <param name="cmsVehicleGear">ContextMenuStrip to attach to Gear.</param>
+		/// <param name="cmsVehicleWeapon">ContextMenuStrip to attach to Vehicle Weapons.</param>
+		/// <param name="cmsVehicleWeaponAccessory">ContextMenuStrip to attach to Weapon Accessories.</param>
+		/// <param name="cmsVehicleWeaponMod">ContextMenuStrip to attach to Weapon Mods.</param>
+		/// <param name="blnCreateChildren">Whether or not child items should be created.</param>
+		public static void Create(this Vehicle objVehicle, XmlNode objXmlVehicle, TreeNode objNode, ContextMenuStrip cmsVehicle, ContextMenuStrip cmsVehicleGear, ContextMenuStrip cmsVehicleWeapon, ContextMenuStrip cmsVehicleWeaponAccessory, ContextMenuStrip cmsVehicleWeaponMod, bool blnCreateChildren = true)
+		{
+			objVehicle.Create(objXmlVehicle, View(objNode), ContextMenuNodes.Create(cmsVehicle), ContextMenuNodes.Create(cmsVehicleGear), ContextMenuNodes.Create(cmsVehicleWeapon), ContextMenuNodes.Create(cmsVehicleWeaponAccessory), ContextMenuNodes.Create(cmsVehicleWeaponMod), blnCreateChildren);
 		}
 
 		/// <summary>

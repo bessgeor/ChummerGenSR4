@@ -5,7 +5,7 @@ using System.Xml;
 namespace Chummer
 {
 	/// <summary>
-	/// The choices of armor, cyberware and gear, asked with the app's selection windows, and the Weapons they grant, created as the app's Weapons.
+	/// The choices of the equipment, asked with the app's selection windows, and the Weapons that armor, cyberware and gear grant, created for the app's Character in the app's tree nodes.
 	/// </summary>
 	public sealed class WinFormsEquipmentHost : IEquipmentHost
 	{

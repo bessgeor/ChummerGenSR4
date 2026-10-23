@@ -3,7 +3,7 @@ using System.Collections.Generic;
 namespace Chummer
 {
 	/// <summary>
-	/// What the character's attributes, qualities, skills, magic, resonance, martial arts, contacts, critter powers, armor, cyberware and gear read of their character.
+	/// What the character's attributes, qualities, skills, magic, resonance, martial arts, contacts, critter powers, armor, cyberware, gear, weapons, lifestyles and vehicles read of their character.
 	/// </summary>
 	public interface ICharacter : IImprovementCharacter
 	{
@@ -51,6 +51,21 @@ namespace Chummer
 		/// The Essence penalty to the character's MAG or RES.
 		/// </summary>
 		int EssencePenalty { get; }
+
+		/// <summary>
+		/// Whether or not character creation rules should be ignored.
+		/// </summary>
+		bool IgnoreRules { get; }
+
+		/// <summary>
+		/// Body (BOD) Attribute.
+		/// </summary>
+		Attribute BOD { get; }
+
+		/// <summary>
+		/// Strength (STR) Attribute.
+		/// </summary>
+		Attribute STR { get; }
 
 		/// <summary>
 		/// Charisma (CHA) Attribute.
@@ -133,6 +148,24 @@ namespace Chummer
 		/// The character's Gear.
 		/// </summary>
 		IEnumerable<ICharacterGear> Gear { get; }
+
+		/// <summary>
+		/// Locate a piece of the character's Gear, also one plugged into other Gear. Returns null when there is none.
+		/// </summary>
+		/// <param name="strGuid">InternalId of the Gear to find.</param>
+		Gear FindGear(string strGuid);
+
+		/// <summary>
+		/// Locate a piece of the character's Gear, also one plugged into other Gear, by the InternalId of the Weapon it created. Returns null when there is none.
+		/// </summary>
+		/// <param name="strGuid">InternalId of the Weapon.</param>
+		Gear FindGearByWeaponID(string strGuid);
+
+		/// <summary>
+		/// Locate a piece of Gear within the character's Vehicles. Returns null when there is none.
+		/// </summary>
+		/// <param name="strGuid">InternalId of the Gear to find.</param>
+		Gear FindVehicleGear(string strGuid);
 	}
 
 	/// <summary>

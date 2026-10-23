@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
 
@@ -71,6 +72,15 @@ namespace Chummer
 		public void Add(ITreeNodeView objChild)
 		{
 			_objNode.Nodes.Add(((TreeNodeView)objChild)._objNode);
+		}
+
+		public IEnumerable<ITreeNodeView> Children
+		{
+			get
+			{
+				foreach (TreeNode objChild in _objNode.Nodes)
+					yield return new TreeNodeView(objChild);
+			}
 		}
 
 		public void Expand()

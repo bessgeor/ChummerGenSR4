@@ -20,6 +20,8 @@ internal sealed class TestTreeNode : ITreeNodeView
         set => Tag = value;
     }
 
+    IEnumerable<ITreeNodeView> ITreeNodeView.Children => Children;
+
     public void ShowAsGrayText() => Gray = true;
 
     public ITreeNodeView NewNode()
