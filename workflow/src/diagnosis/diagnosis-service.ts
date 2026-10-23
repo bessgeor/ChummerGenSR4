@@ -6,7 +6,7 @@ import type { AgentRunners } from "../agents/agent-runners.js";
 import type { PlannedCase } from "../cases/case-plan.js";
 import { CaptureResultsSchema } from "../../../contracts/generated/typescript/parity-capture-results.js";
 import { ExecutionCoverageSchema } from "../../../contracts/generated/typescript/parity-execution-coverage.js";
-import { compiledFoldersIn, compiledFoldersText } from "../compiled-source.js";
+import { compiledFoldersIn } from "../compiled-source.js";
 import { fixArchiveOf, fixesRootOf } from "../fixes/fix-archiver.js";
 import { readArchivedFixes } from "../fixes/retrieval.js";
 import { labelRecordById, nextRecordId, noLabels, putRecord, type EvalRecord } from "../evals/eval-record.js";
@@ -27,7 +27,7 @@ import {
 } from "./job-schemas.js";
 import { challengePrompt, hypothesisPrompt, hypothesisPromptVersionOf } from "./prompts.js";
 import type { QuotaWaiter } from "./quota-waiter.js";
-import { unrecordedSource } from "./candidate-source.js";
+import { requireRecordedSource, requireSameSource } from "./candidate-source.js";
 import { createSourceSnapshot, type Git } from "./source-snapshot.js";
 import { validateChallenge, validateHypothesis } from "./validation.js";
 
@@ -91,14 +91,9 @@ export class DiagnosisService {
     const folders = diagnosisFolders(this.dependencies.threadFolder(input.threadId));
     // The models explain this source, so its compiled part must be the source the captured candidate was built from, as its build recorded it.
     // Without a record nothing can be compared, so no snapshot is taken.
-    if (input.candidateSource === unrecordedSource) {
-      throw new SetupError("The candidate has no recorded source: it was not built by the workflow's build step. Run without --only so that the build records it.");
-    }
+    requireRecordedSource(input.candidateSource, "it was not built by the workflow's build step. Run without --only so that the build records it.");
     const snapshot = await createSourceSnapshot(this.dependencies.repositoryRoot, folders.source, this.dependencies.git);
-    if (snapshot.compiledIdentity !== input.candidateSource) {
-      throw new SetupError(`The compiled source (${compiledFoldersText}) differs from the source the candidate was built from (recorded ${input.candidateSource.slice(0, 12)}, now ${snapshot.compiledIdentity.slice(0, 12)}); `
-        + "the pixels do not show this source. Build again: run without --only.");
-    }
+    requireSameSource(input.candidateSource, snapshot.compiledIdentity, "the pixels do not show this source. Build again: run without --only.");
     this.dependencies.log(`Diagnosis: source snapshot of ${snapshot.files} files at ${snapshot.commit.slice(0, 12)}; ${triage.clusters.length} clusters.`);
     const cases = this.dependencies.allCases(input.caseFile);
     // Clusters share run folders, and a report is large: read and validate each once.

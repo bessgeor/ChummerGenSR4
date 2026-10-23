@@ -14,4 +14,7 @@ internal interface IAppSession : IDisposable
     void Wait(int milliseconds);
 
     Bitmap Capture();
+
+    /// <summary>The UI Automation tree of the main window as it is on screen, depth first with parent indexes.</summary>
+    IReadOnlyList<Parity.Contracts.UiTree.UiNode> DescribeTree();
 }

@@ -23,6 +23,9 @@ internal sealed record RunLayout(string RunId, string Root)
 
     public string TimingPath => Path.Combine(Root, "timing.json");
 
+    /// <summary>The candidate side's UI trees, recorded with <c>--ui-tree</c>.</summary>
+    public string UiTrees => Path.Combine(Root, "ui-trees");
+
     public static RunLayout Create(string runsDirectory, DateTimeOffset now)
     {
         string runId = $"{now.UtcDateTime:yyyyMMdd'T'HHmmss'Z'}-{Guid.NewGuid().ToString("N")[..8]}";
@@ -34,6 +37,9 @@ internal sealed record RunLayout(string RunId, string Root)
 
     public string CapturePath(string caseName, string side, string captureName) =>
         Path.Combine(Root, "captures", SafeSegment(caseName), side, $"{SafeSegment(captureName)}.png");
+
+    public string UiTreePath(string caseName, string captureName) =>
+        Path.Combine(UiTrees, SafeSegment(caseName), $"{SafeSegment(captureName)}.json");
 
     /// <summary>A path relative to the run folder, with forward slashes.</summary>
     public string Relative(string path) => RunPaths.Relative(Root, path);

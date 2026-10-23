@@ -1,0 +1,49 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/bessgeor/ChummerGenSR4/contracts/parity-ui-tree.schema.json",
+  "title": "UiTree",
+  "description": "The UI Automation tree of the app's main window right after a capture: the control view's elements that are not off screen, depth first.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["runId", "case", "capture", "side", "nodes"],
+  "properties": {
+    "runId": { "type": "string", "minLength": 1 },
+    "case": { "type": "string", "minLength": 1 },
+    "capture": { "type": "string", "minLength": 1 },
+    "side": { "description": "Trees are recorded on the candidate side only.", "type": "string", "enum": ["candidate"] },
+    "nodes": {
+      "description": "The main window first, then every element after its parent, depth first.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/UiNode" }
+    }
+  },
+  "definitions": {
+    "UiNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["parent", "automationId", "name", "controlType", "className", "enabled", "bounds"],
+      "properties": {
+        "parent": { "description": "Index of the parent node in nodes; null for the main window.", "type": ["integer", "null"], "minimum": 0 },
+        "automationId": { "description": "For WinForms windows, the control's Name; empty when the element has none.", "type": "string" },
+        "name": { "type": "string" },
+        "controlType": { "description": "The UI Automation control type's programmatic name, for example ControlType.Button.", "type": "string", "minLength": 1 },
+        "className": { "type": "string" },
+        "enabled": { "type": "boolean" },
+        "bounds": { "$ref": "#/definitions/UiBounds" }
+      }
+    },
+    "UiBounds": {
+      "description": "Screen coordinates in physical pixels.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": { "type": "integer" },
+        "y": { "type": "integer" },
+        "width": { "type": "integer", "minimum": 0 },
+        "height": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

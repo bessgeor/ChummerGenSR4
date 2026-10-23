@@ -1,11 +1,12 @@
 import { deepStrictEqual, equal, ok, rejects } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { canonicalJson, ContextManifestSchema, contextHash, sealContext, type ContextInput } from "../src/diagnosis/context.js";
 import { compiledSourceIdentity, createSourceSnapshot, processGit, type SourceSnapshot } from "../src/diagnosis/source-snapshot.js";
-import { recordedCandidateSource, unrecordedSource } from "../src/diagnosis/candidate-source.js";
+import { recordedCandidateSha256, recordedCandidateSource, unrecordedSource } from "../src/diagnosis/candidate-source.js";
 import { HostSteps } from "../src/host-steps.js";
 import type { HostRunner } from "../src/host/host-runner.js";
 import { SetupError } from "../src/host/setup-error.js";
@@ -72,11 +73,13 @@ test("the candidate build records the compiled source it started from, only when
   const paths = workflowPaths(root);
   const git = processGit(root);
   equal(recordedCandidateSource(paths), unrecordedSource);
+  equal(recordedCandidateSha256(paths), undefined);
   let status = 1;
   let builds = 0;
   const host: HostRunner = {
     async run() {
       mkdirSync(paths.candidateApp, { recursive: true });
+      writeFileSync(join(paths.candidateApp, "ChummerGenSR4.exe"), `build ${builds + 1}`);
       // An edit while the compiler runs: the record keeps the source as the build started.
       write(root, "Chummer/frmCreate.cs", `class frmCreate { int editedWhileBuilding${++builds}; }`);
       return status;
@@ -90,6 +93,7 @@ test("the candidate build records the compiled source it started from, only when
   const atStart = await compiledSourceIdentity(root, git);
   await steps.buildCandidate();
   equal(recordedCandidateSource(paths), atStart);
+  equal(recordedCandidateSha256(paths), createHash("sha256").update("build 2").digest("hex"));
   ok((await compiledSourceIdentity(root, git)) !== atStart);
 });
 

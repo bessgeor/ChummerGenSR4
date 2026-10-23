@@ -5,6 +5,7 @@ import { nextDiagnosisRoute, type ClusterDiagnosis, type QuotaWaitMark } from ".
 import type { CheckResult } from "../diagnosis/check.js";
 import type { CheckInput, JobInput, JobStep, PrepareInput } from "../diagnosis/diagnosis-service.js";
 import { SetupError } from "../host/setup-error.js";
+import type { InventorySummary } from "../inventory/inventory-service.js";
 import type { NodeName } from "../options/arguments.js";
 import { usesFixChanges, type RunOptions } from "../options/run-options.js";
 import { nextRepairRoute, type ClusterRepair } from "../repair/cluster-repair.js";
@@ -24,12 +25,22 @@ export type TriageInput = {
   readonly compares: Readonly<Record<string, StepOutcome>>;
 };
 
+export type InventoryInput = {
+  readonly threadId: string;
+  readonly plan: readonly PlannedCase[];
+  readonly captures: Readonly<Record<string, StepOutcome>>;
+  /** The compiled source the candidate was built from, as its build recorded it. */
+  readonly candidateSource: string;
+};
+
 /** The host work behind the graph's nodes. */
 export interface WorkflowSteps {
   build(options: RunOptions, buildCandidate: boolean, signal?: AbortSignal): Promise<InputFingerprints>;
   capture(context: StepContext, item: PlannedCase): Promise<StepOutcome>;
   compare(context: StepContext, capture: StepOutcome): Promise<StepOutcome>;
   triage(input: TriageInput, store: BaseStore): Promise<TriageSummary>;
+  /** Writes the thread's source inventory and coverage manifest from its capture runs. */
+  inventory(input: InventoryInput): Promise<InventorySummary>;
 }
 
 /** The diagnosis work behind the graph's diagnosis nodes. */
@@ -150,7 +161,7 @@ function repairInput(state: ClusterTask, config: LangGraphRunnableConfig): Repai
 }
 
 /**
- * build → capture(case k) → compare(case k) ∥ capture(case k+1) → … → triage → diagnosis. `Send` addresses each
+ * build → capture(case k) → compare(case k) ∥ capture(case k+1) → … → triage → inventory → diagnosis. `Send` addresses each
  * case, so compare k and capture k+1 run in the same super-step and both are checkpointed. Diagnosis seals a
  * context per cluster, then `route_diagnosis` sends one job per cluster (hypotheses, then challenges) and waits
  * for quota when a job hit a usage limit; each job is one task, so a resumed thread repeats only unfinished jobs.
@@ -180,6 +191,14 @@ export function buildWorkflowGraph(steps: WorkflowSteps, diagnosis: DiagnosisSte
     .addNode("triage", async (state: WorkflowStateValue, config: LangGraphRunnableConfig) => {
       const summary = await steps.triage({ threadId: state.threadId, plan: state.plan, captures: state.captures, compares: state.compares }, requireStore(config));
       return { triageSummary: summary };
+    })
+    .addNode("inventory", async (state: WorkflowStateValue) => {
+      // A thread stored before the inventory existed has no such field, and its capture runs recorded no UI trees.
+      const recorded: InventorySummary | null | undefined = state.inventorySummary;
+      if (recorded === undefined) return {};
+      if (state.fingerprints === null) throw new Error("The inventory ran without the thread's inputs.");
+      const summary = await steps.inventory({ threadId: state.threadId, plan: state.plan, captures: state.captures, candidateSource: state.fingerprints.candidateSource });
+      return { inventorySummary: summary };
     })
     .addNode("prepare_diagnosis", async (state: WorkflowStateValue) => {
       if (state.triageSummary === null || state.fingerprints === null) throw new Error("Diagnosis ran before triage.");
@@ -265,7 +284,9 @@ export function buildWorkflowGraph(steps: WorkflowSteps, diagnosis: DiagnosisSte
       const done = state.plan.every((item) => state.compares[item.name] !== undefined);
       return done && nodeMode("triage", state.options.only) !== "skip" ? ["triage"] : [];
     }, ["triage"])
-    .addConditionalEdges("triage", (state: WorkflowStateValue) =>
+    // The inventory reads the same capture runs as triage, so it runs whenever triage does.
+    .addEdge("triage", "inventory")
+    .addConditionalEdges("inventory", (state: WorkflowStateValue) =>
       (state.options.diagnosis && nodeMode("diagnose", state.options.only) !== "skip" ? "prepare_diagnosis" : "conclude"), ["prepare_diagnosis", "conclude"])
     .addEdge("prepare_diagnosis", "route_diagnosis")
     .addConditionalEdges("route_diagnosis", (state: WorkflowStateValue) => {

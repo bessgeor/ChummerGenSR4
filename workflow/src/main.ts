@@ -1,5 +1,5 @@
 // Composition root of the parity workflow: `npm start -- <options>` runs or resumes a thread of the graph
-// build → capture → compare → triage → diagnosis → repair → widening and exits with 0, 1, 2 or 3 (see --help).
+// build → capture → compare → triage → inventory → diagnosis → repair → widening and exits with 0, 1, 2 or 3 (see --help).
 import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";

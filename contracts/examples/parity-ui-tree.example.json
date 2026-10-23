@@ -1,0 +1,53 @@
+{
+  "runId": "20261001T120000Z-1a2b3c4d",
+  "case": "build-example",
+  "capture": "skills",
+  "side": "candidate",
+  "nodes": [
+    {
+      "parent": null,
+      "automationId": "frmMain",
+      "name": "Chummer",
+      "controlType": "ControlType.Window",
+      "className": "WindowsForms10.Window.8.app.0.141b42a_r6_ad1",
+      "enabled": true,
+      "bounds": { "x": -8, "y": -8, "width": 1936, "height": 1048 }
+    },
+    {
+      "parent": 0,
+      "automationId": "frmCreate",
+      "name": "Example",
+      "controlType": "ControlType.Window",
+      "className": "WindowsForms10.Window.8.app.0.141b42a_r6_ad1",
+      "enabled": true,
+      "bounds": { "x": 0, "y": 52, "width": 1920, "height": 960 }
+    },
+    {
+      "parent": 1,
+      "automationId": "tabSkills",
+      "name": "Skills",
+      "controlType": "ControlType.Pane",
+      "className": "WindowsForms10.Window.8.app.0.141b42a_r6_ad1",
+      "enabled": true,
+      "bounds": { "x": 4, "y": 80, "width": 1900, "height": 900 }
+    },
+    {
+      "parent": 2,
+      "automationId": "cmdAddKnowledgeSkill",
+      "name": "Add Skill",
+      "controlType": "ControlType.Button",
+      "className": "WindowsForms10.BUTTON.app.0.141b42a_r6_ad1",
+      "enabled": true,
+      "bounds": { "x": 12, "y": 500, "width": 90, "height": 23 }
+    },
+    {
+      "parent": 1,
+      "automationId": "",
+      "name": "Skills",
+      "controlType": "ControlType.TabItem",
+      "className": "",
+      "enabled": true,
+      "bounds": { "x": 60, "y": 56, "width": 40, "height": 20 }
+    }
+  ]
+}

@@ -17,7 +17,8 @@ internal sealed class ChummerSession(
     TabNavigator tabs,
     LabelWaiter labels,
     WindowCapturer capturer,
-    PointerParker pointer) : IAppSession
+    PointerParker pointer,
+    UiTreeReader trees) : IAppSession
 {
     private static readonly TimeSpan WindowTimeout = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan LiveWindowTimeout = TimeSpan.FromSeconds(10);
@@ -108,6 +109,8 @@ internal sealed class ChummerSession(
         pointer.EnsureAt(_pointerSpot);
         return capturer.Capture(window, bounds);
     }
+
+    public IReadOnlyList<Parity.Contracts.UiTree.UiNode> DescribeTree() => trees.Read(LiveWindow());
 
     public void Dispose()
     {

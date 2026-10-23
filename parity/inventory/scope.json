@@ -1,0 +1,291 @@
+{
+  "classes": {
+    "ContactControl": {
+      "scope": "active",
+      "reason": "One row per contact or enemy on the character forms' Common tab."
+    },
+    "PetControl": {
+      "scope": "active",
+      "reason": "One row per pet on the character forms' Pets and Cohorts tab."
+    },
+    "PowerControl": {
+      "scope": "active",
+      "reason": "One row per adept power on the character forms' Adept Powers tab."
+    },
+    "SkillControl": {
+      "scope": "active",
+      "reason": "One row per active or knowledge skill on the character forms' Skills tab."
+    },
+    "SkillGroupControl": {
+      "scope": "active",
+      "reason": "One row per skill group on the character forms' Skills tab."
+    },
+    "SpiritControl": {
+      "scope": "active",
+      "reason": "One row per spirit or sprite on the character forms' Spells and Spirits and Complex Forms and Sprites tabs."
+    },
+    "frmAbout": {
+      "scope": "deferred",
+      "reason": "The About dialog, opened from the Help menu; no case action opens a menu."
+    },
+    "frmCareer": {
+      "scope": "active",
+      "reason": "The career-mode character form: the career cases open it and select its tabs."
+    },
+    "frmCreate": {
+      "scope": "active",
+      "reason": "The build-mode character form: the build cases open it and select its tabs."
+    },
+    "frmCreateCyberwareSuite": {
+      "scope": "deferred",
+      "reason": "A creation dialog, opened by a character form's button or menu item; no case action clicks or opens a menu."
+    },
+    "frmCreateImprovement": {
+      "scope": "deferred",
+      "reason": "A creation dialog, opened by a character form's button or menu item; no case action clicks or opens a menu."
+    },
+    "frmCreatePACKSKit": {
+      "scope": "deferred",
+      "reason": "A creation dialog, opened by a character form's button or menu item; no case action clicks or opens a menu."
+    },
+    "frmCreateSpell": {
+      "scope": "deferred",
+      "reason": "A creation dialog, opened by a character form's button or menu item; no case action clicks or opens a menu."
+    },
+    "frmDiceHits": {
+      "scope": "deferred",
+      "reason": "A dialog opened by a character form's button or menu item; no case action clicks or opens a menu."
+    },
+    "frmDiceRoller": {
+      "scope": "deferred",
+      "reason": "The dice roller, opened from the Tools menu or a skill's dice button in the career form; no case action opens a menu or clicks a button."
+    },
+    "frmExpense": {
+      "scope": "deferred",
+      "reason": "A dialog opened by a character form's button or menu item; no case action clicks or opens a menu."
+    },
+    "frmExport": {
+      "scope": "deferred",
+      "reason": "The export dialog, opened from the career form's File menu; no case action opens a menu."
+    },
+    "frmHistory": {
+      "scope": "deferred",
+      "reason": "The revision history, opened from the Help menu; no case action opens a menu."
+    },
+    "frmLifestyleNuyen": {
+      "scope": "deferred",
+      "reason": "A dialog opened by a character form's button or menu item; no case action clicks or opens a menu."
+    },
+    "frmMain": {
+      "scope": "active",
+      "reason": "The main window: every case opens its character in it, as an MDI child."
+    },
+    "frmMetatype": {
+      "scope": "deferred",
+      "reason": "The metatype dialog, shown when a new character is created or a build-mode character's metatype is changed; the cases open saved characters and change nothing."
+    },
+    "frmNaturalWeapon": {
+      "scope": "deferred",
+      "reason": "A dialog opened by a character form's button or menu item; no case action clicks or opens a menu."
+    },
+    "frmNotes": {
+      "scope": "deferred",
+      "reason": "The notes editor, opened from a Notes menu item or button of a character form or its rows; no case action opens a menu or clicks a button."
+    },
+    "frmOptions": {
+      "scope": "deferred",
+      "reason": "The options dialog, opened from the Tools menu; no case action opens a menu."
+    },
+    "frmPrintMultiple": {
+      "scope": "deferred",
+      "reason": "The print dialog for several characters, opened from the File menu; no case action opens a menu."
+    },
+    "frmReload": {
+      "scope": "deferred",
+      "reason": "The reload dialog, opened by the career form's weapon reload buttons; no case action clicks a button."
+    },
+    "frmSelectAdvancedLifestyle": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectArmor": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectArmorMod": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectAttribute": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectBP": {
+      "scope": "deferred",
+      "reason": "The build method dialog, shown when a new character is created or from the build form's Special menu; the cases open saved characters and open no menu."
+    },
+    "frmSelectCalendarStart": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectContactConnection": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectCritterPower": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectCyberware": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectCyberwareSuite": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectExoticSkill": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectGear": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectItem": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectLifestyle": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectMartialArt": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectMartialArtAdvantage": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectMartialArtManeuver": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectMentorSpirit": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectMetamagic": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectNexus": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectNumber": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectPACKSKit": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectPower": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectProgram": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectProgramOption": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectQuality": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectSetting": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectSide": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectSkill": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectSkillCategory": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectSkillGroup": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectSpell": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectSpellCategory": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectText": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectVehicle": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectVehicleMod": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectWeapon": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectWeaponAccessory": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSelectWeaponCategory": {
+      "scope": "deferred",
+      "reason": "A selection dialog, opened by a button or menu item, or when an item being added asks for a choice; no case action clicks, opens a menu or adds anything."
+    },
+    "frmSellItem": {
+      "scope": "deferred",
+      "reason": "A dialog opened by a character form's button or menu item; no case action clicks or opens a menu."
+    },
+    "frmTest": {
+      "scope": "deferred",
+      "reason": "A test form for the app's developers, opened when the app starts with /test after the character file; the cases pass only the file."
+    },
+    "frmUpdate": {
+      "scope": "deferred",
+      "reason": "The update dialog, opened from the Tools menu, or at startup when the options turn automatic updates on; no case action opens a menu."
+    },
+    "frmViewer": {
+      "scope": "deferred",
+      "reason": "The character sheet viewer, opened when a character is printed from a character form or the print dialog; no case action prints."
+    }
+  },
+  "deferredEvents": {
+    "Activated": "Raised by a form's lifecycle as it opens, activates or closes, not by a user action on a control.",
+    "FormClosed": "Raised by a form's lifecycle as it opens, activates or closes, not by a user action on a control.",
+    "FormClosing": "Raised by a form's lifecycle as it opens, activates or closes, not by a user action on a control.",
+    "Load": "Raised by a form's lifecycle as it opens, activates or closes, not by a user action on a control.",
+    "MdiChildActivate": "Raised by a form's lifecycle as it opens, activates or closes, not by a user action on a control.",
+    "Shown": "Raised by a form's lifecycle as it opens, activates or closes, not by a user action on a control.",
+    "Resize": "Raised by layout when a window or panel changes size, not by a user action on a control.",
+    "ItemAdded": "Raised when the app adds an item to the main window's menu or tool strip, not by a user action.",
+    "ItemRemoved": "Raised when the app removes an item from the main window's tool strip, not by a user action."
+  }
+}

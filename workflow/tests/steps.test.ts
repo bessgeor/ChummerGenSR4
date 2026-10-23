@@ -79,6 +79,10 @@ class FakeHost implements HostRunner {
           writeFileSync(join(runFolder, "captures", "build-Alpha", side, "common.png"), `png ${side} ${this.runs}`);
         }
       }
+      if (command.args.includes("--ui-tree")) {
+        mkdirSync(join(runFolder, "ui-trees", "build-Alpha"), { recursive: true });
+        writeFileSync(join(runFolder, "ui-trees", "build-Alpha", "common.json"), `tree ${this.runs}`);
+      }
       writeFileSync(option("--run-folder-file"), runFolder);
       return this.captureStatus;
     }
@@ -244,6 +248,20 @@ test("--recapture runs the step again and records the new run", async () => {
   ok(lines.some((line) => line.includes("--recapture")));
   const reused = await capture.run(context("run", "t3"), item);
   deepStrictEqual([reused.runFolder, reused.reusedFrom], [again.runFolder, "t2"]);
+});
+
+test("a capture step records the candidate's UI trees and keeps them with its outputs", async () => {
+  const { root, host, lines, capture, context } = setup();
+  const item = plannedCase(root);
+  const first = await capture.run(context(), item);
+  ok(host.commands[0]!.args.includes("--ui-tree"), host.commands[0]!.args.join(" "));
+  // Records made before capture runs recorded trees have the earlier format, so they miss.
+  ok(captureKey(item, "fixture", "e".repeat(64), options, fingerprints).lines.includes("format:capture/2"));
+  equal((await capture.run(context("run", "t2"), item)).reusedFrom, "t1");
+  writeFileSync(join(first.runFolder, "ui-trees", "build-Alpha", "common.json"), "edited");
+  const second = await capture.run(context("run", "t3"), item);
+  notEqual(second.runFolder, first.runFolder);
+  ok(lines.some((line) => line.includes("common.json") && line.includes("changed since it was recorded")), lines.join("\n"));
 });
 
 test("a record is stale when a screenshot changed or disappeared", async () => {

@@ -2,12 +2,14 @@ using System.Diagnostics;
 using System.Drawing.Imaging;
 using Parity.Capture.Ui;
 using Parity.Cases;
+using Parity.Contracts.UiTree;
 
 namespace Parity.Capture.Execution;
 
 /// <summary>
 /// Runs every action of a case on one side and records exactly one outcome per action. A failure
-/// stops the side; the actions after it are recorded as not run.
+/// stops the side; the actions after it are recorded as not run. With a tree recorder, each capture's UI tree is
+/// read right after its bitmap, and a tree that cannot be read or written fails the capture action.
 /// </summary>
 internal sealed class SideExecutor(IUiDriver driver)
 {
@@ -18,7 +20,8 @@ internal sealed class SideExecutor(IUiDriver driver)
         string characterPath,
         UiTiming timing,
         IReadOnlySet<string>? captureFilter,
-        Func<string, string> capturePath)
+        Func<string, string> capturePath,
+        UiTreeRecorder? trees = null)
     {
         Stopwatch timer = Stopwatch.StartNew();
         IReadOnlyList<ParityAction> actions = parityCase.Actions;
@@ -66,7 +69,7 @@ internal sealed class SideExecutor(IUiDriver driver)
                 try
                 {
                     session.Activate();
-                    Perform(session, action, captures, capturePath);
+                    Perform(session, action, captures, capturePath, trees);
                     records.Add(Record(index, action, OutcomeKind.Performed, null));
                 }
                 catch (TabNotFoundException error) when (action is SelectTabAction { Optional: true } optionalTab)
@@ -90,7 +93,8 @@ internal sealed class SideExecutor(IUiDriver driver)
         IAppSession session,
         ParityAction action,
         Dictionary<string, string> captures,
-        Func<string, string> capturePath)
+        Func<string, string> capturePath,
+        UiTreeRecorder? trees)
     {
         switch (action)
         {
@@ -108,7 +112,13 @@ internal sealed class SideExecutor(IUiDriver driver)
                 Directory.CreateDirectory(Path.GetDirectoryName(path)!);
                 using (Bitmap bitmap = session.Capture())
                 {
+                    // Read before anything is written, so a tree that cannot be read leaves no file of the failed capture.
+                    IReadOnlyList<UiNode>? tree = trees?.Read(capture.CaptureName, session);
                     bitmap.Save(path, ImageFormat.Png);
+                    if (tree is not null)
+                    {
+                        trees!.Write(capture.CaptureName, tree);
+                    }
                 }
 
                 captures.Add(capture.CaptureName, path);

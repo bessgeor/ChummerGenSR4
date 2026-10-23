@@ -1,4 +1,5 @@
 using Parity.Capture.Ui;
+using Parity.Contracts.UiTree;
 
 namespace Parity.Tests.Fakes;
 
@@ -16,6 +17,9 @@ internal sealed class ScriptedUiDriver : IUiDriver
     public bool PointerMovedBeforeCapture { get; set; }
 
     public Color CaptureColor { get; set; } = Color.White;
+
+    /// <summary>Thrown by every tree request when set.</summary>
+    public Exception? TreeFailure { get; set; }
 
     public List<string> Calls { get; } = [];
 
@@ -80,6 +84,34 @@ internal sealed class ScriptedUiDriver : IUiDriver
             return bitmap;
         }
 
+        /// <summary>A main window holding one button, named after the number of trees read so far.</summary>
+        public IReadOnlyList<UiNode> DescribeTree()
+        {
+            owner.Calls.Add("tree");
+            if (owner.TreeFailure is not null)
+            {
+                throw owner.TreeFailure;
+            }
+
+            int count = owner.Calls.Count(call => call == "tree");
+            return
+            [
+                Node(null, "frmMain", "ControlType.Window"),
+                Node(0, $"cmdButton{count}", "ControlType.Button"),
+            ];
+        }
+
         public void Dispose() => owner.Disposed = true;
+
+        private static UiNode Node(int? parent, string automationId, string controlType) => new()
+        {
+            Parent = parent,
+            AutomationId = automationId,
+            Name = automationId,
+            ControlType = controlType,
+            ClassName = "WindowsForms10.Window",
+            Enabled = true,
+            Bounds = new UiBounds { X = 0, Y = 0, Width = 10, Height = 10 },
+        };
     }
 }

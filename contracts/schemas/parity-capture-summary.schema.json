@@ -38,6 +38,11 @@
     "timing": {
       "description": "Timing file path relative to the run folder; absent when setup failed.",
       "type": "string"
+    },
+    "uiTrees": {
+      "description": "Folder of the candidate side's UI trees relative to the run folder, holding <case>/<capture>.json for every performed capture; absent when the run records no trees.",
+      "type": "string",
+      "minLength": 1
     }
   },
   "definitions": {

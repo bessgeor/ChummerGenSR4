@@ -88,5 +88,6 @@
   "totals": { "cases": 1, "failedSides": 1, "failedActions": 1, "captures": 1, "visualPassed": 1, "visualFailed": 0 },
   "results": "results.json",
   "coverage": "coverage.json",
-  "timing": "timing.json"
+  "timing": "timing.json",
+  "uiTrees": "ui-trees"
 }

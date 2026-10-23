@@ -34,6 +34,9 @@ internal sealed record CaptureOptions
     /// <summary>Capture names to write; empty selects every capture. Every action still runs.</summary>
     public IReadOnlyList<string> Captures { get; init; } = [];
 
+    /// <summary>Record the candidate side's UI tree after each capture.</summary>
+    public bool UiTree { get; init; }
+
     public bool Help { get; init; }
 
     public string Resolve(string path) => Path.GetFullPath(Path.Combine(RepositoryRoot, path));
