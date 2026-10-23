@@ -555,7 +555,7 @@ namespace Chummer
 					objContactControl.ConnectionRating = objContact.Connection;
 					objContactControl.LoyaltyRating = objContact.Loyalty;
 					objContactControl.EntityType = objContact.EntityType;
-					objContactControl.BackColor = objContact.Colour;
+					objContactControl.BackColor = objContact.GetColour();
 
 					objContactControl.Top = intContact * objContactControl.Height;
 					panContacts.Controls.Add(objContactControl);
@@ -576,7 +576,7 @@ namespace Chummer
 					objContactControl.ConnectionRating = objContact.Connection;
 					objContactControl.LoyaltyRating = objContact.Loyalty;
 					objContactControl.EntityType = objContact.EntityType;
-					objContactControl.BackColor = objContact.Colour;
+					objContactControl.BackColor = objContact.GetColour();
 
 					objContactControl.Top = intEnemy * objContactControl.Height;
 					panEnemies.Controls.Add(objContactControl);
@@ -590,7 +590,7 @@ namespace Chummer
 
 					objContactControl.ContactObject = objContact;
 					objContactControl.ContactName = objContact.Name;
-					objContactControl.BackColor = objContact.Colour;
+					objContactControl.BackColor = objContact.GetColour();
 
 					panPets.Controls.Add(objContactControl);
 				}

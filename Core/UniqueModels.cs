@@ -1,8 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Drawing;
 using System.Linq;
-using System.Windows.Forms;
 using System.Xml;
 using System.Xml.XPath;
 
@@ -20,7 +18,7 @@ namespace Chummer
 		private int _intAugModifier = 0;
 		private string _strAbbrev = "";
 
-		public Character _objCharacter;
+		public ICharacter _objCharacter;
 
 		#region Constructor, Save, Load, and Print Methods
 		/// <summary>
@@ -417,7 +415,7 @@ namespace Chummer
 				// If this is AGI, BOD, or STR, factor in any Cyberlimbs.
 				if (_strAbbrev == "AGI" || _strAbbrev == "BOD" || _strAbbrev == "STR")
 				{
-					foreach (Cyberware objCyberware in _objCharacter.Cyberware)
+					foreach (ICharacterCyberware objCyberware in _objCharacter.Cyberware)
 					{
 						if (objCyberware.Category == "Cyberlimb" && objCyberware.LimbSlot != "")
 							return true;
@@ -499,7 +497,7 @@ namespace Chummer
 				{
 					int intLimbTotal = 0;
 					int intLimbCount = 0;
-					foreach (Cyberware objCyberware in _objCharacter.Cyberware)
+					foreach (ICharacterCyberware objCyberware in _objCharacter.Cyberware)
 					{
 						if (objCyberware.Category == "Cyberlimb" && objCyberware.LimbSlot != "" && objCyberware.LimbSlot != _objCharacter.Options.ExcludeLimbSlot)
 						{
@@ -811,7 +809,7 @@ namespace Chummer
 			string strCyberlimb = "";
 			if (_strAbbrev == "AGI" || _strAbbrev == "BOD" || _strAbbrev == "STR")
 			{
-				foreach (Cyberware objCyberware in _objCharacter.Cyberware)
+				foreach (ICharacterCyberware objCyberware in _objCharacter.Cyberware)
 				{
 					if (objCyberware.Category == "Cyberlimb" && objCyberware.LimbSlot != "")
 					{
@@ -974,7 +972,7 @@ namespace Chummer
 		private QualityType _objQualityType = QualityType.Positive;
 		private QualitySource _objQualitySource = QualitySource.Selected;
 		private XmlNode _nodBonus;
-		private readonly Character _objCharacter;
+		private readonly ICharacter _objCharacter;
 		private string _strAltName = "";
 		private string _strAltPage = "";
 		private Guid _guiWeaponID = new Guid();
@@ -1014,7 +1012,7 @@ namespace Chummer
 		#endregion
 
 		#region Constructor, Create, Save, Load, and Print Methods
-		public Quality(Character objCharacter)
+		public Quality(ICharacter objCharacter)
 		{
 			// Create the GUID for the new Quality.
 			_guiID = Guid.NewGuid();
@@ -1028,10 +1026,9 @@ namespace Chummer
 		/// <param name="objCharacter">Character object the Quality will be added to.</param>
 		/// <param name="objQualitySource">Source of the Quality.</param>
 		/// <param name="objNode">TreeNode to populate a TreeView.</param>
-		/// <param name="objWeapons">List of Weapons that should be added to the Character.</param>
-		/// <param name="objWeaponNodes">List of TreeNodes to represent the Weapons added.</param>
+		/// <param name="funcAddWeapon">Adds the Weapon of an XmlNode to the Character and returns its internal identifier.</param>
 		/// <param name="strForceValue">Force a value to be selected for the Quality.</param>
-		public void Create(XmlNode objXmlQuality, Character objCharacter, QualitySource objQualitySource, TreeNode objNode, List<Weapon> objWeapons, List<TreeNode> objWeaponNodes, string strForceValue = "")
+		public void Create(XmlNode objXmlQuality, ICharacter objCharacter, QualitySource objQualitySource, ITreeNodeView objNode, Func<XmlNode, string> funcAddWeapon, string strForceValue = "")
 		{
 			_strName = objXmlQuality["name"].InnerText;
 			_intBP = Convert.ToInt32(objXmlQuality["bp"].InnerText);
@@ -1075,14 +1072,7 @@ namespace Chummer
 				{
 					XmlNode objXmlWeapon = objXmlWeaponDocument.SelectSingleNode("/chummer/weapons/weapon[name = \"" + objXmlAddWeapon.InnerText + "\" and starts-with(category, \"Quality\")]");
 
-					TreeNode objGearWeaponNode = new TreeNode();
-					Weapon objGearWeapon = new Weapon(objCharacter);
-					objGearWeapon.Create(objXmlWeapon, objCharacter, objGearWeaponNode, null, null, null);
-					objGearWeaponNode.ForeColor = SystemColors.GrayText;
-					objWeaponNodes.Add(objGearWeaponNode);
-					objWeapons.Add(objGearWeapon);
-
-					_guiWeaponID = Guid.Parse(objGearWeapon.InternalId);
+					_guiWeaponID = Guid.Parse(funcAddWeapon(objXmlWeapon));
 				}
 			}
 
@@ -1105,7 +1095,7 @@ namespace Chummer
 
 			// Metatype Qualities appear as grey text to show that they cannot be removed.
 			if (objQualitySource == QualitySource.Metatype || objQualitySource == QualitySource.MetatypeRemovable)
-				objNode.ForeColor = SystemColors.GrayText;
+				objNode.ShowAsGrayText();
 
 			objNode.Text = DisplayName;
 			objNode.Tag = InternalId;
@@ -1790,10 +1780,10 @@ namespace Chummer
 		private string _strSource = "";
 		private string _strPage = "";
 
-		private readonly Character _objCharacter;
+		private readonly ICharacter _objCharacter;
 
 		#region Constructor, Create, Save, Load, and Print Methods
-		public Skill(Character objCharacter)
+		public Skill(ICharacter objCharacter)
 		{
 			_objCharacter = objCharacter;
 		}
@@ -1926,7 +1916,7 @@ namespace Chummer
 		/// <summary>
 		/// The Character object being used by the Skill.
 		/// </summary>
-		public Character CharacterObject
+		public ICharacter CharacterObject
 		{
 			get
 			{
@@ -2242,7 +2232,7 @@ namespace Chummer
 				ImprovementManager objImprovementManager = new ImprovementManager(_objCharacter);
 				if (objImprovementManager.ValueOf(Improvement.ImprovementType.Skillwire) > 0 || _objCharacter.SkillsoftAccess)
 				{
-					foreach (Gear objGear in _objCharacter.Gear)
+					foreach (ICharacterGear objGear in _objCharacter.Gear)
 					{
 						// Look for any Skillsoft that would conflict with the Skill's Rating.
 						if (objGear.Equipped && objGear.Category == "Skillsofts" && (objGear.Extra == _strName || objGear.Extra == _strName + ", " + LanguageManager.Instance.GetString("Label_SelectGear_Hacked")))
@@ -2259,7 +2249,7 @@ namespace Chummer
 							}
 						}
 
-						foreach (Gear objChild in objGear.Children)
+						foreach (ICharacterGear objChild in objGear.Children)
 						{
 							if (objChild.Equipped && objChild.Category == "Skillsofts" && (objChild.Extra == _strName || objChild.Extra == _strName + ", " + LanguageManager.Instance.GetString("Label_SelectGear_Hacked")))
 							{
@@ -3241,7 +3231,7 @@ namespace Chummer
 		private string _strFileName = "";
 		private string _strRelativeName = "";
 		private string _strNotes = "";
-		private readonly Character _objCharacter;
+		private readonly ICharacter _objCharacter;
 
 		#region Helper Methods
 		/// <summary>
@@ -3261,7 +3251,7 @@ namespace Chummer
 		#endregion
 
 		#region Constructor, Save, Load, and Print Methods
-		public Spirit(Character objCharacter)
+		public Spirit(ICharacter objCharacter)
 		{
 			// Create the GUID for the new Spirit.
 			_objCharacter = objCharacter;
@@ -3375,7 +3365,7 @@ namespace Chummer
 		/// <summary>
 		/// The Character object being used by the Spirit.
 		/// </summary>
-		public Character CharacterObject
+		public ICharacter CharacterObject
 		{
 			get
 			{
@@ -3540,13 +3530,13 @@ namespace Chummer
 		private bool _blnLimited = false;
 		private bool _blnExtended = false;
 		private string _strNotes = "";
-		private readonly Character _objCharacter;
+		private readonly ICharacter _objCharacter;
 		private string _strAltName = "";
 		private string _strAltCategory = "";
 		private string _strAltPage = "";
 
 		#region Constructor, Create, Save, Load, and Print Methods
-		public Spell(Character objCharacter)
+		public Spell(ICharacter objCharacter)
 		{
 			// Create the GUID for the new Spell.
 			_guiID = Guid.NewGuid();
@@ -3560,7 +3550,7 @@ namespace Chummer
 		/// <param name="strForcedValue">Value to forcefully select for any ImprovementManager prompts.</param>
 		/// <param name="blnLimited">Whether or not the Spell should be marked as Limited.</param>
 		/// <param name="blnExtended">Whether or not the Spell should be marked as Extended.</param>
-		public void Create(XmlNode objXmlSpellNode, Character objCharacter, TreeNode objNode, string strForcedValue = "", bool blnLimited = false, bool blnExtended = false)
+		public void Create(XmlNode objXmlSpellNode, ICharacter objCharacter, ITreeNodeView objNode, string strForcedValue = "", bool blnLimited = false, bool blnExtended = false)
 		{
 			_strName = objXmlSpellNode["name"].InnerText;
 			_strDescriptors = objXmlSpellNode["descriptor"].InnerText;
@@ -4474,230 +4464,6 @@ namespace Chummer
 	}
 
 	/// <summary>
-	/// A Stacked Focus.
-	/// </summary>
-	public class StackedFocus
-	{
-		private Guid _guiID = new Guid();
-		private bool _blnBonded = false;
-		private Guid _guiGearId = new Guid();
-		private List<Gear> _lstGear = new List<Gear>();
-		private readonly Character _objCharacter;
-
-		#region Constructor, Create, Save, and Load Methods
-		public StackedFocus(Character objCharacter)
-		{
-			// Create the GUID for the new Focus.
-			_guiID = Guid.NewGuid();
-			_objCharacter = objCharacter;
-		}
-
-		/// <summary>
-		/// Save the object's XML to the XmlWriter.
-		/// </summary>
-		/// <param name="objWriter">XmlTextWriter to write with.</param>
-		public void Save(XmlTextWriter objWriter)
-		{
-			objWriter.WriteStartElement("stackedfocus");
-			objWriter.WriteElementString("guid", _guiID.ToString());
-			objWriter.WriteElementString("gearid", _guiGearId.ToString());
-			objWriter.WriteElementString("bonded", _blnBonded.ToString());
-			objWriter.WriteStartElement("gears");
-			foreach (Gear objGear in _lstGear)
-				objGear.Save(objWriter);
-			objWriter.WriteEndElement();
-			objWriter.WriteEndElement();
-		}
-
-		/// <summary>
-		/// Load the Stacked Focus from the XmlNode.
-		/// </summary>
-		/// <param name="objNode">XmlNode to load.</param>
-		public void Load(XmlNode objNode)
-		{
-			_guiID = Guid.Parse(objNode["guid"].InnerText);
-			_guiGearId = Guid.Parse(objNode["gearid"].InnerText);
-			_blnBonded = Convert.ToBoolean(objNode["bonded"].InnerText);
-			XmlNodeList nodGears = objNode.SelectNodes("gears/gear");
-			foreach (XmlNode nodGear in nodGears)
-			{
-				Gear objGear = new Gear(_objCharacter);
-				objGear.Load(nodGear);
-				_lstGear.Add(objGear);
-			}
-		}
-		#endregion
-
-		#region Properties
-		/// <summary>
-		/// Internal identifier which will be used to identify this Stacked Focus in the Improvement system.
-		/// </summary>
-		public string InternalId
-		{
-			get
-			{
-				return _guiID.ToString();
-			}
-		}
-
-		/// <summary>
-		/// GUID of the linked Gear.
-		/// </summary>
-		public string GearId
-		{
-			get
-			{
-				return _guiGearId.ToString();
-			}
-			set
-			{
-				_guiGearId = Guid.Parse(value);
-			}
-		}
-
-		/// <summary>
-		/// Whether or not the Stacked Focus in Bonded.
-		/// </summary>
-		public bool Bonded
-		{
-			get
-			{
-				return _blnBonded;
-			}
-			set
-			{
-				_blnBonded = value;
-			}
-		}
-
-		/// <summary>
-		/// The Stacked Focus' total Force.
-		/// </summary>
-		public int TotalForce
-		{
-			get
-			{
-				int intReturn = 0;
-				foreach (Gear objGear in _lstGear)
-					intReturn += objGear.Rating;
-
-				return intReturn;
-			}
-		}
-
-		/// <summary>
-		/// The cost in Karma to bind this Stacked Focus.
-		/// </summary>
-		public int BindingCost
-		{
-			get
-			{
-				int intCost = 0;
-				foreach (Gear objFocus in _lstGear)
-				{
-					// Each Focus costs an amount of Karma equal to their Force x speicific Karma cost.
-					string strFocusName = objFocus.Name;
-					int intPosition = strFocusName.IndexOf("(");
-					if (intPosition > -1)
-						strFocusName = strFocusName.Substring(0, intPosition - 1);
-					int intKarmaMultiplier = 0;
-					switch (strFocusName)
-					{
-						case "Symbolic Link Focus":
-							intKarmaMultiplier = _objCharacter.Options.KarmaSymbolicLinkFocus;
-							break;
-						case "Sustaining Focus":
-							intKarmaMultiplier = _objCharacter.Options.KarmaSustainingFocus;
-							break;
-						case "Counterspelling Focus":
-							intKarmaMultiplier = _objCharacter.Options.KarmaCounterspellingFocus;
-							break;
-						case "Banishing Focus":
-							intKarmaMultiplier = _objCharacter.Options.KarmaBanishingFocus;
-							break;
-						case "Binding Focus":
-							intKarmaMultiplier = _objCharacter.Options.KarmaBindingFocus;
-							break;
-						case "Weapon Focus":
-							intKarmaMultiplier = _objCharacter.Options.KarmaWeaponFocus;
-							break;
-						case "Spellcasting Focus":
-							intKarmaMultiplier = _objCharacter.Options.KarmaSpellcastingFocus;
-							break;
-						case "Summoning Focus":
-							intKarmaMultiplier = _objCharacter.Options.KarmaSummoningFocus;
-							break;
-						case "Anchoring Focus":
-							intKarmaMultiplier = _objCharacter.Options.KarmaAnchoringFocus;
-							break;
-						case "Centering Focus":
-							intKarmaMultiplier = _objCharacter.Options.KarmaCenteringFocus;
-							break;
-						case "Masking Focus":
-							intKarmaMultiplier = _objCharacter.Options.KarmaMaskingFocus;
-							break;
-						case "Shielding Focus":
-							intKarmaMultiplier = _objCharacter.Options.KarmaShieldingFocus;
-							break;
-						case "Power Focus":
-							intKarmaMultiplier = _objCharacter.Options.KarmaPowerFocus;
-							break;
-						case "Divining Focus":
-							intKarmaMultiplier = _objCharacter.Options.KarmaDiviningFocus;
-							break;
-						case "Dowsing Focus":
-							intKarmaMultiplier = _objCharacter.Options.KarmaDowsingFocus;
-							break;
-						case "Infusion Focus":
-							intKarmaMultiplier = _objCharacter.Options.KarmaInfusionFocus;
-							break;
-						default:
-							intKarmaMultiplier = 1;
-							break;
-					}
-					intCost += (objFocus.Rating * intKarmaMultiplier);
-				}
-				return intCost;
-			}
-		}
-
-		/// <summary>
-		/// Stacked Focus Name.
-		/// </summary>
-		public string Name
-		{
-			get
-			{
-				string strReturn = "";
-				foreach (Gear objGear in _lstGear)
-					strReturn += objGear.DisplayName + ", ";
-
-				// Remove the trailing comma.
-				if (strReturn != string.Empty)
-					strReturn = strReturn.Substring(0, strReturn.Length - 2);
-
-				return strReturn;
-			}
-		}
-
-		/// <summary>
-		/// List of Gear that make up the Stacked Focus.
-		/// </summary>
-		public List<Gear> Gear
-		{
-			get
-			{
-				return _lstGear;
-			}
-			set
-			{
-				_lstGear = value;
-			}
-		}
-		#endregion
-	}
-
-	/// <summary>
 	/// A Metamagic or Echo.
 	/// </summary>
 	public class Metamagic
@@ -4711,10 +4477,10 @@ namespace Chummer
 		private Improvement.ImprovementSource _objImprovementSource = Improvement.ImprovementSource.Metamagic;
 		private string _strNotes = "";
 
-		private readonly Character _objCharacter;
+		private readonly ICharacter _objCharacter;
 
 		#region Constructor, Create, Save, Load, and Print Methods
-		public Metamagic(Character objCharacter)
+		public Metamagic(ICharacter objCharacter)
 		{
 			// Create the GUID for the new piece of Cyberware.
 			_guiID = Guid.NewGuid();
@@ -4726,7 +4492,7 @@ namespace Chummer
 		/// <param name="objCharacter">Character the Gear is being added to.</param>
 		/// <param name="objNode">TreeNode to populate a TreeView.</param>
 		/// <param name="objSource">Source of the Improvement.</param>
-		public void Create(XmlNode objXmlMetamagicNode, Character objCharacter, TreeNode objNode, Improvement.ImprovementSource objSource)
+		public void Create(XmlNode objXmlMetamagicNode, ICharacter objCharacter, ITreeNodeView objNode, Improvement.ImprovementSource objSource)
 		{
 			_strName = objXmlMetamagicNode["name"].InnerText;
 			_strSource = objXmlMetamagicNode["source"].InnerText;
@@ -5038,10 +4804,10 @@ namespace Chummer
 		private string _strNotes = "";
 		private bool _blnDoubleCost = true;
 
-		private readonly Character _objCharacter;
+		private readonly ICharacter _objCharacter;
 
 		#region Constructor, Create, Save, Load, and Print Methods
-		public Power(Character objCharacter)
+		public Power(ICharacter objCharacter)
 		{
 			// Create the GUID for the new Power.
 			_guiID = Guid.NewGuid();
@@ -5160,7 +4926,7 @@ namespace Chummer
 		/// <summary>
 		/// The Character object being used by the Power.
 		/// </summary>
-		public Character CharacterObject
+		public ICharacter CharacterObject
 		{
 			get
 			{
@@ -5561,10 +5327,10 @@ namespace Chummer
 		private List<string> _lstTags = new List<string>();
 		private List<TechProgramOption> _lstOptions = new List<TechProgramOption>();
 		private string _strNotes = "";
-		private readonly Character _objCharacter;
+		private readonly ICharacter _objCharacter;
 
 		#region Constructor, Create, Save, Load, and Print Methods
-		public TechProgram(Character objCharacter)
+		public TechProgram(ICharacter objCharacter)
 		{
 			// Create the GUID for the new Complex Form.
 			_guiID = Guid.NewGuid();
@@ -5576,7 +5342,7 @@ namespace Chummer
 		/// <param name="objCharacter">Character the Gear is being added to.</param>
 		/// <param name="objNode">TreeNode to populate a TreeView.</param>
 		/// <param name="strForcedValue">Value to forcefully select for any ImprovementManager prompts.</param>
-		public void Create(XmlNode objXmlProgramNode, Character objCharacter, TreeNode objNode, string strForcedValue = "")
+		public void Create(XmlNode objXmlProgramNode, ICharacter objCharacter, ITreeNodeView objNode, string strForcedValue = "")
 		{
 			_strName = objXmlProgramNode["name"].InnerText;
 			_strCategory = objXmlProgramNode["category"].InnerText;
@@ -6151,10 +5917,10 @@ namespace Chummer
 		private string _strExtra = "";
 		private List<string> _lstTags = new List<string>();
 		private string _strNotes = "";
-		private readonly Character _objCharacter;
+		private readonly ICharacter _objCharacter;
 
 		#region Constructor, Create, Save, Load, and Print Methods
-		public TechProgramOption(Character objCharacter)
+		public TechProgramOption(ICharacter objCharacter)
 		{
 			// Create the GUID for the new Complex Form.
 			_guiID = Guid.NewGuid();
@@ -6166,7 +5932,7 @@ namespace Chummer
 		/// <param name="objCharacter">Character the Gear is being added to.</param>
 		/// <param name="objNode">TreeNode to populate a TreeView.</param>
 		/// <param name="strForcedValue">Value to forcefully select for any ImprovementManager prompts.</param>
-		public void Create(XmlNode objXmlOptionNode, Character objCharacter, TreeNode objNode, string strForcedValue = "")
+		public void Create(XmlNode objXmlOptionNode, ICharacter objCharacter, ITreeNodeView objNode, string strForcedValue = "")
 		{
 			_strName = objXmlOptionNode["name"].InnerText;
 			_strSource = objXmlOptionNode["source"].InnerText;
@@ -6516,10 +6282,10 @@ namespace Chummer
 		private int _intRating = 1;
 		private List<MartialArtAdvantage> _lstAdvantages = new List<MartialArtAdvantage>();
 		private string _strNotes = "";
-		private Character _objCharacter;
+		private ICharacter _objCharacter;
 
 		#region Create, Save, Load, and Print Methods
-		public MartialArt(Character objCharacter)
+		public MartialArt(ICharacter objCharacter)
 		{
 			_objCharacter = objCharacter;
 		}
@@ -6528,7 +6294,7 @@ namespace Chummer
 		/// <param name="objXmlArtNode">XmlNode to create the object from.</param>
 		/// <param name="objNode">TreeNode to populate a TreeView.</param>
 		/// <param name="objCharacter">Character the Martial Art is being added to.</param>
-		public void Create(XmlNode objXmlArtNode, TreeNode objNode, Character objCharacter)
+		public void Create(XmlNode objXmlArtNode, ITreeNodeView objNode, ICharacter objCharacter)
 		{
 			_objCharacter = objCharacter;
 			_strName = objXmlArtNode["name"].InnerText;
@@ -6761,10 +6527,10 @@ namespace Chummer
 		private Guid _guiID = new Guid();
 		private string _strName = "";
 		private string _strNotes = "";
-		private Character _objCharacter;
+		private ICharacter _objCharacter;
 
 		#region Constructor, Create, Save, Load, and Print Methods
-		public MartialArtAdvantage(Character objCharacter)
+		public MartialArtAdvantage(ICharacter objCharacter)
 		{
 			// Create the GUID for the new Martial Art Advantage.
 			_guiID = Guid.NewGuid();
@@ -6775,7 +6541,7 @@ namespace Chummer
 		/// <param name="objXmlAdvantageNode">XmlNode to create the object from.</param>
 		/// <param name="objCharacter">Character the Gear is being added to.</param>
 		/// <param name="objNode">TreeNode to populate a TreeView.</param>
-		public void Create(XmlNode objXmlAdvantageNode, Character objCharacter, TreeNode objNode)
+		public void Create(XmlNode objXmlAdvantageNode, ICharacter objCharacter, ITreeNodeView objNode)
 		{
 			_strName = objXmlAdvantageNode["name"].InnerText;
 
@@ -6913,10 +6679,10 @@ namespace Chummer
 		private string _strSource = "";
 		private string _strPage = "";
 		private string _strNotes = "";
-		private readonly Character _objCharacter;
+		private readonly ICharacter _objCharacter;
 
 		#region Constructor, Create, Save, Load, and Print Methods
-		public MartialArtManeuver(Character objCharacter)
+		public MartialArtManeuver(ICharacter objCharacter)
 		{
 			// Create the GUID for the new Martial Art Maneuver.
 			_guiID = Guid.NewGuid();
@@ -6926,7 +6692,7 @@ namespace Chummer
 		/// Create a Martial Art Maneuver from an XmlNode and return the TreeNodes for it.
 		/// <param name="objXmlManeuverNode">XmlNode to create the object from.</param>
 		/// <param name="objNode">TreeNode to populate a TreeView.</param>
-		public void Create(XmlNode objXmlManeuverNode, TreeNode objNode)
+		public void Create(XmlNode objXmlManeuverNode, ITreeNodeView objNode)
 		{
 			_strName = objXmlManeuverNode["name"].InnerText;
 			_strSource = objXmlManeuverNode["source"].InnerText;
@@ -7137,9 +6903,9 @@ namespace Chummer
 		private string _strFileName = "";
 		private string _strRelativeName = "";
 		private string _strNotes = "";
-		private Color _objColour;
+		private int? _intColour;
 		private bool _blnFree = false;
-		private Character _objCharacter;
+		private ICharacter _objCharacter;
 
 		#region Helper Methods
 		/// <summary>
@@ -7161,7 +6927,7 @@ namespace Chummer
 		#endregion
 
 		#region Constructor, Save, Load, and Print Methods
-		public Contact(Character objCharacter)
+		public Contact(ICharacter objCharacter)
 		{
 			_objCharacter = objCharacter;
 		}
@@ -7185,7 +6951,7 @@ namespace Chummer
 			objWriter.WriteElementString("relative", _strRelativeName);
 			objWriter.WriteElementString("notes", _strNotes);
 			objWriter.WriteElementString("groupname", _strGroupName);
-			objWriter.WriteElementString("colour", _objColour.ToArgb().ToString());
+			objWriter.WriteElementString("colour", (_intColour ?? 0).ToString());
 			objWriter.WriteElementString("free", _blnFree.ToString());
 			objWriter.WriteEndElement();
 		}
@@ -7240,7 +7006,7 @@ namespace Chummer
 			}
 			try
 			{
-				_objColour = Color.FromArgb(Convert.ToInt32(objNode["colour"].InnerText));
+				_intColour = Convert.ToInt32(objNode["colour"].InnerText);
 			}
 			catch
 			{
@@ -7467,17 +7233,17 @@ namespace Chummer
 		}
 
 		/// <summary>
-		/// Contact Colour.
+		/// Contact Colour as an ARGB value, or null when none was chosen.
 		/// </summary>
-		public Color Colour
+		public int? ColourArgb
 		{
 			get
 			{
-				return _objColour;
+				return _intColour;
 			}
 			set
 			{
-				_objColour = value;
+				_intColour = value;
 			}
 		}
 
@@ -7516,11 +7282,11 @@ namespace Chummer
 		private double _dblPowerPoints = 0.0;
 		private XmlNode _nodBonus;
 		private string _strNotes = "";
-		private readonly Character _objCharacter;
+		private readonly ICharacter _objCharacter;
 		private bool _blnCountTowardsLimit = true;
 
 		#region Constructor, Create, Save, Load, and Print Methods
-		public CritterPower(Character objCharacter)
+		public CritterPower(ICharacter objCharacter)
 		{
 			// Create the GUID for the new Power.
 			_guiID = Guid.NewGuid();
@@ -7533,7 +7299,7 @@ namespace Chummer
 		/// <param name="objNode">TreeNode to populate a TreeView.</param>
 		/// <param name="intRating">Selected Rating for the Gear.</param>
 		/// <param name="strForcedValue">Value to forcefully select for any ImprovementManager prompts.</param>
-		public void Create(XmlNode objXmlPowerNode, Character objCharacter, TreeNode objNode, int intRating = 0, string strForcedValue = "")
+		public void Create(XmlNode objXmlPowerNode, ICharacter objCharacter, ITreeNodeView objNode, int intRating = 0, string strForcedValue = "")
 		{
 			_strName = objXmlPowerNode["name"].InnerText;
 			_strCategory = objXmlPowerNode["category"].InnerText;
@@ -8083,7 +7849,7 @@ namespace Chummer
 		private readonly CharacterOptions _objOptions;
 
 		#region Constructor, Create, Save, and Load Methods
-		public InitiationGrade(Character objCharacter)
+		public InitiationGrade(ICharacter objCharacter)
 		{
 			// Create the GUID for the new InitiationGrade.
 			_guiID = Guid.NewGuid();

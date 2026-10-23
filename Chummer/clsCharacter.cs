@@ -35,16 +35,10 @@ public delegate void BlackMarketEnabledChangedHandler(Object sender);
 
 namespace Chummer
 {
-	public enum CharacterBuildMethod
-	{
-		BP = 0,
-		Karma = 1,
-	}
-
 	/// <summary>
 	/// Class that holds all of the information that makes up a complete Character.
 	/// </summary>
-	public class Character : IImprovementCharacter
+	public class Character : ICharacter
 	{
 		private readonly ImprovementManager _objImprovementManager;
 		private readonly CharacterOptions _objOptions = new CharacterOptions();
@@ -4370,6 +4364,14 @@ namespace Chummer
 			}
 		}
 
+		IEnumerable<ICharacterCyberware> ICharacter.Cyberware
+		{
+			get
+			{
+				return Cyberware;
+			}
+		}
+
 		/// <summary>
 		/// Weapons.
 		/// </summary>
@@ -4408,6 +4410,14 @@ namespace Chummer
 			get
 			{
 				return _lstGear;
+			}
+		}
+
+		IEnumerable<ICharacterGear> ICharacter.Gear
+		{
+			get
+			{
+				return Gear;
 			}
 		}
 
