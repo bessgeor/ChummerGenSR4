@@ -6,7 +6,7 @@ using System.Xml;
 
 namespace Chummer
 {
-	public partial class frmMain : Form
+	public partial class frmMain : Form, IMainForm
 	{
 		private frmDiceRoller _frmRoller;
 
@@ -47,7 +47,7 @@ namespace Chummer
 			if (strArgs.GetUpperBound(0) > 0)
 			{
 				if (strArgs[1] != "/debug")
-					LoadCharacter(strArgs[1]);
+					LoadCharacter(strArgs[1], true, "", false);
 				if (strArgs.Length > 2)
 				{
 					if (strArgs[2] == "/test")
@@ -226,7 +226,7 @@ namespace Chummer
 			string strFileName = ((ToolStripMenuItem)sender).Text;
 			string strNumber = strFileName.Substring(0, 3);
 			strFileName = strFileName.Replace(strNumber, string.Empty).Trim();
-			LoadCharacter(strFileName);
+			LoadCharacter(strFileName, true, "", false);
 		}
 
 		private void mnuMRU_MouseDown(object sender, MouseEventArgs e)
@@ -245,7 +245,7 @@ namespace Chummer
 		private void mnuStickyMRU_Click(object sender, EventArgs e)
 		{
 			string strFileName = ((ToolStripMenuItem)sender).Text;
-			LoadCharacter(strFileName);
+			LoadCharacter(strFileName, true, "", false);
 		}
 
 		private void mnuStickyMRU_MouseDown(object sender, MouseEventArgs e)
@@ -415,7 +415,7 @@ namespace Chummer
 			// Open each file that has been dropped into the window.
 			string[] s = (string[])e.Data.GetData(DataFormats.FileDrop, false);
 			foreach (string strFileName in s)
-				LoadCharacter(strFileName);
+				LoadCharacter(strFileName, true, "", false);
 		}
 
 		private void frmMain_DragEnter(object sender, DragEventArgs e)
@@ -503,7 +503,7 @@ namespace Chummer
 			{
 				foreach (string strFileName in openFileDialog.FileNames)
 				{
-					LoadCharacter(strFileName);
+					LoadCharacter(strFileName, true, "", false);
 				}
 			}
 		}
@@ -515,7 +515,7 @@ namespace Chummer
 		/// <param name="blnIncludeInMRU">Whether or not the file should appear in the MRU list.</param>
 		/// <param name="strNewName">New name for the character.</param>
 		/// <param name="blnClearFileName">Whether or not the name of the save file should be cleared.</param>
-		public void LoadCharacter(string strFileName, bool blnIncludeInMRU = true, string strNewName = "", bool blnClearFileName = false)
+		public void LoadCharacter(string strFileName, bool blnIncludeInMRU, string strNewName, bool blnClearFileName)
 		{
 			if (File.Exists(strFileName) && strFileName.EndsWith("chum"))
 			{

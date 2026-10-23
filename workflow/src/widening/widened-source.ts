@@ -1,28 +1,31 @@
 import { createHash } from "node:crypto";
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { compiledFolders, isCompiledPath } from "../compiled-source.js";
 import { SetupError } from "../host/setup-error.js";
 import type { PatchFile } from "../repair/patch.js";
-
-/** The only folder a patch may change and the only one the widened source holds: the compiled source. */
-export const compiledFolder = "Chummer";
 
 function sha256(path: string): string {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
 /**
- * Makes `target` a copy of the accepted source's `Chummer/` with the patch's after sides from the attempt's archive
- * (`files/after/<path>`) written over it. Returns the files whose accepted content is not the content the patch was
- * made from; then nothing is written over, and `target` holds the plain copy.
+ * Makes `target` a copy of the accepted source's compiled folders (`Chummer/` and `Core/`), the only ones a patch may
+ * change and the only ones the widened source holds, with the patch's after sides from the attempt's archive
+ * (`files/after/<path>`) written over it. A compiled folder that the accepted source lacks is a setup error: the source
+ * cannot be built without it. Returns the files whose accepted content is not the content the patch was made from;
+ * then nothing is written over, and `target` holds the plain copy.
  */
 export function prepareWidenedSource(acceptedSource: string, archive: string, files: readonly PatchFile[], target: string): string[] {
   rmSync(target, { recursive: true, force: true });
   mkdirSync(target, { recursive: true });
-  cpSync(join(acceptedSource, compiledFolder), join(target, compiledFolder), { recursive: true });
+  for (const folder of compiledFolders) {
+    if (!existsSync(join(acceptedSource, folder))) throw new SetupError(`The accepted source ${acceptedSource} has no ${folder}/, which the candidate is compiled from.`);
+    cpSync(join(acceptedSource, folder), join(target, folder), { recursive: true });
+  }
   const conflicts: string[] = [];
   for (const file of files) {
-    if (!file.path.startsWith(`${compiledFolder}/`) || file.change === "deleted" || file.after === null) {
+    if (!isCompiledPath(file.path) || file.change === "deleted" || file.after === null) {
       throw new SetupError(`The archived patch in ${archive} changes ${file.path} (${file.change}), which the patch guard does not let through.`);
     }
     const accepted = join(acceptedSource, file.path);

@@ -16,10 +16,10 @@ test("the snapshot copies the working tree's source and data without history, ig
   const root = repository();
   const target = join(scratch(), "source");
   const snapshot = await createSourceSnapshot(root, target, processGit(root));
-  equal(snapshot.files, 4);
+  equal(snapshot.files, 5);
   ok(/^[0-9a-f]{40}$/.test(snapshot.commit));
   equal(readFileSync(join(target, "Chummer/frmCreate.cs"), "utf8"), "class frmCreate { int moved; }");
-  ok(existsSync(join(target, "Chummer/untracked.cs")) && existsSync(join(target, "bin/data/skills.xml")) && existsSync(join(target, "bin/lang/en-us.xml")));
+  ok(existsSync(join(target, "Chummer/untracked.cs")) && existsSync(join(target, "Core/XmlManager.cs")) && existsSync(join(target, "bin/data/skills.xml")) && existsSync(join(target, "bin/lang/en-us.xml")));
   for (const absent of ["Chummer/obj/ignored.cs", "Chummer/deleted.cs", "bin/ChummerGenSR4.exe", "README.md", ".git"]) ok(!existsSync(join(target, absent)), absent);
   const again = await createSourceSnapshot(root, target, processGit(root));
   equal(again.identity, snapshot.identity);
@@ -53,6 +53,18 @@ test("the compiled-source identity of the working tree equals the snapshot's; a 
   equal(await compiledSourceIdentity(root, git), snapshot.compiledIdentity);
   ok((await createSourceSnapshot(root, join(scratch(), "source"), git)).identity !== snapshot.identity);
   write(root, "Chummer/frmCreate.cs", "class frmCreate { int edited; }");
+  ok((await compiledSourceIdentity(root, git)) !== snapshot.compiledIdentity);
+});
+
+test("the class library under Core/ is compiled source: the snapshot copies it and an edit changes the compiled identity", async () => {
+  const root = repository();
+  const git = processGit(root);
+  write(root, "Core/XmlManager.cs", "class XmlManager {}");
+  const target = join(scratch(), "source");
+  const snapshot = await createSourceSnapshot(root, target, git);
+  equal(readFileSync(join(target, "Core/XmlManager.cs"), "utf8"), "class XmlManager {}");
+  equal(await compiledSourceIdentity(root, git), snapshot.compiledIdentity);
+  write(root, "Core/XmlManager.cs", "class XmlManager { int edited; }");
   ok((await compiledSourceIdentity(root, git)) !== snapshot.compiledIdentity);
 });
 test("the candidate build records the compiled source it started from, only when it ran and succeeded", async () => {

@@ -5,46 +5,6 @@ using System.Windows.Forms;
 namespace Chummer
 {
 	/// <summary>
-	/// ListItem class to make populating a DropDownList from a DataSource easier.
-	/// </summary>
-	public class ListItem
-	{
-		private string _strValue = "";
-		private string _strName = "";
-
-		/// <summary>
-		/// Value.
-		/// </summary>
-		public string Value
-		{
-			get
-			{
-				return _strValue;
-			}
-			set
-			{
-				_strValue = value;
-			}
-		}
-
-		/// <summary>
-		/// Name.
-		/// </summary>
-		public string Name
-		{
-			get
-			{
-				return _strName;
-			}
-			set
-			{
-				_strName = value;
-			}
-		}
-	}
-
-	#region Sorting Classes
-	/// <summary>
 	/// Sort TreeNodes in alphabetical order, ignoring [].
 	/// </summary>
 	public class SortByName : IComparer
@@ -69,20 +29,6 @@ namespace Chummer
 			ListViewItem ly = objY as ListViewItem;
 
 			return DateTime.Compare(DateTime.Parse(ly.Text), DateTime.Parse(lx.Text));
-		}
-	}
-
-	/// <summary>
-	/// Sort ListItems by Name in alphabetical order.
-	/// </summary>
-	public class SortListItem : IComparer
-	{
-		public int Compare(object objX, object objY)
-		{
-			ListItem lx = objX as ListItem;
-			ListItem ly = objY as ListItem;
-
-			return string.Compare(lx.Name, ly.Name);
 		}
 	}
 
@@ -157,5 +103,4 @@ namespace Chummer
 			}
 		}
 	}
-	#endregion
 }

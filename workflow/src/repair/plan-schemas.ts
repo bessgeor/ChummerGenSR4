@@ -1,9 +1,10 @@
 import { z } from "zod";
-import { maximumFiles, repairableFolder } from "./patch-guard.js";
+import { compiledFoldersText, isCompiledPath } from "../compiled-source.js";
+import { maximumFiles } from "./patch-guard.js";
 import { unsafePath } from "./repair-schemas.js";
 
-export const planPromptVersion = "repair-plan-v1";
-export const subtaskPromptVersion = "repair-task-v1";
+export const planPromptVersion = "repair-plan-v2";
+export const subtaskPromptVersion = "repair-task-v2";
 export const maximumSubtasks = 5;
 
 const SubtaskSchema = z.strictObject({
@@ -61,7 +62,7 @@ export function validatePlan(output: PlanOutput): string[] {
     for (const [fileIndex, path] of task.files.entries()) {
       const problem = unsafePath(path);
       if (problem !== null) errors.push(`${at}.files[${fileIndex}] '${path}' ${problem}`);
-      else if (!path.startsWith(repairableFolder)) errors.push(`${at}.files[${fileIndex}] '${path}' is outside ${repairableFolder}`);
+      else if (!isCompiledPath(path)) errors.push(`${at}.files[${fileIndex}] '${path}' is outside ${compiledFoldersText}`);
       if (task.files.indexOf(path) !== fileIndex) errors.push(`${at}.files[${fileIndex}] '${path}' is named twice`);
     }
     for (const blocker of task.blockedBy) {

@@ -13,6 +13,7 @@ namespace Chummer
         [STAThread]
         static void Main()
         {
+            ApplicationHost.Current = new WinFormsApplicationHost();
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 			LanguageManager.Instance.Load(GlobalOptions.Instance.Language, null);

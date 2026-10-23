@@ -4,7 +4,6 @@ using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Xml;
-using System.Windows.Forms;
 using Microsoft.Win32;
 
 // MRUChanged Event Handler.
@@ -81,7 +80,7 @@ namespace Chummer
 
 		public event MRUChangedHandler MRUChanged;
 
-		private frmMain _frmMainForm;
+		private IMainForm _frmMainForm;
 
 		private static bool _blnAutomaticUpdate = false;
 		private static bool _blnLocalisedUpdatesOnly = false;
@@ -96,9 +95,6 @@ namespace Chummer
 		private XmlDocument _objXmlClipboard = new XmlDocument();
 		private ClipboardContentType _objClipboardContentType = new ClipboardContentType();
 
-		public static GradeList CyberwareGrades = new GradeList();
-		public static GradeList BiowareGrades = new GradeList();
-
 		// PDF information.
 		public static string _strPDFAppPath = "";
 		public static List<SourcebookInfo> _lstSourcebookInfo = new List<SourcebookInfo>();
@@ -106,8 +102,8 @@ namespace Chummer
 		#region Constructor and Instance
 		static GlobalOptions()
 		{
-			if (!Directory.Exists(Path.Combine(Application.StartupPath, "settings")))
-				Directory.CreateDirectory(Path.Combine(Application.StartupPath, "settings"));
+			if (!Directory.Exists(Path.Combine(ApplicationHost.Current.StartupPath, "settings")))
+				Directory.CreateDirectory(Path.Combine(ApplicationHost.Current.StartupPath, "settings"));
 
 			// Automatic Update.
 			try
@@ -217,8 +213,6 @@ namespace Chummer
 				}
 			}
 
-			CyberwareGrades.LoadList(Improvement.ImprovementSource.Cyberware);
-			BiowareGrades.LoadList(Improvement.ImprovementSource.Bioware);
 		}
 
 		GlobalOptions()
@@ -301,7 +295,7 @@ namespace Chummer
 		/// <summary>
 		/// Main application form.
 		/// </summary>
-		public frmMain MainForm
+		public IMainForm MainForm
 		{
 			get
 			{
@@ -791,11 +785,11 @@ namespace Chummer
 		public CharacterOptions()
 		{
 			// Create the settings directory if it does not exist.
-			if (!Directory.Exists(Path.Combine(Application.StartupPath, "settings")))
-				Directory.CreateDirectory(Path.Combine(Application.StartupPath, "settings"));
+			if (!Directory.Exists(Path.Combine(ApplicationHost.Current.StartupPath, "settings")))
+				Directory.CreateDirectory(Path.Combine(ApplicationHost.Current.StartupPath, "settings"));
 
 			// If the default.xml settings file does not exist, attempt to read the settings from the Registry (old storage format), then save them to the default.xml file.
-			string strFilePath = Path.Combine(Application.StartupPath, "settings");
+			string strFilePath = Path.Combine(ApplicationHost.Current.StartupPath, "settings");
 			strFilePath = Path.Combine(strFilePath, "default.xml");
 			if (!File.Exists(strFilePath))
 			{
@@ -818,7 +812,7 @@ namespace Chummer
 		/// </summary>
 		public void Save()
 		{
-			string strFilePath = Path.Combine(Application.StartupPath, "settings");
+			string strFilePath = Path.Combine(ApplicationHost.Current.StartupPath, "settings");
 			strFilePath = Path.Combine(strFilePath, _strFileName);
 			FileStream objStream = new FileStream(strFilePath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite);
 			XmlTextWriter objWriter = new XmlTextWriter(objStream, Encoding.Unicode);
@@ -1112,7 +1106,7 @@ namespace Chummer
 		public bool Load(string strFileName)
 		{
 			_strFileName = strFileName;
-			string strFilePath = Path.Combine(Application.StartupPath, "settings");
+			string strFilePath = Path.Combine(ApplicationHost.Current.StartupPath, "settings");
 			strFilePath = Path.Combine(strFilePath, _strFileName);
 			XmlDocument objXmlDocument = new XmlDocument();
 			try
@@ -1122,9 +1116,9 @@ namespace Chummer
 					objXmlDocument.Load(strFilePath);
 				else
 				{
-					if (MessageBox.Show(LanguageManager.Instance.GetString("Message_CharacterOptions_CannotLoadSetting").Replace("{0}", _strFileName), LanguageManager.Instance.GetString("MessageTitle_CharacterOptions_CannotLoadSetting"), MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.No)
+					if (!ApplicationHost.Current.AskYesNo(LanguageManager.Instance.GetString("Message_CharacterOptions_CannotLoadSetting").Replace("{0}", _strFileName), LanguageManager.Instance.GetString("MessageTitle_CharacterOptions_CannotLoadSetting")))
 					{
-						MessageBox.Show(LanguageManager.Instance.GetString("Message_CharacterOptions_CannotLoadCharacter"), LanguageManager.Instance.GetString("MessageText_CharacterOptions_CannotLoadCharacter"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+						ApplicationHost.Current.ShowError(LanguageManager.Instance.GetString("Message_CharacterOptions_CannotLoadCharacter"), LanguageManager.Instance.GetString("MessageText_CharacterOptions_CannotLoadCharacter"));
 						return false;
 					}
 					else
@@ -1136,7 +1130,7 @@ namespace Chummer
 			}
 			catch
 			{
-				MessageBox.Show(LanguageManager.Instance.GetString("Message_CharacterOptions_CannotLoadCharacter"), LanguageManager.Instance.GetString("MessageText_CharacterOptions_CannotLoadCharacter"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+				ApplicationHost.Current.ShowError(LanguageManager.Instance.GetString("Message_CharacterOptions_CannotLoadCharacter"), LanguageManager.Instance.GetString("MessageText_CharacterOptions_CannotLoadCharacter"));
 				return false;
 			}
 

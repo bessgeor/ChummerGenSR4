@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Windows.Forms;
 using System.Xml;
 
 namespace Chummer
@@ -48,7 +47,6 @@ namespace Chummer
 			}
 		}
 
-		static private readonly bool _blnDebug = false;
 		static private string _strLanguage = "";
 		static readonly LanguageManager _objInstance = new LanguageManager();
 		static private readonly Dictionary<string, string> _objDictionary = new Dictionary<string, string>();
@@ -59,12 +57,6 @@ namespace Chummer
 		#region Constructor and Instance
 		static LanguageManager()
 		{
-			string[] strArgs = Environment.GetCommandLineArgs();
-			if (strArgs.GetUpperBound(0) > 0)
-			{
-				if (strArgs[1] == "/debug")
-					_blnDebug = true;
-			}
 			RefreshStrings();
 		}
 
@@ -125,11 +117,13 @@ namespace Chummer
 		/// </summary>
 		private static void RefreshStrings()
 		{
+			// The host is read outside the try block so that a missing host reaches the caller instead of the handler below.
+			IApplicationHost objHost = ApplicationHost.Current;
 			try
 			{
 				_objDictionary.Clear();
 				XmlDocument objEnglishDocument = new XmlDocument();
-				string strFilePath = Path.Combine(Application.StartupPath, "lang");
+				string strFilePath = Path.Combine(objHost.StartupPath, "lang");
 				strFilePath = Path.Combine(strFilePath, "en-us.xml");
 				objEnglishDocument.Load(strFilePath);
 				foreach (XmlNode objNode in objEnglishDocument.SelectNodes("/chummer/strings/string"))
@@ -143,8 +137,8 @@ namespace Chummer
 			}
 			catch
 			{
-				MessageBox.Show("Could not load default language file!", "Default Language Missing", MessageBoxButtons.OK, MessageBoxIcon.Error);
-				Application.Exit();
+				objHost.ShowError("Could not load default language file!", "Default Language Missing");
+				objHost.Exit();
 			}
 		}
 
@@ -163,7 +157,7 @@ namespace Chummer
 				{
 					_strLanguage = strLanguage;
 					XmlDocument objLanguageDocument = new XmlDocument();
-					strFilePath = Path.Combine(Application.StartupPath, "lang");
+					strFilePath = Path.Combine(ApplicationHost.Current.StartupPath, "lang");
 					strFilePath = Path.Combine(strFilePath, strLanguage + ".xml");
 					objLanguageDocument.Load(strFilePath);
 					_objXmlDocument.Load(strFilePath);
@@ -184,12 +178,12 @@ namespace Chummer
 				catch (Exception)
 				{
 					_strLanguage = strLanguage;
-					MessageBox.Show("Language file " + strFilePath + " could not be loaded.", "Cannot Load Language", MessageBoxButtons.OK, MessageBoxIcon.Error);
+					ApplicationHost.Current.ShowError("Language file " + strFilePath + " could not be loaded.", "Cannot Load Language");
 					return;
 				}
 
 				// Check to see if the data translation file for the selected language exists.
-				string strDataPath = Path.Combine(Application.StartupPath, "lang");
+				string strDataPath = Path.Combine(ApplicationHost.Current.StartupPath, "lang");
 				strDataPath = Path.Combine(strDataPath, strLanguage + "_data.xml");
 				if (File.Exists(strDataPath))
 				{
@@ -205,229 +199,8 @@ namespace Chummer
 				}
 			}
 
-			// If the object is a Form, call the UpdateForm method to provide its translations.
-			if (objObject is Form)
-				UpdateForm((Form)objObject);
-
-			// If the object is a UserControl, call the UpdateUserControl method to provide its translations.
-			if (objObject is UserControl)
-				UpdateUserControl((UserControl)objObject);
-		}
-
-		/// <summary>
-		/// Recursive method to translate all of the controls in a Form or UserControl.
-		/// </summary>
-		/// <param name="objParent">Control container to translate.</param>
-		private void UpdateControls(Control objParent)
-		{
-			// Translatable items are identified by having a value in their Tag attribute. The contents of Tag is the string to lookup in the language list.
-
-			foreach (Label lblLabel in objParent.Controls.OfType<Label>())
-			{
-				if (lblLabel.Tag != null)
-				{
-					try
-					{
-						lblLabel.Text = GetString(lblLabel.Tag.ToString());
-					}
-					catch
-					{
-						if (_blnDebug)
-							throw;
-						else
-							lblLabel.Text = lblLabel.Tag.ToString();
-					}
-				}
-			}
-			foreach (Button cmdButton in objParent.Controls.OfType<Button>())
-			{
-				if (cmdButton.Tag != null)
-				{
-					try
-					{
-						cmdButton.Text = GetString(cmdButton.Tag.ToString());
-					}
-					catch
-					{
-						if (_blnDebug)
-							throw;
-						else
-							cmdButton.Text = cmdButton.Tag.ToString();
-					}
-				}
-			}
-			foreach (CheckBox chkCheckbox in objParent.Controls.OfType<CheckBox>())
-			{
-				if (chkCheckbox.Tag != null)
-				{
-					try
-					{
-						if (chkCheckbox.Tag.ToString().Contains("_"))
-							chkCheckbox.Text = GetString(chkCheckbox.Tag.ToString());
-					}
-					catch
-					{
-						if (_blnDebug)
-							throw;
-						else
-							chkCheckbox.Text = chkCheckbox.Tag.ToString();
-					}
-				}
-			}
-			foreach (ListView lstList in objParent.Controls.OfType<ListView>())
-			{
-				foreach (ColumnHeader objHeader in lstList.Columns)
-				{
-					if (objHeader.Tag != null)
-					{
-						try
-						{
-							objHeader.Text = GetString(objHeader.Tag.ToString());
-						}
-						catch
-						{
-							if (_blnDebug)
-								throw;
-							else
-								objHeader.Text = objHeader.Tag.ToString();
-						}
-					}
-				}
-			}
-
-			// Run through any Panels on the container.
-			foreach (Panel objPanel in objParent.Controls.OfType<Panel>())
-			{
-				UpdateControls(objPanel);
-			}
-
-			// Run through any Tabs on the container.
-			foreach (TabControl objTabControl in objParent.Controls.OfType<TabControl>())
-			{
-				foreach (TabPage tabPage in objTabControl.TabPages)
-				{
-					if (tabPage.Tag != null)
-					{
-						try
-						{
-							tabPage.Text = GetString(tabPage.Tag.ToString());
-						}
-						catch
-						{
-							if (_blnDebug)
-								throw;
-							else
-								tabPage.Text = tabPage.Tag.ToString();
-						}
-					}
-
-					UpdateControls(tabPage);
-				}
-			}
-
-			// Run through everything in any SplitContainers.
-			foreach (SplitContainer objSplitControl in objParent.Controls.OfType<SplitContainer>())
-			{
-				for (int i = 1; i <= 2; i++)
-				{
-					SplitterPanel objSplitPanel;
-					if (i == 1)
-						objSplitPanel = objSplitControl.Panel1;
-					else
-						objSplitPanel = objSplitControl.Panel2;
-
-					UpdateControls(objSplitPanel);
-				}
-			}
-
-			// Run through any FlowLayoutPanels on the container.
-			foreach (FlowLayoutPanel objContainer in objParent.Controls.OfType<FlowLayoutPanel>())
-			{
-				UpdateControls(objContainer);
-			}
-
-			foreach (TreeView treTree in objParent.Controls.OfType<TreeView>())
-			{
-				foreach (TreeNode objNode in treTree.Nodes)
-				{
-					if (objNode.Level == 0)
-					{
-						if (objNode.Tag != null)
-						{
-							if (objNode.Tag.ToString().StartsWith("Node_"))
-							{
-								try
-								{
-									objNode.Text = GetString(objNode.Tag.ToString());
-								}
-								catch
-								{
-									if (_blnDebug)
-										throw;
-									else
-										objNode.Text = objNode.Tag.ToString();
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-
-		/// <summary>
-		/// Translate the contents of a UserControl.
-		/// </summary>
-		/// <param name="objControl">UserControl to translate.</param>
-		private void UpdateUserControl(UserControl objControl)
-		{
-			UpdateControls(objControl);
-		}
-
-		/// <summary>
-		/// Translate the contents of a Form.
-		/// </summary>
-		/// <param name="objForm">Form to translate.</param>
-		private void UpdateForm(Form objForm)
-		{
-			// Translatable items are identified by having a value in their Tag attribute. The contents of Tag is the string to lookup in the language list.
-			// Update the Form itself.
-			if (objForm.Tag != null)
-			{
-				try
-				{
-					objForm.Text = GetString(objForm.Tag.ToString());
-				}
-				catch
-				{
-					if (_blnDebug)
-						throw;
-					else
-						objForm.Text = objForm.Tag.ToString();
-				}
-			}
-
-			// Run through any StatusStrips.
-			foreach (StatusStrip objStrip in objForm.Controls.OfType<StatusStrip>())
-			{
-				foreach (ToolStripStatusLabel tssLabel in objStrip.Items.OfType<ToolStripStatusLabel>())
-				{
-					if (tssLabel.Tag != null)
-						try
-						{
-							tssLabel.Text = GetString(tssLabel.Tag.ToString());
-						}
-						catch
-						{
-							if (_blnDebug)
-								throw;
-							else
-								tssLabel.Text = tssLabel.Tag.ToString();
-						}
-				}
-			}
-
-			// Handle control over to the method that handles translating all of the other Controls.
-			UpdateControls(objForm);
+			// Let the application translate the object if it is a Form or a UserControl.
+			ApplicationHost.Current.TranslateControls(objObject);
 		}
 
 		/// <summary>
@@ -451,7 +224,7 @@ namespace Chummer
 			// Load the English version.
 			List<LanguageString> lstEnglish = new List<LanguageString>();
 			XmlDocument objEnglishDocument = new XmlDocument();
-			string strFilePath = Path.Combine(Application.StartupPath, "lang");
+			string strFilePath = Path.Combine(ApplicationHost.Current.StartupPath, "lang");
 			strFilePath = Path.Combine(strFilePath, "en-us.xml");
 			objEnglishDocument.Load(strFilePath);
 			foreach (XmlNode objNode in objEnglishDocument.SelectNodes("/chummer/strings/string"))
@@ -465,7 +238,7 @@ namespace Chummer
 			// Load the selected language version.
 			List<LanguageString> lstLanguage = new List<LanguageString>();
 			XmlDocument objLanguageDocument = new XmlDocument();
-			string strLangPath = Path.Combine(Application.StartupPath, "lang");
+			string strLangPath = Path.Combine(ApplicationHost.Current.StartupPath, "lang");
 			strLangPath = Path.Combine(strLangPath, strLanguage + ".xml");
 			objLanguageDocument.Load(strLangPath);
 			foreach (XmlNode objNode in objLanguageDocument.SelectNodes("/chummer/strings/string"))
@@ -494,9 +267,9 @@ namespace Chummer
 
 			// Display the message.
 			if (strMessage != "")
-				MessageBox.Show(strMessage, "Language File Contents", MessageBoxButtons.OK, MessageBoxIcon.Information);
+				ApplicationHost.Current.ShowInformation(strMessage, "Language File Contents");
 			else
-				MessageBox.Show("Language file is OK.", "Language File Contents", MessageBoxButtons.OK, MessageBoxIcon.Information);
+				ApplicationHost.Current.ShowInformation("Language file is OK.", "Language File Contents");
 		}
 
 		/// <summary>

@@ -87,7 +87,7 @@ test("an eval run scores every sample of the partition, records each job and wri
   equal(agents.calls.length, 8);
   ok(agents.calls.every((call) => !call.workspace.folder.startsWith(run.folder) && call.workspace.contextFiles.includes("context.json")));
   const { settings, samples } = readRun(folder);
-  deepStrictEqual([settings.jobKind, settings.partition, settings.repeat, settings.choice.provider, settings.promptVersion, settings.samples.length], ["hypothesis", "test", 2, "claude", "hypothesis-v1", 8]);
+  deepStrictEqual([settings.jobKind, settings.partition, settings.repeat, settings.choice.provider, settings.promptVersion, settings.samples.length], ["hypothesis", "test", 2, "claude", "hypothesis-v2", 8]);
   // Two samples answered without an explanation: invalid output.
   deepStrictEqual(summary.failures, { invalid_output: 2, refused: 0 });
   // Repetitions of an item are one sample: the two items of cluster 400 pass half of their repetitions, the two of cluster 100 all of them.
@@ -110,12 +110,12 @@ test("a context frozen from a thread with fix changes is run without its priors,
   const { folder } = await startEvalRun(run.dependencies(agents), { datasetFolder: run.folder, partition: "test", repeat: 1, name: null, settings: resolveAgentSettings(undefined) });
   ok(agents.calls.length > 0);
   for (const call of agents.calls) {
-    ok(call.prompt.startsWith("PROMPT_VERSION=hypothesis-v1\n") && !call.prompt.includes("PRIOR FIXES") && !call.prompt.includes("fix-d-similar"), call.prompt.slice(0, 80));
+    ok(call.prompt.startsWith("PROMPT_VERSION=hypothesis-v2\n") && !call.prompt.includes("PRIOR FIXES") && !call.prompt.includes("fix-d-similar"), call.prompt.slice(0, 80));
     ok(!call.workspace.contextFiles.includes("priors"));
   }
-  equal(readRun(folder).settings.promptVersion, "hypothesis-v1");
+  equal(readRun(folder).settings.promptVersion, "hypothesis-v2");
   const records = (await listRecords(run.fixture.store)).filter((record) => record.origin === "eval-run");
-  ok(records.length > 0 && records.every((record) => record.promptVersion === "hypothesis-v1"));
+  ok(records.length > 0 && records.every((record) => record.promptVersion === "hypothesis-v2"));
 });
 
 test("a stopped run resumes only its missing samples with the settings it started with", async () => {

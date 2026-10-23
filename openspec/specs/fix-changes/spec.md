@@ -35,7 +35,7 @@ The workflow SHALL create each fix change with the pinned CLI (`openspec new cha
 
 #### Scenario: Off by default
 - **WHEN** `npm start` runs without `--fix-changes` and a cluster is promoted
-- **THEN** the hypothesis prompt has no priors, the repair runs one job per attempt, and the fix commit holds only `Chummer/`
+- **THEN** the hypothesis prompt has no priors, the repair runs one job per attempt, and the fix commit holds only the compiled source, `Chummer/` and `Core/`
 
 #### Scenario: With unattended
 - **WHEN** `npm start -- --fix-changes --unattended --no-repair` is given

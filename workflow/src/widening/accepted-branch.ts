@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { compiledFolders } from "../compiled-source.js";
 import { SetupError } from "../host/setup-error.js";
-import { compiledFolder } from "./widened-source.js";
 
 /** Runs git with the repository's git folder, in `cwd`, with extra environment variables, and returns its standard output. */
 export type BranchGit = (args: readonly string[], options?: { readonly cwd?: string; readonly env?: Readonly<Record<string, string>>; readonly input?: string }) => string;
@@ -42,14 +43,18 @@ export class AcceptedBranch {
   }
 
   /**
-   * A commit on `parent` whose `Chummer/` (and the other `paths` of `sourceFolder`) is the one of `sourceFolder`,
+   * A commit on `parent` whose `Chummer/` and `Core/` (and the other `paths` of `sourceFolder`) are those of `sourceFolder`,
    * staged as `git add` would, or null when the staged tree is the parent's own tree within `changing` (the `paths` by
-   * default): a folder staged only to accompany the change does not make it one.
+   * default): a folder staged only to accompany the change does not make it one. A compiled folder that `sourceFolder`
+   * lacks is a setup error, since the source cannot be built without it; any other path that it lacks fails in git.
    */
-  commitSource(parent: string, sourceFolder: string, message: string, paths: readonly string[] = [compiledFolder], changing: readonly string[] = paths): string | null {
+  commitSource(parent: string, sourceFolder: string, message: string, paths: readonly string[] = compiledFolders, changing: readonly string[] = paths): string | null {
     const env = { GIT_INDEX_FILE: this.indexFile };
     try {
       this.git(["read-tree", parent], { env });
+      for (const folder of compiledFolders) {
+        if (paths.includes(folder) && !existsSync(join(sourceFolder, folder))) throw new SetupError(`${sourceFolder} has no ${folder}/, which the candidate is compiled from.`);
+      }
       this.git([`--work-tree=${sourceFolder}`, "add", "--all", "--", ...paths], { cwd: sourceFolder, env });
       const tree = this.git(["write-tree"], { env }).trim();
       const changed = this.git(["diff-tree", "-r", "--name-only", `${parent}^{tree}`, tree, "--", ...changing]).trim();
@@ -88,13 +93,13 @@ export type Promotion = {
   readonly widenedSource: string;
   readonly trailers: FixTrailers;
   readonly summary: string;
-  /** Folders of the widened source the fix commit holds besides `Chummer/`, such as the archived fix change. */
+  /** Folders of the widened source the fix commit holds besides `Chummer/` and `Core/`, such as the archived fix change. */
   readonly alsoCommitted?: readonly string[];
 };
 
 /**
  * Commits the widened source on the accepted branch and returns the commit. The first promotion starts the branch at
- * the snapshot's commit, with a commit of the snapshot's `Chummer/` when that differs. A branch whose tip already
+ * the snapshot's commit, with a commit of the snapshot's `Chummer/` and `Core/` when they differ. A branch whose tip already
  * carries the attempt's record was moved before an interruption, and its tip is the promotion; any other tip than
  * the accepted commit is a setup error. A widened source that stages the accepted tree gives null: there is nothing to
  * commit.
@@ -107,7 +112,7 @@ export function promote(promotion: Promotion): string | null {
     throw new SetupError(`${branch.ref} is at ${tip ?? "nothing"}, not at the accepted ${promotion.accepted ?? "nothing"}; something else moved it or it was deleted, and a thread that can still be resumed needs the branch where it left it.`);
   }
   const parent = promotion.accepted ?? branch.commitSource(promotion.base, promotion.snapshotFolder, sourceMessage(branch.threadId)) ?? promotion.base;
-  const fix = branch.commitSource(parent, promotion.widenedSource, fixMessage(trailers, promotion.summary), [compiledFolder, ...(promotion.alsoCommitted ?? [])], [compiledFolder]);
+  const fix = branch.commitSource(parent, promotion.widenedSource, fixMessage(trailers, promotion.summary), [...compiledFolders, ...(promotion.alsoCommitted ?? [])], compiledFolders);
   if (fix === null) return null;
   branch.move(fix, tip);
   return fix;

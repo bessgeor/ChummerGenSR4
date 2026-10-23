@@ -2,7 +2,10 @@
 // The project's own output path is ..\bin\, which holds the canonical executable, so both the
 // output and intermediate paths are overridden, and the canonical hash is checked before and after.
 //
-// Options: --source <folder> builds <folder>/Chummer/Chummer.csproj instead of the repository's;
+// The app's class library (Core/Core.csproj) is built with it from the same source folder and keeps its
+// intermediate files in Core\ below the given intermediate folder.
+//
+// Options: --source <folder> builds <folder>/Chummer/Chummer.csproj, with <folder>/Core/, instead of the repository's;
 // --output <folder> puts the executable in <folder>/bin/ and intermediate files in <folder>/obj/;
 // --log <file> writes an MSBuild file log.
 // Exit status: 0 built, 1 the build failed, 3 setup error (canonical hash, MSBuild not found or stopped, options, any unexpected failure).

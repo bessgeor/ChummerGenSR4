@@ -956,9 +956,9 @@ namespace Chummer
 			}
 
 			if (_objMode == Mode.Bioware)
-				_objSelectedGrade = GlobalOptions.BiowareGrades.GetGrade(cboGrade.SelectedValue.ToString());
+				_objSelectedGrade = GradeList.BiowareGrades.GetGrade(cboGrade.SelectedValue.ToString());
 			else
-				_objSelectedGrade = GlobalOptions.CyberwareGrades.GetGrade(cboGrade.SelectedValue.ToString());
+				_objSelectedGrade = GradeList.CyberwareGrades.GetGrade(cboGrade.SelectedValue.ToString());
 
 			_strSelectedGrade = cboGrade.SelectedValue.ToString();
 			_intSelectedRating = Convert.ToInt32(nudRating.Value);
@@ -977,9 +977,9 @@ namespace Chummer
 		{
 			GradeList objGradeList;
 			if (_objMode == Mode.Bioware)
-				objGradeList = GlobalOptions.BiowareGrades;
+				objGradeList = GradeList.BiowareGrades;
 			else
-				objGradeList = GlobalOptions.CyberwareGrades;
+				objGradeList = GradeList.CyberwareGrades;
 
 			_lstGrade.Clear();
 			foreach (Grade objGrade in objGradeList)

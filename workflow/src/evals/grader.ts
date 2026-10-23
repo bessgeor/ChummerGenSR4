@@ -2,6 +2,7 @@ import { join } from "node:path";
 import type { BaseStore } from "@langchain/langgraph-checkpoint";
 import { z } from "zod";
 import { wasNotStarted, type AgentChoice, type AgentResult, type AgentRunner } from "../agents/agent-job.js";
+import { compiledFoldersIn } from "../compiled-source.js";
 import type { ContextManifest } from "../diagnosis/context.js";
 import { jobFolderIn, stageJobFolder } from "../diagnosis/job-folder.js";
 import type { Explanation } from "../diagnosis/job-schemas.js";
@@ -140,7 +141,7 @@ async function gradeOne(
       const staged = jobFolderIn(scratch, record.subject.id);
       result = await dependencies.agents.run<GradeOutput>({
         kind: "grade", label, choice: dependencies.choice, schema: GradeOutputSchema, validate: validateGrade,
-        prompt: gradePrompt(record, hypothesis, found.manifest, { contextFolder: staged.context, snapshotFolder: staged.source }),
+        prompt: gradePrompt(record, hypothesis, found.manifest, { contextFolder: staged.context, snapshotFolder: staged.source, compiledFolders: compiledFoldersIn(found.sourceFolder) }),
         images: found.manifest.members.flatMap((member) => [join(staged.context, member.canonicalCrop), join(staged.context, member.candidateCrop)]),
         workspace: { folder: staged.context, readOnly: [staged.source] },
         logFile: join(dependencies.logsFolder, `${recordId.replaceAll("/", "-")}.jsonl`),

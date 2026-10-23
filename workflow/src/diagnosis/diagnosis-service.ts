@@ -6,6 +6,7 @@ import type { AgentRunners } from "../agents/agent-runners.js";
 import type { PlannedCase } from "../cases/case-plan.js";
 import { CaptureResultsSchema } from "../../../contracts/generated/typescript/parity-capture-results.js";
 import { ExecutionCoverageSchema } from "../../../contracts/generated/typescript/parity-execution-coverage.js";
+import { compiledFoldersIn, compiledFoldersText } from "../compiled-source.js";
 import { fixArchiveOf, fixesRootOf } from "../fixes/fix-archiver.js";
 import { readArchivedFixes } from "../fixes/retrieval.js";
 import { labelRecordById, nextRecordId, noLabels, putRecord, type EvalRecord } from "../evals/eval-record.js";
@@ -95,7 +96,7 @@ export class DiagnosisService {
     }
     const snapshot = await createSourceSnapshot(this.dependencies.repositoryRoot, folders.source, this.dependencies.git);
     if (snapshot.compiledIdentity !== input.candidateSource) {
-      throw new SetupError(`The compiled source (Chummer/) differs from the source the candidate was built from (recorded ${input.candidateSource.slice(0, 12)}, now ${snapshot.compiledIdentity.slice(0, 12)}); `
+      throw new SetupError(`The compiled source (${compiledFoldersText}) differs from the source the candidate was built from (recorded ${input.candidateSource.slice(0, 12)}, now ${snapshot.compiledIdentity.slice(0, 12)}); `
         + "the pixels do not show this source. Build again: run without --only.");
     }
     this.dependencies.log(`Diagnosis: source snapshot of ${snapshot.files} files at ${snapshot.commit.slice(0, 12)}; ${triage.clusters.length} clusters.`);
@@ -214,7 +215,7 @@ export class DiagnosisService {
     let result: AgentResult<unknown> | NotStarted;
     try {
       const staged = jobFolderIn(scratch, cluster.clusterId);
-      const paths = { contextFolder: staged.context, snapshotFolder: staged.source };
+      const paths = { contextFolder: staged.context, snapshotFolder: staged.source, compiledFolders: compiledFoldersIn(folders.source) };
       const common = {
         kind, label, choice, images: manifest.members.flatMap((member) => [join(staged.context, member.canonicalCrop), join(staged.context, member.candidateCrop)]),
         workspace: { folder: staged.context, readOnly: [staged.source] },

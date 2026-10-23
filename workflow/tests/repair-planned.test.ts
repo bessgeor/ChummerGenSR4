@@ -20,12 +20,13 @@ const cluster = "d-0000000000000100";
 const task = (id: number, files: string[], blockedBy: number[] = []): Subtask => ({ id, title: `Subtask ${id}`, instructions: `Do part ${id}.`, files, blockedBy });
 const plan = (tasks: Subtask[]): PlanOutput => ({ outcome: "planned", reason: "Three parts.", summary: "Restore the label and its helpers.", tasks });
 
-test("a plan's subtasks are numbered in order, blocked only by lower ones, inside Chummer/, and apart where they may run together", () => {
+test("a plan's subtasks are numbered in order, blocked only by lower ones, inside Chummer/ and Core/, and apart where they may run together", () => {
   deepStrictEqual(validatePlan(plan([task(1, ["Chummer/a.cs"]), task(2, ["Chummer/b.cs"]), task(3, ["Chummer/a.cs", "Chummer/b.cs"], [1, 2])])), []);
+  deepStrictEqual(validatePlan(plan([task(1, ["Core/XmlManager.cs"]), task(2, ["Chummer/b.cs"])])), []);
   deepStrictEqual(validatePlan(plan([task(2, ["Chummer/a.cs"])])), ["tasks[0] has id 2, not 1"]);
   deepStrictEqual(validatePlan(plan([task(1, ["Chummer/a.cs"], [2]), task(2, ["Chummer/b.cs"], [1])])), ["tasks[0] is blocked by 2, which is not a lower subtask"]);
   deepStrictEqual(validatePlan(plan([task(1, ["bin/data/skills.xml", "../x.cs", "Chummer/a.cs", "Chummer/a.cs"])])),
-    ["tasks[0].files[0] 'bin/data/skills.xml' is outside Chummer/", "tasks[0].files[1] '../x.cs' has an empty, . or .. part", "tasks[0].files[3] 'Chummer/a.cs' is named twice"]);
+    ["tasks[0].files[0] 'bin/data/skills.xml' is outside Chummer/ and Core/", "tasks[0].files[1] '../x.cs' has an empty, . or .. part", "tasks[0].files[3] 'Chummer/a.cs' is named twice"]);
   deepStrictEqual(validatePlan(plan([task(1, ["Chummer/a.cs"]), task(2, ["Chummer/a.cs"])])), ["subtasks 1 and 2 may run at the same time and both name Chummer/a.cs"]);
   // Through subtask 2, subtask 3 waits for 1, so they may share a file.
   deepStrictEqual(validatePlan(plan([task(1, ["Chummer/a.cs"]), task(2, ["Chummer/b.cs"], [1]), task(3, ["Chummer/a.cs"], [2])])), []);
@@ -37,7 +38,7 @@ test("a plan's subtasks are numbered in order, blocked only by lower ones, insid
   deepStrictEqual([...blockerClosure([task(1, []), task(2, [], [1]), task(3, [], [2])]).get(3)!].sort(), [1, 2]);
 });
 
-const isPlan = (call: JobCall) => call.prompt.startsWith("PROMPT_VERSION=repair-plan-v1");
+const isPlan = (call: JobCall) => call.prompt.startsWith("PROMPT_VERSION=repair-plan-v2");
 const subtaskOf = (call: JobCall) => Number(/^YOUR SUBTASK: (\d+)$/m.exec(call.prompt)?.[1] ?? 0);
 
 /** Edits the job's copy and answers `patched` with the given files (by default the edited ones). */
@@ -118,7 +119,7 @@ test("independent subtasks run together, a blocked one starts on their changes, 
   ok(!draft.narrowCheck.run.includes("\\") && !draft.narrowCheck.run.includes("/"));
   ok(readFileSync(join(step.update.attempt!.folder, "fix", "tasks.md"), "utf8").includes("- [x] 1.3 \"Subtask 3\". Files: `Chummer/frmCreate.cs`. Blocked by: 1.1, 1.2."));
   ok(existsSync(join(step.update.attempt!.folder, "fix", "proposal.md")));
-  for (const [id, version] of [[`${prefix}/1`, "repair-plan-v1"], [`${prefix}/1/task-2`, "repair-task-v1"]] as const) {
+  for (const [id, version] of [[`${prefix}/1`, "repair-plan-v2"], [`${prefix}/1/task-2`, "repair-task-v2"]] as const) {
     const stored = EvalRecordSchema.parse((await setup.store.get(recordNamespace("repair"), id))!.value);
     deepStrictEqual([stored.promptVersion, stored.labels.repair?.outcome], [version, "passed"]);
   }

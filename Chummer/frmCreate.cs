@@ -954,7 +954,7 @@ namespace Chummer
 
 			// Populate the Grade list.
 			List<ListItem> lstCyberwareGrades = new List<ListItem>();
-			foreach (Grade objGrade in GlobalOptions.CyberwareGrades)
+			foreach (Grade objGrade in GradeList.CyberwareGrades)
 			{
 				ListItem objItem = new ListItem();
 				objItem.Value = objGrade.Name;
@@ -12393,9 +12393,9 @@ namespace Chummer
 
 				GradeList objGradeList;
 				if (objCyberware.SourceType == Improvement.ImprovementSource.Bioware)
-					objGradeList = GlobalOptions.BiowareGrades;
+					objGradeList = GradeList.BiowareGrades;
 				else
-					objGradeList = GlobalOptions.CyberwareGrades;
+					objGradeList = GradeList.CyberwareGrades;
 
 				// Updated the selected Cyberware Grade.
 				objCyberware.Grade = objGradeList.GetGrade(cboCyberwareGrade.SelectedValue.ToString());
@@ -19523,9 +19523,9 @@ namespace Chummer
 			// Load the Cyberware information.
 			GradeList objGradeList;
 			if (blnBioware)
-				objGradeList = GlobalOptions.BiowareGrades;
+				objGradeList = GradeList.BiowareGrades;
 			else
-				objGradeList = GlobalOptions.CyberwareGrades;
+				objGradeList = GradeList.CyberwareGrades;
 			List<ListItem> lstCyberwareGrades = new List<ListItem>();
 
 			foreach (Grade objWareGrade in objGradeList)
