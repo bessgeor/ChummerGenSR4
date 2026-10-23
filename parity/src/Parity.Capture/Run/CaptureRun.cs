@@ -1,8 +1,12 @@
 using System.Globalization;
+using Parity.Capture.Cache;
+using Parity.Capture.Coverage;
 using Parity.Capture.Staging;
+using Parity.Capture.Timing;
 using Parity.Capture.Ui;
 using Parity.Cases;
 using Parity.Contracts.CaptureSummary;
+using Parity.Contracts.ExecutionCoverage;
 using ResultRow = Parity.Contracts.CaptureResults.CaptureResult;
 
 namespace Parity.Capture.Run;
@@ -20,6 +24,10 @@ internal sealed class CaptureRun(
     CaseRunner caseRunner,
     ReportWriter writer,
     ScreenInventory screens,
+    CoverageAuditor auditor,
+    TimingRecorder timingRecorder,
+    CacheSessionFactory cacheSessions,
+    CanonicalCaptureCache cache,
     TimeProvider time)
 {
     public int Execute(IReadOnlyList<string> args)
@@ -48,8 +56,15 @@ internal sealed class CaptureRun(
         IReadOnlySet<string>? captureFilter;
         CaseSuite suite;
         string sourceHashBefore;
+        string? cacheDirectory = null;
         try
         {
+            if (options.CanonicalCache is not null)
+            {
+                cacheDirectory = Path.GetFullPath(options.CanonicalCache, options.RepositoryRoot);
+                UncommittableLocation.Ensure(options.RepositoryRoot, cacheDirectory, "canonical capture cache");
+            }
+
             canonicalSource = options.Resolve(options.CanonicalExecutable);
             suite = loader.Load(options.Resolve(options.CaseFile));
             cases = SelectCases(suite, options.Cases);
@@ -102,11 +117,17 @@ internal sealed class CaptureRun(
             report = report with { Screens = screens.Current() };
             StagedRun staged = stager.Stage(layout, options.RepositoryRoot, canonicalSource, report.CandidateSource, report.SettingsOverlay, cases);
             report = report with { Staged = staged };
+            if (cacheDirectory is not null)
+            {
+                report = report with { Cache = cacheSessions.Open(cacheDirectory, layout.CanonicalApp, report.Screens) };
+                Console.WriteLine($"Canonical capture cache: {cacheDirectory}");
+            }
+
             UiTiming timing = new(TimeSpan.FromSeconds(suite.StartupDelaySeconds), TimeSpan.FromMilliseconds(suite.SettleMilliseconds));
             foreach (ParityCase parityCase in cases)
             {
                 Console.WriteLine($"Case {parityCase.Name} ({parityCase.Actions.Count} actions)");
-                runs.Add(caseRunner.Run(parityCase, layout, staged, timing, captureFilter, options.Threshold));
+                runs.Add(caseRunner.Run(parityCase, layout, staged, timing, captureFilter, options.Threshold, report.Cache));
             }
 
             report = report with { Cases = runs };
@@ -119,10 +140,19 @@ internal sealed class CaptureRun(
                 throw new SetupException("The canonical executable changed during the run.");
             }
 
-            report = report with { Finished = time.GetUtcNow(), Status = Status(runs) };
+            ExecutionCoverage coverage = auditor.Audit(layout.RunId, runs);
+            report = report with { Finished = time.GetUtcNow(), Status = Status(runs, coverage) };
             writer.Write(layout.ResultsPath, writer.BuildResults(report));
+            writer.Write(layout.CoveragePath, coverage);
+            writer.Write(layout.TimingPath, timingRecorder.Build(layout.RunId));
+            if (report.Cache is not null)
+            {
+                // Last, so that a run that fails while building its reports stores nothing; the summary records the count.
+                cache.StorePending(report.Cache);
+            }
+
             writer.Write(layout.SummaryPath, writer.BuildSummary(report, path => DisplayPath(options.RepositoryRoot, path)));
-            PrintOutcome(runs, report.Status, layout);
+            PrintOutcome(runs, coverage, report.Cache, report.Status, layout);
             return ExitCode(report.Status);
         }
         catch (Exception error)
@@ -144,9 +174,10 @@ internal sealed class CaptureRun(
         _ => 3,
     };
 
-    public static RunStatus Status(IReadOnlyList<CaseRun> runs)
+    /// <summary>Execution failures, including coverage that is invalid for any reason, outrank visual results.</summary>
+    public static RunStatus Status(IReadOnlyList<CaseRun> runs, ExecutionCoverage coverage)
     {
-        if (runs.Any(run => run.Canonical.Failed || run.Candidate.Failed))
+        if (!coverage.Valid || runs.Any(run => run.Canonical.Failed || run.Candidate.Failed))
         {
             return RunStatus.ExecutionFailures;
         }
@@ -188,17 +219,32 @@ internal sealed class CaptureRun(
             : throw new ArgumentException($"--capture matches no capture of the selected cases: {string.Join(", ", unknown)}.");
     }
 
-    private static void PrintOutcome(IReadOnlyList<CaseRun> runs, RunStatus status, RunLayout layout)
+    private static void PrintOutcome(IReadOnlyList<CaseRun> runs, ExecutionCoverage coverage, CacheSession? cache, RunStatus status, RunLayout layout)
     {
         Console.WriteLine("Execution:");
         foreach (CaseRun run in runs)
         {
             foreach (Execution.SideRun side in new[] { run.Canonical, run.Candidate })
             {
-                Console.WriteLine($"  {(side.Failed ? "FAILED" : "ok"),-6} {run.Case.Name}/{side.Side}: " +
+                Console.WriteLine($"  {(side.Failed ? "FAILED" : "ok"),-6} {run.Case.Name}/{side.Side}{(side.Origin.FromCache ? " (cache)" : string.Empty)}: " +
                                   string.Join(", ", side.Actions.GroupBy(action => action.Outcome).Select(group => $"{group.Key}={group.Count()}")) +
                                   (side.Failed ? $" | {side.Failure}" : string.Empty));
             }
+        }
+
+        CoverageTotals totals = coverage.Totals;
+        Console.WriteLine($"Coverage: {(coverage.Valid ? "valid" : "INVALID")}; {totals.Sides} sides, {totals.Actions} actions, " +
+                          $"{totals.Failures} failed, {totals.StartupFailures} startup failures, {totals.OptionalAbsent} optional absent, " +
+                          $"{totals.SkippedOptional} skipped optional, {totals.Filtered} filtered, {totals.NotRun} not run; " +
+                          $"{totals.CapturedPairs} of {totals.PlannedCaptures} planned captures on both sides");
+        foreach (string reason in coverage.InvalidReasons)
+        {
+            Console.WriteLine($"  {reason}");
+        }
+
+        if (cache is not null)
+        {
+            Console.WriteLine($"Canonical capture cache: {cache.Hits} hits, {cache.Misses} misses, {cache.Stored} stored");
         }
 
         Console.WriteLine("Visual:");
@@ -211,6 +257,8 @@ internal sealed class CaptureRun(
         Console.WriteLine($"Status: {status} (exit {ExitCode(status)})");
         Console.WriteLine($"Summary: {layout.SummaryPath}");
         Console.WriteLine($"Results: {layout.ResultsPath}");
+        Console.WriteLine($"Coverage: {layout.CoveragePath}");
+        Console.WriteLine($"Timing: {layout.TimingPath}");
     }
 
     private static string Reason(ResultRow row) => row.Reason switch

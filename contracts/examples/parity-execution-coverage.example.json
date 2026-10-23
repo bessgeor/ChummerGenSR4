@@ -1,0 +1,67 @@
+{
+  "runId": "20261001T120000Z-1a2b3c4d",
+  "valid": false,
+  "invalidReasons": ["failure:build-example/candidate"],
+  "cases": [
+    {
+      "case": "build-example",
+      "characterFile": "example-build.chum",
+      "mode": "build",
+      "plannedActions": 6,
+      "plannedCaptures": ["common", "adept-powers"],
+      "sides": [
+        {
+          "side": "canonical",
+          "source": "cache",
+          "recordedActions": 6,
+          "contiguous": true,
+          "failures": [],
+          "optionalAbsent": [
+            { "index": 3, "action": "selectTab:Adept Powers", "reason": "No tab named 'Adept Powers'." }
+          ],
+          "skippedOptional": [
+            { "index": 4, "action": "waitFor:Power Points:" },
+            { "index": 5, "action": "capture:adept-powers" }
+          ],
+          "filtered": 0,
+          "notRun": 0,
+          "captures": [
+            { "capture": "common", "outcome": "performed", "file": true },
+            { "capture": "adept-powers", "outcome": "skipped-optional", "file": false }
+          ]
+        },
+        {
+          "side": "candidate",
+          "source": "live",
+          "recordedActions": 6,
+          "contiguous": true,
+          "failures": [
+            { "index": 2, "action": "waitFor:Active Skills", "reason": "TimeoutException: Timed out waiting for visible UI label 'Active Skills'." }
+          ],
+          "optionalAbsent": [],
+          "skippedOptional": [],
+          "filtered": 0,
+          "notRun": 3,
+          "captures": [
+            { "capture": "common", "outcome": "performed", "file": true },
+            { "capture": "adept-powers", "outcome": "not-run", "file": false }
+          ]
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "cases": 1,
+    "sides": 2,
+    "cachedSides": 1,
+    "actions": 12,
+    "failures": 1,
+    "startupFailures": 0,
+    "optionalAbsent": 1,
+    "skippedOptional": 2,
+    "filtered": 0,
+    "notRun": 3,
+    "plannedCaptures": 2,
+    "capturedPairs": 1
+  }
+}

@@ -20,6 +20,9 @@ internal sealed record CaptureOptions
 
     public string? SettingsOverlay { get; init; }
 
+    /// <summary>Folder of the canonical capture cache; null runs every canonical side live and caches nothing.</summary>
+    public string? CanonicalCache { get; init; }
+
     public double Threshold { get; init; } = DefaultThreshold;
 
     /// <summary>Case names or character file names (with or without extension); empty selects every case.</summary>

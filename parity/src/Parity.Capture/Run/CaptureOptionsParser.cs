@@ -13,6 +13,8 @@ internal sealed class CaptureOptionsParser
           --capture <names>          capture names to write, comma-separated (default: all; every action still runs)
           --settings-overlay <dir>   folder copied over both staged apps, e.g. <dir>/settings/default.xml;
                                      must be outside the repository or under out/
+          --canonical-cache <dir>    reuse canonical sides stored by earlier runs with the same inputs, and store
+                                     completed ones; must be outside the repository or under out/ (default: off)
           --threshold <ratio>        largest passing share of differing pixels (default: 0.00004)
           --case-file <path>         default: parity/cases/characters.json
           --canonical-exe <path>     default: bin/ChummerGenSR4.exe (verified by SHA-256, never modified)
@@ -46,6 +48,9 @@ internal sealed class CaptureOptionsParser
                     break;
                 case "--settings-overlay":
                     options = options with { SettingsOverlay = Value(args, ref index) };
+                    break;
+                case "--canonical-cache":
+                    options = options with { CanonicalCache = Value(args, ref index) };
                     break;
                 case "--threshold":
                     options = options with { Threshold = Threshold(Value(args, ref index)) };

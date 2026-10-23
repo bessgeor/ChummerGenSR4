@@ -107,6 +107,33 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
 
+    [DllImport("user32.dll")]
+    public static extern uint GetDpiForSystem();
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr MonitorFromPoint(PointStruct point, uint flags);
+
+    [DllImport("shcore.dll")]
+    public static extern int GetDpiForMonitor(IntPtr monitor, int type, out uint dpiX, out uint dpiY);
+
+    [DllImport("user32.dll")]
+    public static extern int GetSystemMetricsForDpi(int index, uint dpi);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool SetCursorPos(int x, int y);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetCursorPos(out PointStruct point);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct PointStruct
+    {
+        public int X;
+        public int Y;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     public struct Rect
     {

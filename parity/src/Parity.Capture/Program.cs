@@ -1,8 +1,11 @@
 using Microsoft.Extensions.DependencyInjection;
+using Parity.Capture.Cache;
+using Parity.Capture.Coverage;
 using Parity.Capture.Execution;
 using Parity.Capture.Interop;
 using Parity.Capture.Run;
 using Parity.Capture.Staging;
+using Parity.Capture.Timing;
 using Parity.Capture.Ui;
 using Parity.Cases;
 
@@ -38,7 +41,19 @@ internal static class Program
         services.AddSingleton<TabNavigator>();
         services.AddSingleton<LabelWaiter>();
         services.AddSingleton<WindowCapturer>();
-        services.AddSingleton<IUiDriver, ChummerUiDriver>();
+        services.AddSingleton<PointerParker>();
+        services.AddSingleton<ChummerUiDriver>();
+        services.AddSingleton<TimingRecorder>();
+        services.AddSingleton<IUiDriver>(provider => new TimedUiDriver(
+            provider.GetRequiredService<ChummerUiDriver>(),
+            provider.GetRequiredService<TimingRecorder>(),
+            provider.GetRequiredService<TimeProvider>()));
+
+        services.AddSingleton<FolderFingerprinter>();
+        services.AddSingleton<CacheEnvironmentReader>();
+        services.AddSingleton<CacheSessionFactory>();
+        services.AddSingleton<CacheKeyBuilder>();
+        services.AddSingleton<CanonicalCaptureCache>();
 
         services.AddSingleton<SideExecutor>();
         services.AddSingleton<PixelComparer>();
@@ -46,6 +61,7 @@ internal static class Program
         services.AddSingleton<CaseRunner>();
         services.AddSingleton<ReportWriter>();
         services.AddSingleton<ScreenInventory>();
+        services.AddSingleton<CoverageAuditor>();
         services.AddSingleton<CaptureOptionsParser>();
         services.AddSingleton<CaptureRun>();
         return services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });

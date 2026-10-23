@@ -23,6 +23,15 @@ internal sealed class ReportPrinter(TextWriter output)
                              $"{Text(representative.CanonicalOcr)} → {Text(representative.CandidateOcr)}");
         }
 
+        CompletenessTotals accounted = report.Completeness.Totals;
+        output.WriteLine($"Completeness: {(report.Completeness.Complete ? "complete" : "INCOMPLETE")}; planned {accounted.Planned}, reported {accounted.Reported}, " +
+                         $"analysis failed {accounted.AnalysisFailed}, filtered {accounted.Filtered}, optional absent {accounted.OptionalAbsent}, " +
+                         $"execution lost {accounted.ExecutionLost}, unaccounted {accounted.Unaccounted}");
+        foreach (CompletenessEntry entry in report.Completeness.Entries.Where(entry => entry.State is CompletenessState.Unaccounted or CompletenessState.ExecutionLost))
+        {
+            output.WriteLine($"  {(entry.State == CompletenessState.Unaccounted ? "UNACCOUNTED" : "LOST"),-11} {entry.Case}/{entry.Capture}: {entry.Detail}");
+        }
+
         ReportTotals totals = report.Totals;
         output.WriteLine($"Totals: rows {totals.Rows}, passed {totals.Passed}, analyzed {totals.Analyzed}, size mismatches {totals.SizeMismatches}, " +
                          $"missing {totals.Missing}, failed {totals.Failed}, discrepancies {totals.Discrepancies}, groups {totals.Groups}, OCR errors {totals.OcrErrors}");

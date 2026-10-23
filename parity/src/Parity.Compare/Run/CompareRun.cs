@@ -7,6 +7,7 @@ using Parity.Compare.Ocr;
 using Parity.Compare.Report;
 using Parity.Contracts.CompareReport;
 using CaptureResults = Parity.Contracts.CaptureResults.CaptureResults;
+using ExecutionCoverage = Parity.Contracts.ExecutionCoverage.ExecutionCoverage;
 
 namespace Parity.Compare.Run;
 
@@ -48,11 +49,13 @@ internal sealed class CompareRun(
 
         RunFolder folder;
         CaptureResults results;
+        ExecutionCoverage coverage;
         IOcrEngine ocr;
         try
         {
             folder = RunFolder.At(options.Run!);
             results = ReadResults(folder);
+            coverage = ReadCoverage(folder, results.RunId);
             ocr = ocrFactory.Create(options.Ocr, options.Tessdata);
         }
         catch (Exception error)
@@ -69,7 +72,7 @@ internal sealed class CompareRun(
             Console.WriteLine(ocr.Language is null ? "OCR: disabled" : $"OCR: {ocr.Language}");
             try
             {
-                report = Analyze(results, folder, ocr);
+                report = Analyze(results, coverage, folder, ocr);
             }
             catch (Exception error)
             {
@@ -95,7 +98,7 @@ internal sealed class CompareRun(
         return ReportBuilder.ExitCode(report.Status);
     }
 
-    private CompareReport Analyze(CaptureResults results, RunFolder folder, IOcrEngine ocr)
+    private CompareReport Analyze(CaptureResults results, ExecutionCoverage coverage, RunFolder folder, IOcrEngine ocr)
     {
         if (Directory.Exists(folder.CompareDirectory))
         {
@@ -105,7 +108,7 @@ internal sealed class CompareRun(
         Directory.CreateDirectory(folder.CompareDirectory);
         List<RowAnalysis> rows = results.Results.Select(row => analyzer.Analyze(row, folder, ocr)).ToList();
         IReadOnlyList<IReadOnlyList<Finding>> groups = grouper.Group(rows.SelectMany(row => row.Findings).ToList());
-        CompareReport report = builder.Build(results, ocr.Language, rows, groups);
+        CompareReport report = builder.Build(results, coverage, ocr.Language, rows, groups);
         File.WriteAllText(folder.ReportPath, ContractJson.Write(report) + "\n", Utf8);
         return report;
     }
@@ -149,5 +152,28 @@ internal sealed class CompareRun(
         }
 
         return results;
+    }
+
+    /// <summary>Reads <c>coverage.json</c> strictly; it must belong to the same run as the results.</summary>
+    private static ExecutionCoverage ReadCoverage(RunFolder folder, string runId)
+    {
+        if (!File.Exists(folder.CoveragePath))
+        {
+            throw new CompareSetupException($"{folder.CoveragePath} does not exist; the completeness of the run cannot be checked without it.");
+        }
+
+        ExecutionCoverage coverage;
+        try
+        {
+            coverage = ContractJson.ReadCoverage(File.ReadAllText(folder.CoveragePath));
+        }
+        catch (JsonException error)
+        {
+            throw new CompareSetupException($"{folder.CoveragePath} is not valid execution coverage: {error.Message}");
+        }
+
+        return coverage.RunId == runId
+            ? coverage
+            : throw new CompareSetupException($"{folder.CoveragePath} belongs to run {coverage.RunId}, the results to run {runId}.");
     }
 }

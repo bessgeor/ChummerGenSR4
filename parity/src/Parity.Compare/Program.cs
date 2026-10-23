@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Parity.Compare.Accounting;
 using Parity.Compare.Analysis;
 using Parity.Compare.Detection;
 using Parity.Compare.Grouping;
@@ -30,6 +31,7 @@ internal static class Program
 
         services.AddSingleton<RowAnalyzer>();
         services.AddSingleton<DuplicateGrouper>();
+        services.AddSingleton<CompletenessBuilder>();
         services.AddSingleton<ReportBuilder>();
         services.AddSingleton(_ => new ReportPrinter(Console.Out));
         services.AddSingleton<CompareOptionsParser>();

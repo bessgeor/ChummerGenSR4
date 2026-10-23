@@ -1,15 +1,22 @@
+using Parity.Compare.Accounting;
 using Parity.Compare.Analysis;
 using Parity.Contracts.CompareReport;
 using CaptureResults = Parity.Contracts.CaptureResults.CaptureResults;
 using CapturedMode = Parity.Contracts.CaptureResults.Mode;
 using CapturedSize = Parity.Contracts.CaptureResults.ImageSize;
+using ExecutionCoverage = Parity.Contracts.ExecutionCoverage.ExecutionCoverage;
 
 namespace Parity.Compare.Report;
 
-/// <summary>Maps the analyzed rows and their duplicate groups to the report contract, with totals and status.</summary>
-internal sealed class ReportBuilder
+/// <summary>Maps the analyzed rows, their duplicate groups and the completeness of the run to the report contract, with totals and status.</summary>
+internal sealed class ReportBuilder(CompletenessBuilder completeness)
 {
-    public CompareReport Build(CaptureResults results, string? ocrLanguage, IReadOnlyList<RowAnalysis> rows, IReadOnlyList<IReadOnlyList<Finding>> groups)
+    public CompareReport Build(
+        CaptureResults results,
+        ExecutionCoverage coverage,
+        string? ocrLanguage,
+        IReadOnlyList<RowAnalysis> rows,
+        IReadOnlyList<IReadOnlyList<Finding>> groups)
     {
         Dictionary<string, string> representatives = groups
             .SelectMany(group => group.Select(member => (member.Id, Representative: group[0].Id)))
@@ -27,13 +34,15 @@ internal sealed class ReportBuilder
             Groups = groups.Count,
             OcrErrors = findings.Sum(finding => (finding.CanonicalOcr.Status == OcrStatus.Error ? 1 : 0) + (finding.CandidateOcr.Status == OcrStatus.Error ? 1 : 0)),
         };
+        List<ReportRow> reportRows = rows.Select(Row).ToList();
+        Completeness accounted = completeness.Build(coverage, reportRows);
         return new CompareReport
         {
             RunId = results.RunId,
             Threshold = results.Threshold,
             Ocr = new OcrSettings { Enabled = ocrLanguage is not null, Language = ocrLanguage },
-            Status = Status(totals),
-            Rows = rows.Select(Row).ToList(),
+            Status = Status(totals, accounted),
+            Rows = reportRows,
             Discrepancies = findings.Select(finding => Discrepancy(finding, representatives[finding.Id])).ToList(),
             Groups = groups.Select(group => new DiscrepancyGroup
             {
@@ -41,12 +50,14 @@ internal sealed class ReportBuilder
                 Members = group.Select(member => member.Id).ToList(),
             }).ToList(),
             Totals = totals,
+            Completeness = accounted,
         };
     }
 
-    public static ReportStatus Status(ReportTotals totals)
+    /// <summary>A failed row, an OCR error or an unaccounted planned capture is an analysis failure.</summary>
+    public static ReportStatus Status(ReportTotals totals, Completeness completeness)
     {
-        if (totals.Failed > 0 || totals.OcrErrors > 0)
+        if (totals.Failed > 0 || totals.OcrErrors > 0 || !completeness.Complete)
         {
             return ReportStatus.AnalysisFailures;
         }

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Parity.Cases;
+using Parity.Compare.Accounting;
 using Parity.Compare.Analysis;
 using Parity.Compare.Detection;
 using Parity.Compare.Grouping;
@@ -352,7 +353,7 @@ public sealed class CompareRunTests : IDisposable
         ocr,
         Analyzer(),
         new DuplicateGrouper(),
-        new ReportBuilder(),
+        new ReportBuilder(new CompletenessBuilder()),
         new ReportPrinter(output ?? Console.Out));
 
     /// <summary>A console that fails on every write.</summary>

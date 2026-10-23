@@ -8,6 +8,8 @@ internal sealed record RunFolder(string Root)
 {
     public string ResultsPath => Path.Combine(Root, "results.json");
 
+    public string CoveragePath => Path.Combine(Root, "coverage.json");
+
     public string CompareDirectory => Path.Combine(Root, "compare");
 
     public string ReportPath => Path.Combine(CompareDirectory, "report.json");

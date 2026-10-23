@@ -106,6 +106,18 @@ public sealed class SideExecutorTests : IDisposable
     }
 
     [Fact]
+    public void Pointer_moved_before_a_capture_fails_it_with_its_reason()
+    {
+        _driver.PointerMovedBeforeCapture = true;
+
+        SideRun run = Run(Case(new CaptureAction("common"), new WaitAction(10)));
+
+        Assert.Equal([OutcomeKind.Failed, OutcomeKind.NotRun], run.Actions.Select(action => action.Outcome));
+        Assert.Equal("pointer: scripted pointer move", run.Actions[0].Reason);
+        Assert.Empty(run.Captures);
+    }
+
+    [Fact]
     public void Startup_failure_marks_every_action_not_run()
     {
         _driver.LaunchFailure = new TimeoutException("no window");
@@ -129,6 +141,16 @@ public sealed class SideExecutorTests : IDisposable
         Assert.Equal([OutcomeKind.Filtered, OutcomeKind.Performed, OutcomeKind.Performed], run.Actions.Select(action => action.Outcome));
         Assert.Equal(["skills"], run.Captures.Keys);
         Assert.Contains("selectTab:Skills", _driver.Calls);
+    }
+
+    [Fact]
+    public void Capture_filter_marks_a_capture_filtered_even_when_its_optional_tab_is_absent()
+    {
+        SideRun run = Run(
+            Case(new CaptureAction("common"), new SelectTabAction("Adept Powers", Optional: true), new WaitForAction("Power Points:"), new CaptureAction("adept-powers")),
+            new HashSet<string>(["common"], StringComparer.Ordinal));
+
+        Assert.Equal([OutcomeKind.Performed, OutcomeKind.OptionalAbsent, OutcomeKind.SkippedOptional, OutcomeKind.Filtered], run.Actions.Select(action => action.Outcome));
     }
 
     private SideRun Run(ParityCase parityCase, IReadOnlySet<string>? filter = null) =>

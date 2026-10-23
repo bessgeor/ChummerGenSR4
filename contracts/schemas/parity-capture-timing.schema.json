@@ -1,0 +1,68 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/bessgeor/ChummerGenSR4/contracts/parity-capture-timing.schema.json",
+  "title": "CaptureTiming",
+  "description": "Durations of a capture run's UI operations, measured around the UI driver: per live side in order, and per operation over the run.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["runId", "operations", "sides"],
+  "properties": {
+    "runId": { "type": "string", "minLength": 1 },
+    "operations": {
+      "description": "One entry per operation that has samples, in the order of the Operation enum.",
+      "type": "array",
+      "items": { "$ref": "#/definitions/OperationTiming" }
+    },
+    "sides": {
+      "description": "Every live side, in run order; a side served from the cache has no entry.",
+      "type": "array",
+      "items": { "$ref": "#/definitions/SideTiming" }
+    }
+  },
+  "definitions": {
+    "Operation": {
+      "type": "string",
+      "enum": ["launch", "activate", "selectTab", "waitForLabel", "wait", "capture", "close"]
+    },
+    "OperationTiming": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "count", "failures", "totalMilliseconds", "medianMilliseconds", "p80Milliseconds", "maxMilliseconds"],
+      "properties": {
+        "operation": { "$ref": "#/definitions/Operation" },
+        "count": { "type": "integer", "minimum": 1 },
+        "failures": { "description": "Samples whose call threw.", "type": "integer", "minimum": 0 },
+        "totalMilliseconds": { "type": "number", "minimum": 0 },
+        "medianMilliseconds": { "description": "Nearest-rank 50th percentile.", "type": "number", "minimum": 0 },
+        "p80Milliseconds": { "description": "Nearest-rank 80th percentile.", "type": "number", "minimum": 0 },
+        "maxMilliseconds": { "type": "number", "minimum": 0 }
+      }
+    },
+    "SideTiming": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["case", "side", "totalMilliseconds", "samples"],
+      "properties": {
+        "case": { "type": "string", "minLength": 1 },
+        "side": { "type": "string", "enum": ["canonical", "candidate"] },
+        "totalMilliseconds": { "description": "Sum of the side's samples.", "type": "number", "minimum": 0 },
+        "samples": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/TimingSample" }
+        }
+      }
+    },
+    "TimingSample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "milliseconds", "succeeded"],
+      "properties": {
+        "operation": { "$ref": "#/definitions/Operation" },
+        "target": { "description": "The tab, label or wait in milliseconds; absent for other operations.", "type": "string" },
+        "milliseconds": { "type": "number", "minimum": 0 },
+        "succeeded": { "description": "False when the call threw.", "type": "boolean" },
+        "error": { "description": "The exception type when the call threw.", "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

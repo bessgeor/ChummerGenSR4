@@ -30,7 +30,7 @@ internal sealed class RunStager(FileHasher hasher, CanonicalExecutableGuard guar
 
         if (overlayDirectory is not null)
         {
-            EnsureUncommittable(repositoryRoot, overlayDirectory);
+            UncommittableLocation.Ensure(repositoryRoot, overlayDirectory, "settings overlay");
         }
 
         string canonicalStaged = Path.Combine(layout.CanonicalApp, Path.GetFileName(canonicalExecutable));
@@ -73,18 +73,6 @@ internal sealed class RunStager(FileHasher hasher, CanonicalExecutableGuard guar
         }
 
         return new StagedRun(canonicalStaged, canonicalHash, candidateStaged, candidateHash, overlay, copies);
-    }
-
-    /// <summary>An overlay must live outside the repository or under its ignored <c>out/</c> folder.</summary>
-    private static void EnsureUncommittable(string repositoryRoot, string overlayDirectory)
-    {
-        string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(repositoryRoot)) + Path.DirectorySeparatorChar;
-        string overlay = Path.TrimEndingDirectorySeparator(Path.GetFullPath(overlayDirectory)) + Path.DirectorySeparatorChar;
-        string output = root + "out" + Path.DirectorySeparatorChar;
-        if (overlay.StartsWith(root, StringComparison.OrdinalIgnoreCase) && !overlay.StartsWith(output, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new SetupException($"The settings overlay must be outside the repository or under out/: {overlayDirectory}");
-        }
     }
 
     private static void CopySupport(string canonicalSource, string appDirectory)

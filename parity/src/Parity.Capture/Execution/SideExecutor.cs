@@ -49,6 +49,12 @@ internal sealed class SideExecutor(IUiDriver driver)
                     continue;
                 }
 
+                if (action is CaptureAction filtered && captureFilter is not null && !captureFilter.Contains(filtered.CaptureName))
+                {
+                    records.Add(Record(index, action, OutcomeKind.Filtered, "not selected by --capture"));
+                    continue;
+                }
+
                 if (absentTab is not null && action is not SelectTabAction)
                 {
                     records.Add(Record(index, action, OutcomeKind.SkippedOptional, $"optional tab '{absentTab}' is absent"));
@@ -56,11 +62,6 @@ internal sealed class SideExecutor(IUiDriver driver)
                 }
 
                 absentTab = null;
-                if (action is CaptureAction filtered && captureFilter is not null && !captureFilter.Contains(filtered.CaptureName))
-                {
-                    records.Add(Record(index, action, OutcomeKind.Filtered, "not selected by --capture"));
-                    continue;
-                }
 
                 try
                 {
@@ -121,5 +122,5 @@ internal sealed class SideExecutor(IUiDriver driver)
         new(index, action.Describe(), action.Required, outcome, reason);
 
     private static string Describe(Exception error) =>
-        error is WindowActivationException ? error.Message : $"{error.GetType().Name}: {error.Message}";
+        error is WindowActivationException or PointerException ? error.Message : $"{error.GetType().Name}: {error.Message}";
 }

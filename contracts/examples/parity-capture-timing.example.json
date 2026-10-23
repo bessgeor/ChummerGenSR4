@@ -1,0 +1,25 @@
+{
+  "runId": "20261001T120000Z-1a2b3c4d",
+  "operations": [
+    { "operation": "launch", "count": 1, "failures": 0, "totalMilliseconds": 9120.5, "medianMilliseconds": 9120.5, "p80Milliseconds": 9120.5, "maxMilliseconds": 9120.5 },
+    { "operation": "activate", "count": 2, "failures": 0, "totalMilliseconds": 61.2, "medianMilliseconds": 28.4, "p80Milliseconds": 32.8, "maxMilliseconds": 32.8 },
+    { "operation": "selectTab", "count": 1, "failures": 1, "totalMilliseconds": 210, "medianMilliseconds": 210, "p80Milliseconds": 210, "maxMilliseconds": 210 },
+    { "operation": "capture", "count": 1, "failures": 0, "totalMilliseconds": 655.3, "medianMilliseconds": 655.3, "p80Milliseconds": 655.3, "maxMilliseconds": 655.3 },
+    { "operation": "close", "count": 1, "failures": 0, "totalMilliseconds": 820, "medianMilliseconds": 820, "p80Milliseconds": 820, "maxMilliseconds": 820 }
+  ],
+  "sides": [
+    {
+      "case": "build-example",
+      "side": "candidate",
+      "totalMilliseconds": 10867,
+      "samples": [
+        { "operation": "launch", "milliseconds": 9120.5, "succeeded": true },
+        { "operation": "activate", "milliseconds": 28.4, "succeeded": true },
+        { "operation": "capture", "milliseconds": 655.3, "succeeded": true },
+        { "operation": "activate", "milliseconds": 32.8, "succeeded": true },
+        { "operation": "selectTab", "target": "Adept Powers", "milliseconds": 210, "succeeded": false, "error": "TabNotFoundException" },
+        { "operation": "close", "milliseconds": 820, "succeeded": true }
+      ]
+    }
+  ]
+}

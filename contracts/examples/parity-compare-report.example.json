@@ -103,5 +103,25 @@
     "discrepancies": 2,
     "groups": 1,
     "ocrErrors": 1
+  },
+  "completeness": {
+    "complete": false,
+    "entries": [
+      { "case": "build-Diego_v_alpha2_by_bessgeor", "capture": "common", "state": "reported" },
+      { "case": "build-Diego_v_alpha2_by_bessgeor", "capture": "skills", "state": "reported" },
+      { "case": "build-Diego_v_alpha2_by_bessgeor", "capture": "spells", "state": "reported" },
+      { "case": "build-Diego_v_alpha2_by_bessgeor", "capture": "adept-powers", "state": "optional-absent" },
+      { "case": "build-Diego_v_alpha2_by_bessgeor", "capture": "gear", "state": "reported" },
+      { "case": "build-Diego_v_alpha2_by_bessgeor", "capture": "vehicles", "state": "unaccounted", "detail": "both sides performed the capture, but the report has no row for it" }
+    ],
+    "totals": {
+      "planned": 6,
+      "reported": 4,
+      "analysisFailed": 0,
+      "filtered": 0,
+      "optionalAbsent": 1,
+      "executionLost": 0,
+      "unaccounted": 1
+    }
   }
 }

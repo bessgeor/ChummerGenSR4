@@ -6,6 +6,8 @@ using Parity.Cases;
 using Parity.Contracts.CaptureSummary;
 using CaptureResultsContract = Parity.Contracts.CaptureResults.CaptureResults;
 using CaptureSummaryContract = Parity.Contracts.CaptureSummary.CaptureSummary;
+using CaptureTimingContract = Parity.Contracts.CaptureTiming.CaptureTiming;
+using ExecutionCoverageContract = Parity.Contracts.ExecutionCoverage.ExecutionCoverage;
 using CharacterMode = Parity.Cases.CharacterMode;
 using ResultRow = Parity.Contracts.CaptureResults.CaptureResult;
 
@@ -52,6 +54,9 @@ internal sealed class ReportWriter
                     Files = overlay.Select(file => new OverlayFile { Path = file.RelativePath, Sha256 = file.Sha256, Replaced = file.Replaced }).ToList(),
                 }
                 : null,
+            CanonicalCache = report.Cache is { } cache
+                ? new CanonicalCache { Path = displayPath(cache.Directory), Hits = cache.Hits, Misses = cache.Misses, Stored = cache.Stored }
+                : null,
             Screens = report.Screens.ToList(),
             Cases = report.Cases.Select(item => new CaseExecution
             {
@@ -70,6 +75,8 @@ internal sealed class ReportWriter
                 VisualFailed = rows.Count(row => !row.Passed),
             },
             Results = report.Finished is null ? null : report.Layout.Relative(report.Layout.ResultsPath),
+            Coverage = report.Finished is null ? null : report.Layout.Relative(report.Layout.CoveragePath),
+            Timing = report.Finished is null ? null : report.Layout.Relative(report.Layout.TimingPath),
         };
     }
 
@@ -86,9 +93,18 @@ internal sealed class ReportWriter
     public void Write(string path, CaptureResultsContract results) =>
         File.WriteAllText(path, ContractJson.Write(results) + "\n", Utf8);
 
+    public void Write(string path, ExecutionCoverageContract coverage) =>
+        File.WriteAllText(path, ContractJson.Write(coverage) + "\n", Utf8);
+
+    public void Write(string path, CaptureTimingContract timing) =>
+        File.WriteAllText(path, ContractJson.Write(timing) + "\n", Utf8);
+
     private static SideExecution Side(SideRun run) => new()
     {
         Side = run.Side == RunLayout.CanonicalSide ? Parity.Contracts.CaptureSummary.Side.Canonical : Parity.Contracts.CaptureSummary.Side.Candidate,
+        Source = run.Origin.FromCache ? Source.Cache : Source.Live,
+        CacheEntry = run.Origin.CacheKey,
+        CachedFromRun = run.Origin.CachedFromRun,
         Status = run.Failed ? Status.Failed : Status.Completed,
         DurationMilliseconds = (long)run.Duration.TotalMilliseconds,
         Failure = run.Failure,
