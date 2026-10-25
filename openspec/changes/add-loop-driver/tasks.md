@@ -18,10 +18,11 @@ Each task names the tasks it builds on as `(after: …)`, by number in this list
 
 - [ ] 4.1 (after: 2.1) Add `workflow/src/loop/loop-control.ts` (control file schema, reader, atomic writer), `--pause` and `--unpause` with `--lane`, `pausable` nodes that call `interrupt()` while the loop is paused and a resume with `Command({ resume: true })`, paused time kept out of budgets, deadlines and timing, and lanes that take no new command while paused. Evidence: workflow tests for a loop paused during a job, a lane paused while it captures, every lane paused, an invalid control file, and a budget that does not count paused time.
 - [ ] 4.2 (after: 4.1) Write the four graphs' structure under `out/loop/graphs/`, `state.json` with each lane's flag and task, and `activity.jsonl` from the graphs' task events, with exported schemas, and record each thread's kind, times and reason in `loop.json`. Evidence: workflow tests for two cases on two lanes, a discovery and a tuning task, and the schemas against written files.
+- [ ] 4.3 (after: 2.1) Open every checkpoint database (loop, workflow, discovery, tuning) in WAL mode with a busy timeout, so that a reader such as a dashboard can open it while a graph writes. Evidence: a workflow test that reads a checkpoint database through a second saver while a graph writes it, with every write committed and no reader error.
 
 ## 5. Docs
 
-- [ ] 5.1 (after: 3.1, 4.2) Document `npm run loop` in `AGENTS.md` and `README.md`. Evidence: `npm run workflow:typecheck`, `npm run workflow:test` and `npm run openspec:validate` pass (recorded in `verification.md`).
+- [ ] 5.1 (after: 3.1, 4.2, 4.3) Document `npm run loop` in `AGENTS.md` and `README.md`. Evidence: `npm run workflow:typecheck`, `npm run workflow:test` and `npm run openspec:validate` pass (recorded in `verification.md`).
 
 ## 6. Verification and archive
 

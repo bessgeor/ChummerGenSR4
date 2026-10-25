@@ -63,6 +63,8 @@ The four builders (`buildLoopGraph`, `buildWorkflowGraph`, `buildDiscoveryGraph`
 
 ### State and activity
 
+`loop.json` is `{ loopId, startedUtc, status, threads: [{ thread, graph, startedUtc, endedUtc, reason }] }`, and loop IDs start with `loop-`, so a reader finds loops as `out/loop/loop-*/` folders. Every `SqliteSaver` is opened through one helper that sets `journal_mode=WAL` and a busy timeout, so a reader that opens a checkpoint database while a graph writes it neither blocks the writer nor sees a partial write.
+
 `state.json` is `{ paused, pausing, lanes: { <lane>: { paused, busy } }, updatedUtc }`; a reader derives running tasks from the checkpoints. Every graph the loop runs is streamed with `streamMode: ["tasks", "values"]`; task start and result events give the lanes' `busy` entries (the lane the host runner reports for the task) and one `activity.jsonl` line per finished task with its duration and the paused time that passed while it ran.
 
 ## Risks / Trade-offs
