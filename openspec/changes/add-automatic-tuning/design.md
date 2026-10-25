@@ -33,7 +33,7 @@ When the tuning folder or the certificates folder lies inside the repository, th
 
 ### A tuning graph
 
-The automatic tuning is a checkpointed LangGraph graph, `buildTuningGraph` in `workflow/src/tuning/tuning-graph.ts`, saved in `out/evals/tuning/checkpoints.sqlite` under the tuning's ID (`tune-<time>-<suffix>`): `count → freeze → worktree → baseline → propose ⟲ (one proposal, its development run and comparison per pass) → holdout → test_baseline → activate → commit → merge`. Its nodes call the existing cycle steps, which record their run IDs before they start, so a node interrupted mid-run resumes its run; `cycle.json` is still written for `tune cycle` readers. `tune cycle` runs the same graph from `baseline` on a given dataset, without the trigger, the worktree and the merge.
+The automatic tuning is a checkpointed LangGraph graph, `buildTuningGraph` in `workflow/src/tuning/tuning-graph.ts`, saved in `out/evals/tuning/checkpoints.sqlite` under the tuning's ID (`tune-<time>-<suffix>`): `count → freeze → worktree → baseline → propose ⟲ (one proposal, its development run and comparison per pass) → holdout → test_baseline → activate → commit → merge`. Its nodes call the existing cycle steps, which record their run IDs before they start, so a node interrupted mid-run resumes its run; `cycle.json` is still written for `tune cycle` readers. Where a driver runs the tuning, the compiled tuning graph is its node `tune`. `tune cycle` runs the same graph from `baseline` on a given dataset, without the trigger, the worktree and the merge.
 
 ### State and resumption
 

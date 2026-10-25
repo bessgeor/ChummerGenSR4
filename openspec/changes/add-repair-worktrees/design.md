@@ -4,6 +4,8 @@
 
 Diagnosis copies `Chummer/`, `Core/`, `bin/data/` and `bin/lang/` of the working tree into `diagnosis/source/` (the snapshot) and records the commit the working tree was on. Repair copies the snapshot into a scratch folder per attempt (and per subtask), computes the patch by comparing file contents with the snapshot, and archives the files before and after. Widening copies the accepted `Chummer/` and `Core/` into `widening/<cluster>/attempt-<n>/source/`, writes the archived after-files over it when every changed file still has the hash the patch was made from, and builds it. Promotion stages that folder with a private index and moves `accepted/<thread>` by compare-and-swap. `conclude` only writes `outcome.json`.
 
+The workflow graph is made of stage subgraphs (`start`, `capture`, `diagnose`, `repair`, `widen`, `conclude`); this change works inside the `repair`, `widen` and `conclude` stages and adds no stage.
+
 ## Goals / Non-Goals
 
 **Goals:**
