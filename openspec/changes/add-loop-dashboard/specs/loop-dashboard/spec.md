@@ -12,7 +12,7 @@
 - **THEN** the request is refused with 403 and nothing is written
 
 ### Requirement: The page shows the loop's stages and each graph's own drawing
-The page SHALL draw the stages start thread, capture and compare, discovery, diagnose, repair, widen, conclude and tune, with the decisions "any difference?" and "anything changed?" and the loop back to the next thread. Every node of the loop, workflow, discovery and tuning graphs SHALL belong to exactly one stage, and each stage SHALL list its nodes. For each graph, the page SHALL also show LangGraph's own Mermaid drawing of the compiled graph, unchanged except that running nodes are marked. The graphs SHALL be compiled with inert steps, and the dashboard SHALL NOT run a node.
+The page SHALL draw the stages start thread, capture and compare, discovery, diagnose, repair, widen, conclude and tune, with the decisions "any difference?" and "anything changed?" and the loop back to the next thread. Every node of the loop, workflow, discovery and tuning graphs SHALL belong to exactly one stage, and each stage SHALL list its nodes. For each graph, the page SHALL also show LangGraph's own Mermaid drawing of the compiled graph, drawn by LangGraph's `drawMermaid()` with each node named `<stage>:<node>` so that LangGraph draws each stage as a subgraph, keeping every node and edge, with the running nodes marked. The graphs SHALL be compiled with inert steps, and the dashboard SHALL NOT run a node.
 
 #### Scenario: A new node without a stage
 - **WHEN** a graph gains a node that the stage map does not name

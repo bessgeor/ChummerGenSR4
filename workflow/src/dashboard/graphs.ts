@@ -2,13 +2,14 @@ import { existsSync } from "node:fs";
 import Database from "better-sqlite3";
 import type { StateSnapshot } from "@langchain/langgraph";
 import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
-import { groupByStage, nodeStage } from "./stages.js";
+import { Graph, type Edge, type Node } from "@langchain/core/runnables/graph";
+import { groupedId, nodeStage } from "./stages.js";
 import type { GraphKind, TaskView } from "./snapshot.js";
 
 /** What the dashboard needs of a compiled graph: its drawing and a thread's state. It never invokes one. */
 export type InspectableGraph = {
   getState(config: { configurable: { thread_id: string } }): Promise<StateSnapshot>;
-  getGraphAsync(): Promise<{ drawMermaid(): string; nodes: Record<string, unknown> }>;
+  getGraphAsync(): Promise<{ nodes: Record<string, Node>; edges: Edge[] }>;
 };
 
 /** A graph of the loop: its builder, compiled with inert steps, and its checkpoint file. */
@@ -49,9 +50,16 @@ export class GraphReader {
     this.graph = source.compile(this.saver);
   }
 
-  /** LangGraph's own drawing of the compiled graph, its nodes grouped by stage. */
+  /**
+   * LangGraph's own drawing of the compiled graph with its nodes grouped by stage. Each node is renamed `<stage>:<node>`,
+   * the way a real subgraph's nodes are named, so LangGraph's `drawMermaid()` draws each stage as a subgraph itself.
+   */
   async drawing(): Promise<string> {
-    return groupByStage(this.source.kind, (await this.graph.getGraphAsync()).drawMermaid());
+    const drawn = await this.graph.getGraphAsync();
+    const id = (node: string) => groupedId(this.source.kind, node);
+    const nodes = Object.fromEntries(Object.values(drawn.nodes).map((node) => [id(node.id), { ...node, id: id(node.id), name: id(node.name) }]));
+    const edges = drawn.edges.map((edge) => ({ ...edge, source: id(edge.source), target: id(edge.target) }));
+    return new Graph({ nodes, edges }).drawMermaid();
   }
 
   /** The node names of the compiled graph, without LangGraph's start and end. */

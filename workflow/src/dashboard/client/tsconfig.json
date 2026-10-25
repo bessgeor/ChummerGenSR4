@@ -13,5 +13,5 @@
     "allowImportingTsExtensions": false,
     "types": []
   },
-  "include": ["*.ts", "*.tsx", "../snapshot.ts", "../drawing.ts"]
+  "include": ["*.ts", "*.tsx", "../snapshot.ts", "../drawing.ts", "../stages.ts"]
 }

@@ -2,6 +2,7 @@ import mermaid from "mermaid";
 import { useEffect, useState } from "react";
 import { markRunning } from "../drawing.js";
 import type { GraphDrawings, GraphKind, TaskView } from "../snapshot.js";
+import { drawnId } from "../stages.js";
 
 const dark = matchMedia("(prefers-color-scheme: dark)").matches;
 // The stage boxes take the page's accent; the nodes keep LangGraph's own styles. Drawings keep their natural size and scroll.
@@ -15,10 +16,11 @@ mermaid.initialize({
 let renders = 0;
 
 /** One graph's drawing from LangGraph, as LangGraph draws it, with the nodes running now marked. */
-function Drawing({ kind, drawing, running }: { kind: GraphKind; drawing: string; running: readonly string[] }) {
+function Drawing({ kind, drawing, tasks }: { kind: GraphKind; drawing: string; tasks: readonly TaskView[] }) {
+  const running = tasks.map((task) => task.node);
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const source = markRunning(drawing, running);
+  const source = markRunning(drawing, tasks.map((task) => drawnId(task.stage, task.node)));
   useEffect(() => {
     let current = true;
     mermaid.render(`graph-${kind}-${++renders}`, source)
@@ -42,7 +44,7 @@ export function NodeView({ drawings, tasks }: { drawings: GraphDrawings | null; 
   return (
     <div className="side">
       {(Object.entries(drawings) as [GraphKind, string][]).map(([kind, drawing]) => (
-        <Drawing key={kind} kind={kind} drawing={drawing} running={tasks.filter((task) => task.graph === kind && task.state === "running").map((task) => task.node)} />
+        <Drawing key={kind} kind={kind} drawing={drawing} tasks={tasks.filter((task) => task.graph === kind && task.state === "running")} />
       ))}
     </div>
   );

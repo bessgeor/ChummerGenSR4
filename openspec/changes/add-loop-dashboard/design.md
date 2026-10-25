@@ -29,6 +29,10 @@ The server compiles each graph's builder with inert step objects and a `SqliteSa
 
 A fixed table maps each graph's node names to a stage: the workflow's `build` to start thread; `capture`, `compare`, `route_cases`, `triage` and `inventory` to capture and compare; the diagnosis nodes to diagnose; the repair nodes and `retry_repair` to repair; the widening nodes to widen; `conclude` to conclude; every discovery node to discovery; every tuning node to tune; the loop graph's nodes to the stage they start. A test compiles every graph and fails when a node has no stage, so a new node cannot go unseen.
 
+### Node view grouped by LangGraph
+
+LangGraph's `drawMermaid()` draws a subgraph for every group of nodes whose IDs share a `<prefix>:`, which is how it names the nodes of a real subgraph. The dashboard copies the compiled graph's nodes and edges as `getGraphAsync()` returns them, renames each node `<stage>:<node>`, and has LangGraph's own `Graph.drawMermaid()` draw the copy, so LangGraph draws each stage as a subgraph and keeps every node, edge and style. Making the stages real subgraphs of the workflow graph would give the same drawing without the rename, but would change the graph's checkpoints, so threads started before could not resume.
+
 ### Running tasks
 
 For each thread that may be running, `getState()` lists the tasks of the next superstep. A task with a `result` or an `error` has finished; a task with interrupts is paused; any other task is running since the checkpoint's `createdAt`. A pushed task's path names the index of its pending send in the checkpoint's `__pregel_tasks`, whose arguments name its cluster (`clusterId`), its case (`index` into `plan`) or its discovery target. Threads that may be running are the loop's threads that have not ended. Without a loop, the page lists the threads with pending tasks from the most recent checkpoints and says it cannot tell a running thread from an interrupted one.
