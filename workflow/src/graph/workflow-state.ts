@@ -29,6 +29,11 @@ export const WorkflowState = Annotation.Root({
   threadId: Annotation<string>(),
   options: Annotation<RunOptions>(),
   plan: Annotation<PlannedCase[]>(),
+  /** Case indexes currently queued for capture or compare inside the capture stage. */
+  pendingCaseIndexes: Annotation<number[], number[]>({
+    reducer: (_current, update) => update,
+    default: () => [],
+  }),
   fingerprints: Annotation<InputFingerprints | null>(),
   captures: byCase(),
   compares: byCase(),

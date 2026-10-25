@@ -284,7 +284,7 @@ test("a thread stored before the inventory existed skips it and its report says 
   const graph = buildWorkflowGraph(run.steps, noDiagnosis, noRepair, noWidening, run.loop).compile({ checkpointer: new MemorySaver(), store: new InMemoryStore() });
   const options = run.dependencies.resolveOptions({ kind: "start", arguments: baseArguments }, "wf-test");
   const { inventorySummary: _absent, ...stored }: WorkflowStateValue = {
-    threadId: "wf-old", options, plan: [plannedCase("a")], fingerprints: null, captures: {}, compares: {}, triageSummary: null, inventorySummary: null,
+    threadId: "wf-old", options, plan: [plannedCase("a")], pendingCaseIndexes: [], fingerprints: null, captures: {}, compares: {}, triageSummary: null, inventorySummary: null,
     clusters: {}, agentMilliseconds: 0, diagnosisCheck: null, diagnosisPath: null, repairs: {}, repairPath: null, widenings: {}, earlierWidenings: [], accepted: null,
     wideningPath: null, startedUtc: null, outcome: null, outcomePath: null,
   };
@@ -529,11 +529,7 @@ test("during a capture the state read with subgraphs shows the pending tasks in 
   ok(namespace.startsWith("capture:"), namespace);
   // The third case is captured while the second is compared: the tasks are the pushes of that step, in this order.
   deepStrictEqual(stage.tasks.map((task) => [task.name, task.path]), [["compare", ["__pregel_push", 0]], ["capture", ["__pregel_push", 1]]]);
-  // A task description carries no arguments; they are the stage's pending sends in the namespace the state reported,
-  // and their case indexes are those of the plan, not the sends' positions.
-  const stored = await run.checkpointer.getTuple(stage.config);
-  const sends = stored!.checkpoint.channel_values["__pregel_tasks"] as { node: string; args: { index: number } }[];
-  deepStrictEqual(sends.map((send) => [send.node, send.args.index]), [["compare", 1], ["capture", 2]]);
+  deepStrictEqual(stage.values.pendingCaseIndexes, [1, 2]);
   release();
   equal(await finished, 0);
 });

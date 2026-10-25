@@ -26,18 +26,24 @@ function caseAt(state: CaseTask): PlannedCase {
  * (unless compare is skipped) and a capture for each of the next uncaptured cases, one per lane; triage once every
  * case is compared, or the end of the stage when triage is skipped and nothing is left.
  */
-function caseRoute(state: WorkflowStateValue, lanes: number): Send[] | "triage" | typeof END {
+function pendingCases(state: WorkflowStateValue, lanes: number): { node: "capture" | "compare"; index: number }[] {
   const comparing = nodeMode("compare", state.options.only) !== "skip";
-  const sends: Send[] = [];
+  const pending: { node: "capture" | "compare"; index: number }[] = [];
   let capturing = 0;
   state.plan.forEach((item, index) => {
     if (state.captures[item.name] === undefined) {
-      if (capturing < lanes) sends.push(new Send("capture", { ...state, index }));
+      if (capturing < lanes) pending.push({ node: "capture", index });
       capturing++;
     } else if (comparing && state.compares[item.name] === undefined) {
-      sends.push(new Send("compare", { ...state, index }));
+      pending.push({ node: "compare", index });
     }
   });
+  return pending;
+}
+
+function caseRoute(state: WorkflowStateValue, lanes: number): Send[] | "triage" | typeof END {
+  const comparing = nodeMode("compare", state.options.only) !== "skip";
+  const sends = pendingCases(state, lanes).map(({ node, index }) => new Send(node, { ...state, index }));
   if (sends.length > 0) return sends;
   return comparing && nodeMode("triage", state.options.only) !== "skip" ? "triage" : END;
 }
@@ -49,7 +55,7 @@ function caseRoute(state: WorkflowStateValue, lanes: number): Send[] | "triage" 
  */
 export function buildCaptureStage(steps: WorkflowSteps) {
   return new StateGraph(WorkflowState)
-    .addNode("route_cases", () => ({}))
+    .addNode("route_cases", (state: WorkflowStateValue) => ({ pendingCaseIndexes: pendingCases(state, steps.captureLanes).map(({ index }) => index) }))
     .addNode("capture", async (state: CaseTask, config: LangGraphRunnableConfig) => {
       const outcome = await steps.capture(context(state, "capture", config.signal), caseAt(state));
       return { captures: { [outcome.case]: outcome } };

@@ -90,7 +90,7 @@ async function start(command: Extract<Command, { kind: "start" }>, dependencies:
   const cache = options.canonicalCache === null ? "off (--live-canonical)" : `${options.canonicalCache} (${options.canonicalCacheSource})`;
   dependencies.log(`Thread ${threadId}: ${plan.cases.length} cases, canonical cache ${cache}.`);
   const input: WorkflowStateValue = {
-    threadId, options, plan: [...plan.cases], fingerprints: null, captures: {}, compares: {}, triageSummary: null, inventorySummary: null,
+    threadId, options, plan: [...plan.cases], pendingCaseIndexes: [], fingerprints: null, captures: {}, compares: {}, triageSummary: null, inventorySummary: null,
     clusters: {}, agentMilliseconds: 0, diagnosisCheck: null, diagnosisPath: null, repairs: {}, repairPath: null, widenings: {}, earlierWidenings: [], accepted: null, wideningPath: null,
     startedUtc: dependencies.now().toISOString(), outcome: null, outcomePath: null,
   };

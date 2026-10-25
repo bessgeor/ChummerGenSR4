@@ -4,27 +4,29 @@
 
 | Command | Result |
 | --- | --- |
-| `npm run workflow:typecheck` | Passed on the reviewed branch. |
-| `node --import tsx workflow/tests/graph.test.ts` | 21 tests, 21 passed, 0 failed, including the xray, capture fan-out, resume and flat-thread tests. |
-| `npm run workflow:test` | Failed to start test files: Node's test runner reported `spawn EPERM` for its per-file workers. This is an execution failure; it is not counted as a pass. An earlier run recorded by the prior session on this branch reported 489 tests passed, 0 failed. |
-| `npm run openspec:validate` | Passed strict validation: 23 passed, 0 failed. |
-| SHA-256 of `bin/ChummerGenSR4.exe` | Current value is `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`; the prior session recorded the same value before its test run. The executable was not built or launched. |
+| `npm run workflow:typecheck` | Passed after adding pending case indexes to the capture stage state. |
+| `npm run workflow:test` | Failed to start test workers: Node reported `spawn EPERM`. This is an execution failure and does not establish the task's named full-suite evidence. |
+| `node out/workflow-test-build/workflow/tests/graph.test.js` | 21 tests, 21 passed, 0 failed. This test file was compiled from the current TypeScript sources with `npx tsc -p workflow --noEmit false --outDir out/workflow-test-build --rootDir .` to avoid the blocked `tsx` esbuild worker. |
+| `npm run openspec:validate` | Passed strict validation after the verification and task-status edits: 23 passed, 0 failed. |
+| SHA-256 of `bin/ChummerGenSR4.exe` | `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`; the executable was not built or launched. |
 
-New tests, all in `workflow/tests/`:
+The prescribed `workflow:test` runner could not spawn its workers. A serial compiled-JS attempt was also tried, but it is not equivalent to the repository test command: tests that depend on repository-relative assets or child Git/process launches failed in that setup. In particular, that workaround did not verify the full diagnosis, repair, widening or loop graph suites. No such failures are represented as passes.
 
-- `graph.test.ts`, the drawing with `xray`: the workflow graph has the six stage IDs from the exported constant. `getSubgraphsAsync()` lists the exact inner nodes of every stage (`start`: `build`; `capture`: `route_cases`, `capture`, `compare`, `triage`, `inventory`; plus the inner nodes of `diagnose`, `repair`, `widen` and `conclude`). `getGraphAsync({ xray: true })` draws all stage nodes and expands stages with multiple inner nodes. LangGraph represents a stage with one inner node (`start`, `conclude`) by the inner node under the stage ID; the same assertion verifies those one-node subgraphs separately.
-- `graph.test.ts`, the fan-out seen from outside: while case `c` is captured on one lane, `getState(config, { subgraphs: true })` returns the capture stage in a `capture:<task>` namespace with its pending `compare` and `capture` tasks. The checkpoint tuple in that namespace supplies their Send payloads because LangGraph's task descriptions omit arguments: `compare` has case index 1 and `capture` has case index 2.
-- `diagnosis-graph.test.ts` and `widening-graph.test.ts`: a run killed inside the `diagnose` stage (a challenge job) and inside the `widen` stage resumes from that stage; already finished jobs and levels do not run again. These were included in the earlier 489-test run recorded above.
+New tests and behavior:
+
+- `graph.test.ts`, the drawing with `xray`: the workflow graph has the six stage IDs from the exported constant. `getSubgraphsAsync()` lists the exact inner nodes of every stage (`start`: `build`; `capture`: `route_cases`, `capture`, `compare`, `triage`, `inventory`; plus the inner nodes of `diagnose`, `repair`, `widen` and `conclude`). LangGraph renders a single-node subgraph (`start`, `conclude`) as that inner node under the stage ID in xray.
+- `graph.test.ts`, the fan-out seen from outside: while case `c` is captured on one lane, `getState(config, { subgraphs: true })` returns the capture stage in a `capture:<task>` namespace, its pending `compare` and `capture` tasks, and `pendingCaseIndexes: [1, 2]` in that stage's state. The route node writes the indexes alongside routing, so the task args are visible through the state API without reading the checkpoint tuple.
+- `diagnosis-graph.test.ts` and `widening-graph.test.ts` cover interrupted runs resumed from inside the `diagnose` and `widen` stages. Full results remain unverified in this session because the prescribed test command could not run.
 - `graph.test.ts`, the refused flat thread: flat checkpoints stopped at build, capture and inventory are rejected with status 3; the error explains that a new thread reuses the recorded steps, and no misleading resume command is printed.
 
 ## Fixture-tested scope
 
-Tests use fake steps and model jobs with an in-memory checkpointer. The flat graph that stores the refused threads is a test copy (`flat-graph.ts`).
+Graph tests use fake steps and model jobs with an in-memory checkpointer. The flat graph that stores the refused threads is a test copy (`flat-graph.ts`).
 
 ## Live evidence
 
-None for this task. No capture, compare or app behavior changes, and no live run was made.
+None. No capture, compare or app behavior changes, and no live run was made.
 
 ## Unverified
 
-A live `npm start` through the stages, and the stage namespaces in its checkpoints, are not covered here. The full workflow test suite could not be rerun in this environment because its test runner could not spawn workers (`spawn EPERM`).
+The full `workflow:test` result, including diagnosis, repair, widening and loop graph tests, remains unverified because Node cannot spawn the test workers in this environment. A live `npm start` through the stages and stage namespaces in its checkpoints are also not covered here.
