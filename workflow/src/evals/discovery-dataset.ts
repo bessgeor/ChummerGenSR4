@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { canonicalJson } from "../diagnosis/context.js";
@@ -10,6 +10,7 @@ import { fingerprintFolder, sha256Text } from "../steps/fingerprint.js";
 import { readDocument } from "../steps/read-document.js";
 import { datasetFolders, partitionOf, partitions } from "./dataset.js";
 import type { EvalRecord } from "./eval-record.js";
+import { renameWithRetry } from "../host/rename-with-retry.js";
 
 /** A proven scenario's plan as gold: its fixture case and the tab names it selected. */
 const ScenarioGoldSchema = z.strictObject({ kind: z.literal("scenario"), case: z.string().min(1), selectedTabs: z.array(z.string().min(1)) });
@@ -193,6 +194,6 @@ export async function freezeDiscoveryDataset(input: DiscoveryFreezeInput): Promi
   mkdirSync(partial, { recursive: true });
   writeFileSync(join(partial, "dataset.json"), `${JSON.stringify(dataset, null, 2)}\n`);
   const folder = join(nameFolder, `v${previous + 1}`);
-  renameSync(partial, folder);
+  renameWithRetry(partial, folder);
   return { folder, dataset };
 }

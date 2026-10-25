@@ -1,8 +1,9 @@
 import { randomBytes } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { AgentFailure, Effort, Provider } from "../agents/agent-job.js";
 import type { RepairStage } from "../evals/eval-record.js";
+import { renameWithRetry } from "../host/rename-with-retry.js";
 import { SetupError } from "../host/setup-error.js";
 import type { CheckRow } from "./attempt-host.js";
 import type { CheckExecution } from "./cluster-repair.js";
@@ -76,5 +77,5 @@ export function writeArchive(input: ArchiveInput): void {
     writeFileSync(join(partial, path), content);
   }
   mkdirSync(dirname(input.folder), { recursive: true });
-  renameSync(partial, input.folder);
+  renameWithRetry(partial, input.folder);
 }

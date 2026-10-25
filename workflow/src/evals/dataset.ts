@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { ContextManifestSchema, canonicalJson, contextHash, type ContextManifest } from "../diagnosis/context.js";
@@ -13,6 +13,7 @@ import { threadObservations, type ObservationRow } from "./observations.js";
 import { challengedHypothesis, contextExists, missingHypothesisMessage, recordContext } from "./record-context.js";
 import { rootCauseOfExplanation, type RootCause } from "./root-cause.js";
 import type { BaseCheck } from "./snapshot-base.js";
+import { renameWithRetry } from "../host/rename-with-retry.js";
 
 const RootCauseSchema = z.strictObject({
   source: z.string().min(1), mechanism: z.enum(mechanisms),
@@ -211,7 +212,7 @@ export async function freezeDataset(input: FreezeInput): Promise<{ folder: strin
   mkdirSync(partial, { recursive: true });
   writeFileSync(join(partial, "dataset.json"), `${JSON.stringify(dataset, null, 2)}\n`);
   const folder = join(nameFolder, `v${version}`);
-  renameSync(partial, folder);
+  renameWithRetry(partial, folder);
   return { folder, dataset };
 }
 
