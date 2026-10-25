@@ -2,15 +2,15 @@
 
 ## 1. Graphs and stages
 
-- [x] 1.1 Compile every graph read-only on its checkpoint file and map each node to a stage. Evidence: a workflow test that compiles every graph and finds a stage for every node.
+- [ ] 1.1 Compile every graph read-only on its checkpoint file and take each stage from the workflow's stage subgraphs, drawing them with `xray`. Evidence: a workflow test that the stage view has a box for every exported stage ID and that the drawing has a subgraph per stage.
 
 ## 2. Live tasks
 
-- [x] 2.1 Read each candidate thread's running and paused tasks with their subjects from `getState()` and the pending sends, and the loop status from the loop's documents. Evidence: workflow tests against a real SqliteSaver read while a test graph runs, and for each loop status.
+- [ ] 2.1 Read each candidate thread's running and paused tasks with their subjects from `getState()` with subgraphs and the pending sends in each stage's namespace, and the loop status from the loop's documents. Evidence: workflow tests against a real SqliteSaver read while a test graph runs, and for each loop status.
 
 ## 3. Stats
 
-- [x] 3.1 Compute each stage's p80 and counts from the activity log, the eval records and the thread documents, scoped to a loop or to every thread. Evidence: workflow tests on fixture records and documents, including the fallback to record durations and unreadable sources.
+- [ ] 3.1 Compute each stage's p80 and counts from the activity log, the eval records and the thread documents, scoped to a loop or to every thread. Evidence: workflow tests on fixture records and documents, including the fallback to record durations and unreadable sources.
 
 ## 4. Server and controls
 

@@ -2,7 +2,7 @@
 
 ## Context
 
-Every graph of the loop is a LangGraph `StateGraph` checkpointed in its own SQLite file: the loop graph (`out/loop/checkpoints.sqlite`), the workflow graph (`out/workflow/checkpoints.sqlite`), the discovery graph (`out/discovery/checkpoints.sqlite`) and the tuning graph (`out/evals/tuning/checkpoints.sqlite`). Each graph's builder compiles from step objects that are only called when a node runs. Model jobs leave eval records in `out/workflow/store.sqlite`. Each workflow thread writes `triage.json` and `outcome.json` in its folder. The loop driver keeps, per loop, `loop.json` (its threads in order), `control.json` (the pause flags), `state.json` (paused, pausing, each lane's flag and the task it runs) and `activity.jsonl` (one line per finished task, from the graphs' `tasks` stream).
+Every graph of the loop is a LangGraph `StateGraph`, the workflow graph made of one subgraph per stage, checkpointed in its own SQLite file: the loop graph (`out/loop/checkpoints.sqlite`), the workflow graph (`out/workflow/checkpoints.sqlite`), the discovery graph (`out/discovery/checkpoints.sqlite`) and the tuning graph (`out/evals/tuning/checkpoints.sqlite`). Each graph's builder compiles from step objects that are only called when a node runs. Model jobs leave eval records in `out/workflow/store.sqlite`. Each workflow thread writes `triage.json` and `outcome.json` in its folder. The loop driver keeps, per loop, `loop.json` (its threads in order), `control.json` (the pause flags), `state.json` (paused, pausing, each lane's flag and the task it runs) and `activity.jsonl` (one line per finished task, from the graphs' `tasks` stream, with its stage and namespace).
 
 ## Goals / Non-Goals
 
@@ -25,17 +25,17 @@ Every graph of the loop is a LangGraph `StateGraph` checkpointed in its own SQLi
 
 The server compiles each graph's builder with inert step objects and a `SqliteSaver` on that graph's checkpoint file, and only calls `getGraphAsync()`, `getState()` and the saver's `getTuple()` on it, so no node runs. A missing checkpoint file means the graph has no threads yet.
 
-### Stages
+### Stages are LangGraph subgraphs
 
-A fixed table maps each graph's node names to a stage: the workflow's `build` to start thread; `capture`, `compare`, `route_cases`, `triage` and `inventory` to capture and compare; the diagnosis nodes to diagnose; the repair nodes and `retry_repair` to repair; the widening nodes to widen; `conclude` to conclude; every discovery node to discovery; every tuning node to tune; the loop graph's nodes to the stage they start. A test compiles every graph and fails when a node has no stage, so a new node cannot go unseen.
+The workflow graph's stages are real LangGraph subgraphs (`start`, `capture`, `discovery`, `diagnose`, `repair`, `widen`, `conclude`; the loop graph's `tune` node is the compiled tuning graph), with stable IDs exported as a constant by the workflow. The dashboard groups by these IDs and keeps no table of its own: a stage is the subgraph a node belongs to, a discovery thread's nodes are the `discovery` stage and a tuning thread's the `tune` stage. The stage view draws the loop diagram with one box per stage ID; a test fails when the workflow exports a stage ID the diagram has no box for.
 
-### Node view grouped by LangGraph
+### Node view
 
-LangGraph's `drawMermaid()` draws a subgraph for every group of nodes whose IDs share a `<prefix>:`, which is how it names the nodes of a real subgraph. The dashboard copies the compiled graph's nodes and edges as `getGraphAsync()` returns them, renames each node `<stage>:<node>`, and has LangGraph's own `Graph.drawMermaid()` draw the copy, so LangGraph draws each stage as a subgraph and keeps every node, edge and style. Making the stages real subgraphs of the workflow graph would give the same drawing without the rename, but would change the graph's checkpoints, so threads started before could not resume.
+`getGraphAsync({ xray: true })` lists each subgraph's nodes as `<stage>:<node>`, and LangGraph's `drawMermaid()` draws each stage as a subgraph. The page shows that drawing as LangGraph returns it, adding only the marks on running nodes.
 
 ### Running tasks
 
-For each thread that may be running, `getState()` lists the tasks of the next superstep. A task with a `result` or an `error` has finished; a task with interrupts is paused; any other task is running since the checkpoint's `createdAt`. A pushed task's path names the index of its pending send in the checkpoint's `__pregel_tasks`, whose arguments name its cluster (`clusterId`), its case (`index` into `plan`) or its discovery target. Threads that may be running are the loop's threads that have not ended. Without a loop, the page lists the threads with pending tasks from the most recent checkpoints and says it cannot tell a running thread from an interrupted one.
+For each thread that may be running, `getState(config, { subgraphs: true })` returns the thread's next tasks, and for a running stage that stage's own state and tasks. A task with a `result` or an `error` has finished; a task with interrupts is paused; any other task is running since its checkpoint's `createdAt`. A pushed task's path names the index of its pending send in its checkpoint's `__pregel_tasks` (read with the saver's `getTuple()` in the stage's namespace), whose arguments name its cluster (`clusterId`), its case (`index` into `plan`) or its discovery target. Threads that may be running are the loop's threads that have not ended. Without a loop, the page lists the threads with pending tasks from the most recent checkpoints and says it cannot tell a running thread from an interrupted one.
 
 ### Loop status
 
@@ -43,7 +43,7 @@ For each thread that may be running, `getState()` lists the tasks of the next su
 
 ### Stats
 
-- p80 is the nearest-rank 80th percentile of the stage's task durations from `activity.jsonl`, each `finishedUtc - startedUtc - pausedMs`. Routing nodes (`route_*`, `prepare_*`, `finish_*`) take no time and are left out. A stage with no logged task falls back to the `durationMs` of its eval records (hypothesis and challenge for diagnose, repair, rank and scenario for discovery, tune for tune), and the page names the source.
+- p80 is the nearest-rank 80th percentile of the stage's task durations from `activity.jsonl`, by each line's `stage`, each `finishedUtc - startedUtc - pausedMs`. Routing nodes (`route_*`, `prepare_*`, `finish_*`) take no time and are left out. A stage with no logged task falls back to the `durationMs` of its eval records (hypothesis and challenge for diagnose, repair, rank and scenario for discovery, tune for tune), and the page names the source.
 - Counts come from the loop's threads, or from every workflow and discovery thread without a loop: triage totals for discrepancies and clusters; scenario records with the discovery label `proven` for discoveries; hypothesis records by check label; repair records, grouped by thread and cluster (one group per hypothesis that reached repair), for rejected tries per hypothesis; their widening labels for promotions and, over the groups that ended without a promotion, the mean number of widenings before the rejection; `outcome.json` dispositions for fixes merged and `merge_failed`; the loop's tuning threads, or the folders of `out/evals/tuning/cycles/` without a loop, for tunings run.
 
 ### Controls
