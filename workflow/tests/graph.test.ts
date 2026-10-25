@@ -505,7 +505,7 @@ test("the drawing with xray shows every stage with its inner nodes", async () =>
   deepStrictEqual(drawn, { ...inner, start: ["start"], conclude: ["conclude"] });
 });
 
-test("during a capture the state read with subgraphs shows the case's pending capture in the capture stage's namespace", async () => {
+test("during a capture the state read with subgraphs shows the pending tasks in the capture stage's namespace, with their case indexes", async () => {
   const steps = new FakeSteps();
   let release = () => {};
   const released = new Promise<void>((resolve) => { release = resolve; });
@@ -513,7 +513,7 @@ test("during a capture the state read with subgraphs shows the case's pending ca
   const capturing = new Promise<void>((resolve) => { started = resolve; });
   const capture = steps.capture.bind(steps);
   steps.capture = async (context, item) => {
-    if (item.name === "a") {
+    if (item.name === "c") {
       started();
       await released;
     }
@@ -527,10 +527,13 @@ test("during a capture the state read with subgraphs shows the case's pending ca
   const stage = snapshot.tasks[0]!.state as StateSnapshot;
   const namespace = String(stage.config.configurable?.["checkpoint_ns"]);
   ok(namespace.startsWith("capture:"), namespace);
-  deepStrictEqual(stage.tasks.map((task) => task.name), ["capture"]);
+  // The third case is captured while the second is compared: the tasks are the pushes of that step, in this order.
+  deepStrictEqual(stage.tasks.map((task) => [task.name, task.path]), [["compare", ["__pregel_push", 0]], ["capture", ["__pregel_push", 1]]]);
+  // A task description carries no arguments; they are the stage's pending sends in the namespace the state reported,
+  // and their case indexes are those of the plan, not the sends' positions.
   const stored = await run.checkpointer.getTuple(stage.config);
   const sends = stored!.checkpoint.channel_values["__pregel_tasks"] as { node: string; args: { index: number } }[];
-  deepStrictEqual(sends.map((send) => [send.node, send.args.index]), [["capture", 0]]);
+  deepStrictEqual(sends.map((send) => [send.node, send.args.index]), [["compare", 1], ["capture", 2]]);
   release();
   equal(await finished, 0);
 });
@@ -561,6 +564,7 @@ test("a thread checkpointed by the flat graph is refused wherever it stopped, an
     equal(await runWorkflow({ kind: "resume", threadId: "wf-flat" }, run.dependencies), 3);
     ok(run.lines.includes("Setup error: Thread wf-flat was checkpointed before the workflow graph had stages, so it cannot be resumed. "
       + "Start a new run with the same options: it reuses the capture and compare steps the thread recorded."), run.lines.join("\n"));
+    ok(!run.lines.some((line) => line.includes("resume it with")), run.lines.join("\n"));
     deepStrictEqual(steps.calls, []);
     deepStrictEqual(steps.buildCandidate.length, 1);
   }

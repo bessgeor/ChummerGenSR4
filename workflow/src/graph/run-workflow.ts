@@ -154,11 +154,13 @@ function finish(final: WorkflowStateValue, dependencies: RunDependencies): numbe
 /** Runs or resumes a thread and returns the exit status; any failure is a setup error, and an unfinished thread stays resumable. */
 export async function runWorkflow(command: Exclude<Command, { kind: "help" }>, dependencies: RunDependencies): Promise<number> {
   const { graph, log } = dependencies;
-  let threadId: string | null = command.kind === "resume" ? command.threadId : null;
+  // Set once the thread may run: a thread that is refused has nothing to resume.
+  let threadId: string | null = null;
   try {
     let final: WorkflowStateValue;
     if (command.kind === "resume") {
       await checkResumable(command.threadId, dependencies);
+      threadId = command.threadId;
       log(`Resuming thread ${command.threadId}.`);
       final = await graph.invoke(null, threadConfig(command.threadId, dependencies.signal));
     } else {
