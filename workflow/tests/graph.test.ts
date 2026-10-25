@@ -281,7 +281,7 @@ test("an inventory setup error ends the run with 3, and the resumed thread runs 
 test("a thread stored before the inventory existed skips it and its report says so", async () => {
   const run = harness(["a"]);
   const graph = buildWorkflowGraph(run.steps, noDiagnosis, noRepair, noWidening, run.loop).compile({ checkpointer: new MemorySaver(), store: new InMemoryStore() });
-  const options = run.dependencies.resolveOptions({ kind: "start", arguments: baseArguments });
+  const options = run.dependencies.resolveOptions({ kind: "start", arguments: baseArguments }, "wf-test");
   const { inventorySummary: _absent, ...stored }: WorkflowStateValue = {
     threadId: "wf-old", options, plan: [plannedCase("a")], fingerprints: null, captures: {}, compares: {}, triageSummary: null, inventorySummary: null,
     clusters: {}, agentMilliseconds: 0, diagnosisCheck: null, diagnosisPath: null, repairs: {}, repairPath: null, widenings: {}, earlierWidenings: [], accepted: null,
@@ -439,7 +439,7 @@ const storedBefore = {
 async function storeOlder(run: ReturnType<typeof harness>, names: string[]): Promise<void> {
   const older = buildLegacyCaseGraph(run.steps).compile({ checkpointer: run.checkpointer });
   await rejects(older.invoke({
-    ...storedBefore, options: run.dependencies.resolveOptions({ kind: "start", arguments: baseArguments }), plan: names.map(plannedCase),
+    ...storedBefore, options: run.dependencies.resolveOptions({ kind: "start", arguments: baseArguments }, "wf-test"), plan: names.map(plannedCase),
   }, { configurable: { thread_id: storedBefore.threadId } }), SetupError);
 }
 

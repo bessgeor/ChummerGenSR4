@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { basename, dirname, extname, resolve } from "node:path";
+import { basename, dirname, extname, join, resolve } from "node:path";
 import { z } from "zod";
 import { ParityCasesSchema, type CaseAction, type ParityCases } from "../../../contracts/generated/typescript/parity-cases.js";
 import { SetupError } from "../host/setup-error.js";
@@ -23,6 +23,11 @@ export type CasePlan = {
   /** Cases left out because none of the requested capture names belongs to them. */
   readonly excluded: readonly string[];
 };
+
+/** The fixture case file: the cases written by hand, without the discovered scenarios. */
+export function fixtureCaseFile(repositoryRoot: string): string {
+  return join(repositoryRoot, "parity", "cases", "characters.json");
+}
 
 /** A character entry's scenario name, which its case name carries after `@`. */
 export const scenarioPattern = /^[a-z0-9][a-z0-9-]*$/;

@@ -1,5 +1,6 @@
 import { join, resolve } from "node:path";
 import { resolveAgentSettings, type AgentSettings } from "../agents/agent-settings.js";
+import { fixtureCaseFile } from "../cases/case-plan.js";
 import type { Arguments, NodeName } from "./arguments.js";
 import { readDispatchedTuning } from "../tuning/active-configuration.js";
 import { dispatchedJobKinds, type DispatchedTuning } from "../tuning/tuning.js";
@@ -74,7 +75,7 @@ export function resolveRunOptions(args: Arguments, profile: Profile, env: Enviro
   const absolute = (path: string | null): string | null => (path === null ? null : resolve(repositoryRoot, path));
   const cache = cacheFolder(args, profile, env);
   return {
-    caseFile: resolve(repositoryRoot, args.caseFile ?? join("parity", "cases", "characters.json")),
+    caseFile: args.caseFile === null ? fixtureCaseFile(repositoryRoot) : resolve(repositoryRoot, args.caseFile),
     cases: args.cases,
     captures: args.captures,
     settingsOverlay: absolute(args.settingsOverlay ?? profile.settingsOverlay ?? null),

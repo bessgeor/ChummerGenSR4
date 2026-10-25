@@ -4,7 +4,7 @@ Each task names the tasks it builds on as `(after: …)`, by number in this list
 
 ## 1. Default suite
 
-- [ ] 1.1 Write the thread's suite from the fixture cases and the discovered scenarios when no `--case-file` is given, and use it as the thread's case file. Evidence: workflow tests for a suite without a registry, with one, with differing timings, with a duplicate case name, with a case file that does not match its registry, and a capture step recorded from `characters.json` reused from the suite.
+- [x] 1.1 Write the thread's suite from the fixture cases and the discovered scenarios when no `--case-file` is given, and use it as the thread's case file. Evidence: workflow tests for a suite without a registry, with one, with differing timings, with a duplicate case name, with a case file that does not match its registry, and a capture step recorded from `characters.json` reused from the suite.
 
 ## 2. Shared discovery composition
 

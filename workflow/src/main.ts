@@ -27,7 +27,7 @@ import { SetupError } from "./host/setup-error.js";
 import { LoopService } from "./loop/loop-service.js";
 import { parseArguments, usage } from "./options/arguments.js";
 import { loadProfile, localDataFolder } from "./options/profile.js";
-import { resolveRunOptions } from "./options/run-options.js";
+import { startOptions } from "./cases/suite.js";
 import { workflowPaths } from "./paths.js";
 import { hostAttemptBuild, hostNarrowCheck } from "./repair/attempt-host.js";
 import { RepairService } from "./repair/repair-service.js";
@@ -109,7 +109,7 @@ async function main(): Promise<number> {
     const graph = buildWorkflowGraph(steps, diagnosis, repair, widening, new LoopService({ threadFolder: paths.threadFolder, now })).compile({ checkpointer, store });
     return await runWorkflow(command, {
       graph,
-      resolveOptions: (start) => resolveRunOptions(start.arguments, profile, process.env, repositoryRoot),
+      resolveOptions: (start, threadId) => startOptions(start.arguments, profile, process.env, repositoryRoot, paths.threadFolder(threadId)),
       planCases: (options) => planCases(options.caseFile, options.cases, options.captures),
       readCase: readCaseDetails,
       certificateProblems: unattendedProblems,

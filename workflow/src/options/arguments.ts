@@ -39,7 +39,7 @@ export const usage = `Usage: npm start -- [options]
     --capture <names>          capture names, comma-separated (default: all)
     --settings-overlay <dir>   folder copied over both staged apps (default: the profile's settingsOverlay)
     --threshold <ratio>        largest passing share of differing pixels
-    --case-file <path>         default: parity/cases/characters.json
+    --case-file <path>         default: the thread's suite of parity/cases/characters.json and parity/cases/discovered.json
   Canonical cache:
     --canonical-cache <dir>    default: PARITY_CANONICAL_CACHE, the profile's canonicalCache, or the local app data folder
     --live-canonical           use no cache: every canonical side runs live
