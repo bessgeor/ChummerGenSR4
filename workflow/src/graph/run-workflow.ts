@@ -20,7 +20,8 @@ export type WorkflowGraph = ReturnType<ReturnType<typeof buildWorkflowGraph>["co
 
 export type RunDependencies = {
   readonly graph: WorkflowGraph;
-  readonly resolveOptions: (command: Extract<Command, { kind: "start" }>) => RunOptions;
+  /** A new thread's options; without --case-file this writes the thread's suite. */
+  readonly resolveOptions: (command: Extract<Command, { kind: "start" }>, threadId: string) => RunOptions;
   readonly planCases: (options: RunOptions) => CasePlan;
   /** Reads a case's run folder for the report; a failure is a setup error. */
   readonly readCase: (runFolder: string, compared: boolean) => CaseDetails;
@@ -81,11 +82,11 @@ function report(state: WorkflowStateValue, readCase: RunDependencies["readCase"]
 }
 
 async function start(command: Extract<Command, { kind: "start" }>, dependencies: RunDependencies): Promise<{ threadId: string; input: WorkflowStateValue }> {
-  const options = dependencies.resolveOptions(command);
+  const threadId = newThreadId(dependencies.now());
+  const options = dependencies.resolveOptions(command, threadId);
   requireCertificates(options, dependencies);
   const plan = dependencies.planCases(options);
   for (const name of plan.excluded) dependencies.log(`${name} is left out: none of the requested captures belongs to it.`);
-  const threadId = newThreadId(dependencies.now());
   const cache = options.canonicalCache === null ? "off (--live-canonical)" : `${options.canonicalCache} (${options.canonicalCacheSource})`;
   dependencies.log(`Thread ${threadId}: ${plan.cases.length} cases, canonical cache ${cache}.`);
   const input: WorkflowStateValue = {

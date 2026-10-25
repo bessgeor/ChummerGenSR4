@@ -69,12 +69,15 @@ function cacheFolder(args: Arguments, profile: Profile, env: Environment): Pick<
   return { canonicalCache: join(localDataFolder(env), "canonical-cache"), canonicalCacheSource: "default" };
 }
 
-/** Fills in defaults from the profile and the environment and makes every path absolute. */
-export function resolveRunOptions(args: Arguments, profile: Profile, env: Environment, repositoryRoot: string): RunOptions {
+/**
+ * Fills in defaults from the profile and the environment and makes every path absolute. Without --case-file the case file is
+ * `suiteCaseFile`, the thread's suite, or the fixture case file when that is null.
+ */
+export function resolveRunOptions(args: Arguments, profile: Profile, env: Environment, repositoryRoot: string, suiteCaseFile: string | null = null): RunOptions {
   const absolute = (path: string | null): string | null => (path === null ? null : resolve(repositoryRoot, path));
   const cache = cacheFolder(args, profile, env);
   return {
-    caseFile: resolve(repositoryRoot, args.caseFile ?? join("parity", "cases", "characters.json")),
+    caseFile: args.caseFile !== null ? resolve(repositoryRoot, args.caseFile) : suiteCaseFile ?? join(repositoryRoot, "parity", "cases", "characters.json"),
     cases: args.cases,
     captures: args.captures,
     settingsOverlay: absolute(args.settingsOverlay ?? profile.settingsOverlay ?? null),
