@@ -273,23 +273,34 @@ test("stopping a desktop command also stops the apps started from the run folder
   const root = lockFolder();
   const stopped: string[] = [];
   const output: string[] = [];
-  const host = new ProcessHostRunner(root, poolOf(new DesktopLane(laneSettings(join(root, "lane.lock")))), new CpuPool(1), (text) => output.push(text), spawn,
+  // Each command is stopped once its process has started, however long the lane and the start take on a busy machine.
+  let spawned = 0;
+  const counting = ((...args: Parameters<typeof spawn>) => {
+    const child = spawn(...args);
+    child.once("spawn", () => spawned++);
+    return child;
+  }) as unknown as typeof spawn;
+  const stopOnceStarted = async (controller: AbortController, count: number) => {
+    while (spawned < count) await new Promise((resolve) => setTimeout(resolve, 10));
+    controller.abort();
+  };
+  const host = new ProcessHostRunner(root, poolOf(new DesktopLane(laneSettings(join(root, "lane.lock")))), new CpuPool(1), (text) => output.push(text), counting,
     (folder) => stopped.push(folder));
   for (const resource of ["desktop", "cpu"] as const) {
     const controller = new AbortController();
     const running = host.run({ resource, label: resource, command: process.execPath, args: ["-e", "setTimeout(() => {}, 60000)"], signal: controller.signal });
-    setTimeout(() => controller.abort(), 200);
+    void stopOnceStarted(controller, spawned + 1);
     await rejects(running, SetupError);
   }
   deepStrictEqual(stopped, [join(root, "out", "runs")]);
 
-  const failing = new ProcessHostRunner(root, poolOf(new DesktopLane(laneSettings(join(root, "lane2.lock")))), new CpuPool(1), (text) => output.push(text), spawn,
+  const failing = new ProcessHostRunner(root, poolOf(new DesktopLane(laneSettings(join(root, "lane2.lock")))), new CpuPool(1), (text) => output.push(text), counting,
     () => {
       throw new Error("powershell is missing");
     });
   const controller = new AbortController();
   const running = failing.run({ resource: "desktop", label: "d", command: process.execPath, args: ["-e", "setTimeout(() => {}, 60000)"], signal: controller.signal });
-  setTimeout(() => controller.abort(), 200);
+  void stopOnceStarted(controller, spawned + 1);
   await rejects(running, SetupError);
   ok(output.some((line) => line.includes("could not be stopped: powershell is missing")), output.join(""));
 });
