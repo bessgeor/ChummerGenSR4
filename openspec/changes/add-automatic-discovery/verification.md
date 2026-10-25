@@ -9,13 +9,16 @@
 | `node --import tsx --test workflow/tests/discovery-graph.test.ts` | 20 tests, 20 passed (the discovery graph, run through the shared composition in `tests/discovery-harness.ts`). |
 | `node --import tsx --test workflow/tests/discovery-runner.test.ts` | 3 tests, 3 passed: start, resume and read of a finished thread by ID, one test for each. |
 | `npm run workflow:typecheck` | Passed. |
-| `npm run workflow:test`, run 1 | Failed: 481 tests, 480 passed, 1 failed: `stopping a desktop command also stops the apps started from the run folders, and a cpu command does not` (`workflow/tests/host.test.ts`). The failure output of this run was not kept, so only the test name and counts are recorded. |
+| `npm run workflow:test`, run 1 | Failed: 481 tests, 480 passed, 1 failed: `stopping a desktop command also stops the apps started from the run folders, and a cpu command does not` (`workflow/tests/host.test.ts`). The failure output of this run was not kept and the failure did not recur (see the reruns below), so only the test name and counts are recorded; this row is a failure without output. |
 | `node --import tsx --test workflow/tests/host.test.ts` | 20 tests, 20 passed, including the test that failed in run 1. |
 | `npm run workflow:test`, run 2 | 481 tests, 481 passed. |
 | `npm run workflow:test`, run 3 | 481 tests, 481 passed. |
 | `npm run workflow:test`, run 4 | 481 tests, 481 passed. |
 | `npm run workflow:test`, run 5 | Failed: 481 tests, 480 passed, 1 failed: `the files of an answered request that no workflow collects are removed after the retention` (`workflow/tests/lane-agent.test.ts:356`). Output: `failureType: 'testCodeFailure'`, `error: 'uncollected: failed: The lane agent was not running when this request was sent, or stopped while it ran it.'`, `code: 'ERR_ASSERTION'`, `expected: true`, `actual: false`, `operator: '=='`, duration 304 ms. |
 | `node --import tsx --test workflow/tests/lane-agent.test.ts` | 15 tests, 15 passed, including the test that failed in run 5. |
+| `host.test.ts` rerun, 15 times in a row | 15 of 15 passed. |
+| `host.test.ts` rerun, 20 times while three full `npm run workflow:test` runs ran at the same time | 20 of 20 passed. The three full runs, started together on the same worktree, each failed `a build still running at the deadline is stopped and rejects the attempt; a stopped run stays a setup error` (`workflow/tests/repair-service.test.ts:149`, `error: 'false == true'`, `expected: true`, `actual: false`, 235 s), and one also failed `a next attempt refused at the run budget keeps the rejection it followed`. These are load-induced timing failures of tests that measure wall-clock deadlines; they are not evidence about the discovery code. |
+| `npm run workflow:test`, four more runs, one at a time | 481 tests, 481 passed in each. |
 | `npm run openspec:validate` | Passed: 23 passed, 0 failed. |
 
 Runs 1 and 5 each failed one test of a different process-handling test file (`host.test.ts`, `lane-agent.test.ts`). This task touches neither file, and each of those tests passed alone and in the other full runs on the same code. The two failures are recorded as failures that this task does not address; their cause was not investigated.
