@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { resolveAgentSettings } from "../src/agents/agent-settings.js";
-import type { PlannedCase } from "../src/cases/case-plan.js";
+import { planCases, type PlannedCase } from "../src/cases/case-plan.js";
+import { fixtureCaseFile, startOptions, suiteFileName } from "../src/cases/suite.js";
+import { parseArguments } from "../src/options/arguments.js";
 import type { HostCommand, HostRunner } from "../src/host/host-runner.js";
 import { SetupError } from "../src/host/setup-error.js";
 import type { RunOptions } from "../src/options/run-options.js";
@@ -28,6 +30,12 @@ const options: RunOptions = {
   canonicalCacheSource: "option", noOcr: false, tessdata: null, only: null, recapture: false,
   diagnosis: false, agents: resolveAgentSettings(undefined), unattended: false, certificates: "certificates", repair: null, widening: false,
 };
+
+function parseStart(args: string[]) {
+  const command = parseArguments(args);
+  if (command.kind !== "start") throw new Error(`expected start, got ${command.kind}`);
+  return command.arguments;
+}
 
 function scratch(): string {
   return mkdtempSync(join(tmpdir(), "workflow-steps-"));
@@ -252,6 +260,24 @@ test("--recapture runs the step again and records the new run", async () => {
   ok(lines.some((line) => line.includes("--recapture")));
   const reused = await capture.run(context("run", "t3"), item);
   deepStrictEqual([reused.runFolder, reused.reusedFrom], [again.runFolder, "t2"]);
+});
+
+test("a capture recorded from the fixture case file is reused for the same case planned from a thread's suite", async () => {
+  const { root, host, capture, context } = setup();
+  mkdirSync(join(root, "parity", "fixtures", "characters"), { recursive: true });
+  writeFileSync(join(root, "parity", "fixtures", "characters", "Alpha.chum"), "fixture");
+  mkdirSync(join(root, "parity", "cases"), { recursive: true });
+  writeFileSync(fixtureCaseFile(root), JSON.stringify({
+    startupDelaySeconds: 3, settleMilliseconds: 300, sequences: {}, buildActions: [{ type: "capture", name: "common" }], careerActions: [],
+    characters: [{ path: "../fixtures/characters/Alpha.chum", mode: "build" }],
+  }));
+  const fixtureOptions = { ...options, caseFile: fixtureCaseFile(root) };
+  const first = await capture.run(context("run", "t1", fixtureOptions), planCases(fixtureOptions.caseFile, [], []).cases[0]!);
+
+  const suiteOptions = startOptions(parseStart([]), {}, { LOCALAPPDATA: root }, root, join(root, "threads", "t2"));
+  equal(suiteOptions.caseFile, join(root, "threads", "t2", suiteFileName));
+  const fromSuite = await capture.run(context("run", "t2", { ...options, caseFile: suiteOptions.caseFile }), planCases(suiteOptions.caseFile, [], []).cases[0]!);
+  deepStrictEqual([fromSuite.runFolder, fromSuite.reusedFrom, host.commands.length], [first.runFolder, "t1", 1]);
 });
 
 test("a capture step records the candidate's UI trees and keeps them with its outputs", async () => {
