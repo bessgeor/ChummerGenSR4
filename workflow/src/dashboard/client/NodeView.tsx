@@ -3,7 +3,14 @@ import { useEffect, useState } from "react";
 import { markRunning } from "../drawing.js";
 import type { GraphDrawings, GraphKind, TaskView } from "../snapshot.js";
 
-mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "default" });
+const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+// The stage boxes take the page's accent; the nodes keep LangGraph's own styles. Drawings keep their natural size and scroll.
+mermaid.initialize({
+  startOnLoad: false, securityLevel: "strict", theme: "base", flowchart: { useMaxWidth: false },
+  themeVariables: dark
+    ? { darkMode: true, background: "#1b2227", clusterBkg: "#16343a", clusterBorder: "#4fb8c4", lineColor: "#9aa6b0", primaryTextColor: "#1d2329", titleColor: "#e4e9ed", edgeLabelBackground: "#1b2227" }
+    : { clusterBkg: "#e2f1f2", clusterBorder: "#0f6e7a", lineColor: "#5d6873", titleColor: "#1d2329" },
+});
 
 let renders = 0;
 

@@ -91,5 +91,6 @@ select{font:inherit;background:var(--surface);color:var(--fg);border:1px solid v
 .nodes code{background:var(--bg);border-radius:4px;padding:1px 5px}
 .drawing{background:var(--surface);border:1px solid var(--rule);border-radius:10px;padding:10px;overflow-x:auto;display:grid;gap:8px}
 .drawing svg{max-width:none}
+.grid.wide{grid-template-columns:1fr}
 .error{color:var(--warn)}
 `;

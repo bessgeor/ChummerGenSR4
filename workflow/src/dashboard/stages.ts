@@ -48,3 +48,31 @@ export function stageMembers(stage: StageId): string[] {
 export function isRoutingNode(node: string): boolean {
   return /^(route|prepare|finish)_/.test(node) || node === "route_cases";
 }
+
+/** Matches a node's declaration in LangGraph's Mermaid drawing: a tab, the node's ID, then its shape. */
+const declaration = /^\t([A-Za-z0-9_]+)[([]/;
+
+/**
+ * Groups LangGraph's Mermaid drawing of a graph into one subgraph per stage, in the order of the loop, so the
+ * drawing follows the loop's stages. Only the node declarations move; LangGraph's nodes, edges and styles stay as drawn.
+ */
+export function groupByStage(graph: GraphKind, drawing: string): string {
+  const lines = drawing.split("\n");
+  const firstDeclaration = lines.findIndex((line) => declaration.test(line));
+  if (firstDeclaration < 0) return drawing;
+  const grouped = new Map<StageId, string[]>();
+  const rest: string[] = [];
+  const kept: string[] = [];
+  for (const [index, line] of lines.entries()) {
+    const node = index >= firstDeclaration ? declaration.exec(line)?.[1] : undefined;
+    const stage = node === undefined ? null : nodeStage(graph, node);
+    if (node !== undefined && stage !== null) grouped.set(stage, [...(grouped.get(stage) ?? []), line]);
+    else if (node !== undefined) rest.push(line);
+    else if (index >= firstDeclaration) kept.push(line);
+  }
+  const subgraphs = (Object.keys(stageTitles) as StageId[]).flatMap((stage) => {
+    const members = grouped.get(stage);
+    return members === undefined ? [] : [`\tsubgraph stage_${stage}["${stageTitles[stage]}"]`, ...members.map((line) => `\t${line}`), "\tend"];
+  });
+  return [...lines.slice(0, firstDeclaration), ...rest, ...subgraphs, ...kept].join("\n");
+}

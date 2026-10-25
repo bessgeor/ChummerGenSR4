@@ -157,7 +157,7 @@ export function App() {
         <button type="button" role="tab" id="tab-stages" aria-selected={tab === "stages"} onClick={() => setTab("stages")}>Stages</button>
         <button type="button" role="tab" id="tab-nodes" aria-selected={tab === "nodes"} onClick={() => setTab("nodes")}>LangGraph nodes</button>
       </div>
-      <div className="grid">
+      <div className={tab === "stages" ? "grid" : "grid wide"}>
         {tab === "stages"
           ? <div className="fig"><LoopGraph stages={snapshot.stages} selected={stage} onSelect={setStage} /></div>
           : <NodeView drawings={drawings} tasks={snapshot.tasks} />}

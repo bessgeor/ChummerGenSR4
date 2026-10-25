@@ -16,7 +16,7 @@ import { graphSources } from "../src/dashboard/graph-sources.js";
 import { GraphReader, sendSubject, type GraphSource } from "../src/dashboard/graphs.js";
 import { loopFiles, type LoopControl, type LoopDocument, type LoopState } from "../src/dashboard/loop-documents.js";
 import { p80, stageStats, type StatsInput } from "../src/dashboard/stage-stats.js";
-import { frameNodes, nodeStage } from "../src/dashboard/stages.js";
+import { frameNodes, groupByStage, nodeStage } from "../src/dashboard/stages.js";
 import { scratch } from "./diagnosis-fixtures.js";
 import { record } from "./eval-fixtures.js";
 
@@ -295,4 +295,14 @@ test("the React client bundles", async () => {
   const bundle = await bundleClient();
   ok(bundle.length > 1000);
   match(bundle, /api\/snapshot/);
+});
+
+test("LangGraph's drawing is grouped by stage, keeping its nodes, edges and styles", () => {
+  const drawing = "%%{init: {}}%%\ngraph TD;\n\t__start__([<p>__start__</p>]):::first\n\tbuild(build)\n\tcapture(capture)\n\tmystery(mystery)\n\t__start__ --> build;\n\tbuild -.-> capture;\n\tclassDef default fill:#f2f0ff;";
+  equal(groupByStage("workflow", drawing), [
+    "%%{init: {}}%%", "graph TD;", "\t__start__([<p>__start__</p>]):::first", "\tmystery(mystery)",
+    "\tsubgraph stage_start[\"Start thread\"]", "\t\tbuild(build)", "\tend",
+    "\tsubgraph stage_capture[\"Capture and compare\"]", "\t\tcapture(capture)", "\tend",
+    "\t__start__ --> build;", "\tbuild -.-> capture;", "\tclassDef default fill:#f2f0ff;",
+  ].join("\n"));
 });

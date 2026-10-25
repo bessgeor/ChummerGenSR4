@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import Database from "better-sqlite3";
 import type { StateSnapshot } from "@langchain/langgraph";
 import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
-import { nodeStage } from "./stages.js";
+import { groupByStage, nodeStage } from "./stages.js";
 import type { GraphKind, TaskView } from "./snapshot.js";
 
 /** What the dashboard needs of a compiled graph: its drawing and a thread's state. It never invokes one. */
@@ -49,9 +49,9 @@ export class GraphReader {
     this.graph = source.compile(this.saver);
   }
 
-  /** LangGraph's own drawing of the compiled graph. */
+  /** LangGraph's own drawing of the compiled graph, its nodes grouped by stage. */
   async drawing(): Promise<string> {
-    return (await this.graph.getGraphAsync()).drawMermaid();
+    return groupByStage(this.source.kind, (await this.graph.getGraphAsync()).drawMermaid());
   }
 
   /** The node names of the compiled graph, without LangGraph's start and end. */
