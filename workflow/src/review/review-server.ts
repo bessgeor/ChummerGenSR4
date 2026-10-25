@@ -8,7 +8,7 @@ import { isGradable } from "../evals/hindsight.js";
 import { challengedHypothesis, contextExists, missingHypothesisMessage, recordContext } from "../evals/record-context.js";
 import { reviewQueue } from "../evals/review-queue.js";
 import { clusterCheck } from "./cluster-check.js";
-import { HttpError } from "./http-error.js";
+import { HttpError, requireOwnOrigin } from "./http-error.js";
 import type { ReviewDependencies } from "./review-dependencies.js";
 import { escapeHtml, queuePage, recordLink, recordPage } from "./review-pages.js";
 
@@ -45,18 +45,6 @@ async function reviewable(store: BaseStore, recordId: string | null): Promise<{ 
   const record = all.find((item) => item.recordId === recordId);
   if (record === undefined || !isGradable(record)) throw new HttpError(404, `No reviewable record ${recordId ?? ""}.`);
   return { record, all };
-}
-
-/**
- * A request is accepted only when it names this server by its loopback address (a page that rebinds another name to it does not),
- * and, when the browser says where the request comes from, only from a page of this server.
- */
-function requireOwnOrigin(request: IncomingMessage): void {
-  const port = request.socket.localPort;
-  const own = [`127.0.0.1:${port}`, `localhost:${port}`];
-  if (!own.includes(request.headers.host ?? "")) throw new HttpError(403, "The request does not address this server by its loopback address.");
-  const origin = request.headers.origin;
-  if (origin !== undefined && !own.some((host) => origin === `http://${host}`)) throw new HttpError(403, "The request comes from another page.");
 }
 
 /** Whether the record page can show a record: its context is on disk, and a challenge names a hypothesis. The flow to the next record skips the others. */
