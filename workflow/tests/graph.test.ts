@@ -1,15 +1,16 @@
 import { deepStrictEqual, equal, ok, rejects } from "node:assert/strict";
 import { test } from "node:test";
-import { InMemoryStore, MemorySaver } from "@langchain/langgraph";
+import { InMemoryStore, MemorySaver, type StateSnapshot } from "@langchain/langgraph";
 import { resolveAgentSettings } from "../src/agents/agent-settings.js";
 import type { PlannedCase } from "../src/cases/case-plan.js";
+import { buildFlatGraph } from "./flat-graph.js";
 import { buildLegacyCaseGraph } from "./legacy-case-graph.js";
-import { buildWorkflowGraph, nodeMode, type DiagnosisSteps, type InventoryInput, type LoopSteps, type RepairSteps, type WideningSteps, type WorkflowSteps } from "../src/graph/workflow-graph.js";
+import { buildWorkflowGraph, nodeMode, stageIds, type DiagnosisSteps, type InventoryInput, type LoopSteps, type RepairSteps, type WideningSteps, type WorkflowSteps } from "../src/graph/workflow-graph.js";
 import { inventoryLines, type InventorySummary } from "../src/inventory/inventory-service.js";
 import type { WorkflowStateValue } from "../src/graph/workflow-state.js";
 import type { Conclusion, ConcludeInput } from "../src/loop/loop-service.js";
 import type { OutcomeDocument } from "../src/loop/outcome.js";
-import { exitStatus, runWorkflow, threadConfig, type RunDependencies } from "../src/graph/run-workflow.js";
+import { exitStatus, runWorkflow, type RunDependencies } from "../src/graph/run-workflow.js";
 import { SetupError } from "../src/host/setup-error.js";
 import type { Arguments, NodeName } from "../src/options/arguments.js";
 import type { RunOptions } from "../src/options/run-options.js";
@@ -466,7 +467,7 @@ test("a thread stored in the older checkpoint format before triage is refused, w
   }
 });
 
-test("a thread stored in the older checkpoint format after triage resumes where it stopped", async () => {
+test("a thread stored in the older checkpoint format after triage is refused as well", async () => {
   const names = ["a", "b"];
   const steps = new FakeSteps();
   steps.failInventory = true;
@@ -474,23 +475,93 @@ test("a thread stored in the older checkpoint format after triage resumes where 
   await storeOlder(run, names);
   steps.failInventory = false;
   steps.calls.length = 0;
-  equal(await runWorkflow({ kind: "resume", threadId: storedBefore.threadId }, run.dependencies), 0, run.lines.join("\n"));
-  deepStrictEqual(steps.calls, ["inventory src a,b"]);
+  equal(await runWorkflow({ kind: "resume", threadId: storedBefore.threadId }, run.dependencies), 3, run.lines.join("\n"));
+  ok(run.lines.some((line) => line.includes("cannot be resumed")), run.lines.join("\n"));
+  deepStrictEqual(steps.calls, []);
 });
 
-test("without the refusal, the sends stored with the older checkpoint format run beside the router and repeat cases", async () => {
-  const steps = new FakeSteps();
-  steps.failCompare = "a";
-  const names = ["a", "b", "c", "d"];
-  const run = harness(names, steps);
-  await storeOlder(run, names);
-  steps.failCompare = null;
-  steps.calls.length = 0;
-  // The graph is invoked directly, so the refusal of `runWorkflow` does not apply.
-  await run.dependencies.graph.invoke(null, threadConfig(storedBefore.threadId, undefined));
-  const repeated = (verb: string) => {
-    const done = steps.calls.filter((call) => call.startsWith(verb));
-    return done.length - new Set(done).size;
+test("the drawing with xray shows every stage with its inner nodes", async () => {
+  const { graph } = harness(["a"]).dependencies;
+  const stages = Object.keys((await graph.getGraphAsync()).nodes).filter((id) => !id.startsWith("__"));
+  deepStrictEqual(stages, [...stageIds]);
+  const inner = {
+    start: ["build"],
+    capture: ["route_cases", "capture", "compare", "triage", "inventory"],
+    diagnose: ["prepare_diagnosis", "route_diagnosis", "hypothesize", "challenge", "wait_for_quota", "check", "finish_diagnosis"],
+    repair: ["prepare_repair", "route_repair", "repair", "wait_for_repair_quota", "finish_repair", "retry_repair"],
+    widen: ["prepare_widening", "route_widening", "widen", "promote", "roll_back", "finish_widening", "retry_repair"],
+    conclude: ["conclude"],
   };
-  ok(repeated("capture") + repeated("compare") > 0, steps.calls.join(", "));
+  const subgraphs: Record<string, string[]> = {};
+  for await (const [stage, subgraph] of graph.getSubgraphsAsync()) subgraphs[stage] = Object.keys(subgraph.nodes).filter((node) => !node.startsWith("__"));
+  deepStrictEqual(subgraphs, inner);
+  // LangGraph draws a stage of one node as that node under the stage's ID, and every other stage as its inner nodes.
+  const drawn: Record<string, string[]> = {};
+  for (const id of Object.keys((await graph.getGraphAsync({ xray: true })).nodes)) {
+    const [stage, node] = id.split(":");
+    if (stage!.startsWith("__") || node?.startsWith("__") === true) continue;
+    (drawn[stage!] ??= []).push(node ?? stage!);
+  }
+  deepStrictEqual(drawn, { ...inner, start: ["start"], conclude: ["conclude"] });
+});
+
+test("during a capture the state read with subgraphs shows the case's pending capture in the capture stage's namespace", async () => {
+  const steps = new FakeSteps();
+  let release = () => {};
+  const released = new Promise<void>((resolve) => { release = resolve; });
+  let started = () => {};
+  const capturing = new Promise<void>((resolve) => { started = resolve; });
+  const capture = steps.capture.bind(steps);
+  steps.capture = async (context, item) => {
+    if (item.name === "a") {
+      started();
+      await released;
+    }
+    return capture(context, item);
+  };
+  const run = harness(["a", "b", "c"], steps);
+  const finished = run.startRun();
+  await capturing;
+  const snapshot = await run.dependencies.graph.getState({ configurable: { thread_id: run.threadId() } }, { subgraphs: true });
+  deepStrictEqual(snapshot.next, ["capture"]);
+  const stage = snapshot.tasks[0]!.state as StateSnapshot;
+  const namespace = String(stage.config.configurable?.["checkpoint_ns"]);
+  ok(namespace.startsWith("capture:"), namespace);
+  deepStrictEqual(stage.tasks.map((task) => task.name), ["capture"]);
+  const stored = await run.checkpointer.getTuple(stage.config);
+  const sends = stored!.checkpoint.channel_values["__pregel_tasks"] as { node: string; args: { index: number } }[];
+  deepStrictEqual(sends.map((send) => [send.node, send.args.index]), [["capture", 0]]);
+  release();
+  equal(await finished, 0);
+});
+
+const { lastCaptured: _older, ...flatInput } = storedBefore;
+
+test("a thread checkpointed by the flat graph is refused wherever it stopped, and nothing runs", async () => {
+  const names = ["a", "b", "c"];
+  const stops: ((steps: FakeSteps) => void)[] = [
+    (steps) => {
+      steps.onBuild = () => Promise.reject(new SetupError("build exited with 3"));
+    },
+    (steps) => { steps.failCapture = "b"; },
+    (steps) => { steps.failInventory = true; },
+  ];
+  for (const stop of stops) {
+    const steps = new FakeSteps();
+    stop(steps);
+    const run = harness(names, steps);
+    const flat = buildFlatGraph(steps).compile({ checkpointer: run.checkpointer });
+    await rejects(flat.invoke({
+      ...flatInput, threadId: "wf-flat", options: run.dependencies.resolveOptions({ kind: "start", arguments: baseArguments }, "wf-flat"), plan: names.map(plannedCase),
+    }, { configurable: { thread_id: "wf-flat" } }), SetupError);
+    steps.onBuild = null;
+    steps.failCapture = null;
+    steps.failInventory = false;
+    steps.calls.length = 0;
+    equal(await runWorkflow({ kind: "resume", threadId: "wf-flat" }, run.dependencies), 3);
+    ok(run.lines.includes("Setup error: Thread wf-flat was checkpointed before the workflow graph had stages, so it cannot be resumed. "
+      + "Start a new run with the same options: it reuses the capture and compare steps the thread recorded."), run.lines.join("\n"));
+    deepStrictEqual(steps.calls, []);
+    deepStrictEqual(steps.buildCandidate.length, 1);
+  }
 });

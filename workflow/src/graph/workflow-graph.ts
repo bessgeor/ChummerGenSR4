@@ -1,22 +1,29 @@
 import type { BaseStore } from "@langchain/langgraph-checkpoint";
-import { END, Send, START, StateGraph, type LangGraphRunnableConfig } from "@langchain/langgraph";
+import { END, START, StateGraph, type LangGraphRunnableConfig } from "@langchain/langgraph";
 import type { PlannedCase } from "../cases/case-plan.js";
-import { nextDiagnosisRoute, type ClusterDiagnosis, type QuotaWaitMark } from "../diagnosis/cluster-diagnosis.js";
+import type { ClusterDiagnosis, QuotaWaitMark } from "../diagnosis/cluster-diagnosis.js";
 import type { CheckResult } from "../diagnosis/check.js";
 import type { CheckInput, JobInput, JobStep, PrepareInput } from "../diagnosis/diagnosis-service.js";
 import { SetupError } from "../host/setup-error.js";
 import type { InventorySummary } from "../inventory/inventory-service.js";
-import type { NodeName } from "../options/arguments.js";
-import { usesFixChanges, type RunOptions } from "../options/run-options.js";
+import type { RunOptions } from "../options/run-options.js";
 import { nextRepairRoute, type ClusterRepair } from "../repair/cluster-repair.js";
 import type { RepairInput, RepairStep } from "../repair/repair-service.js";
 import type { Conclusion, ConcludeInput } from "../loop/loop-service.js";
-import { nextAttempts, retryLimits, retryPlan } from "../loop/retry.js";
 import type { InputFingerprints } from "../steps/input-fingerprints.js";
-import type { StepContext, StepMode, StepOutcome } from "../steps/step-outcome.js";
-import { nextWideningRoute, type AcceptedState, type ClusterWidening } from "../widening/cluster-widening.js";
+import type { StepContext, StepOutcome } from "../steps/step-outcome.js";
+import type { AcceptedState, ClusterWidening } from "../widening/cluster-widening.js";
 import type { WideningInput, WideningPrepareInput, WideningStep } from "../widening/widening-service.js";
-import { WorkflowState, type CaseTask, type ClusterTask, type TriageSummary, type WorkflowStateValue } from "./workflow-state.js";
+import { buildCaptureStage } from "./stages/capture-stage.js";
+import { buildConcludeStage } from "./stages/conclude-stage.js";
+import { buildDiagnoseStage } from "./stages/diagnose-stage.js";
+import { buildRepairStage } from "./stages/repair-stage.js";
+import { nodeMode, repairs, widens } from "./stages/stage-support.js";
+import { buildStartStage } from "./stages/start-stage.js";
+import { buildWidenStage } from "./stages/widen-stage.js";
+import { ThreadState, type TriageSummary, type WorkflowStateValue } from "./workflow-state.js";
+
+export { nodeMode, repairs, widens } from "./stages/stage-support.js";
 
 export type TriageInput = {
   readonly threadId: string;
@@ -83,266 +90,61 @@ export interface LoopSteps {
   conclude(input: ConcludeInput): Conclusion;
 }
 
-const order: readonly NodeName[] = ["capture", "compare", "triage", "diagnose"];
+/** The nodes of the workflow graph, one per stage, in the order a thread reaches them; they never change. */
+export const stageIds = ["start", "capture", "diagnose", "repair", "widen", "conclude"] as const;
 
-/** Whether a thread repairs its confirmed clusters: repair is on and no single node was asked for. */
-export function repairs(options: RunOptions): boolean {
-  return options.repair !== null && options.only === null;
-}
-
-/** Whether a thread widens its passed repair attempts; a thread whose stored options lack the field was started without widening. */
-export function widens(options: RunOptions): boolean {
-  return repairs(options) && options.widening === true;
-}
-
-/** Whether a node runs its steps, only reuses recorded ones (it comes before `--only`), or is skipped. */
-export function nodeMode(node: NodeName, only: NodeName | null): StepMode | "skip" {
-  if (only === null || only === node) return "run";
-  return order.indexOf(node) < order.indexOf(only) ? "reuse-only" : "skip";
-}
-
-function context(state: WorkflowStateValue, node: NodeName, signal: AbortSignal | undefined): StepContext {
-  const mode = nodeMode(node, state.options.only);
-  if (mode === "skip" || state.fingerprints === null) {
-    throw new Error(`The ${node} node ran without its inputs (mode ${mode}).`);
-  }
-  return { threadId: state.threadId, options: state.options, fingerprints: state.fingerprints, mode, ...(signal === undefined ? {} : { signal }) };
-}
-
-function caseAt(state: CaseTask): PlannedCase {
-  const item = state.plan[state.index];
-  if (item === undefined) throw new Error(`No planned case at index ${state.index}.`);
-  return item;
-}
-
-function requireStore(config: LangGraphRunnableConfig): BaseStore {
-  if (config.store === undefined) throw new Error("The graph was compiled without a store.");
-  return config.store;
-}
-
-function jobInput(state: ClusterTask, config: LangGraphRunnableConfig): JobInput {
-  const cluster = state.clusters[state.clusterId];
-  if (cluster === undefined) throw new Error(`No diagnosis for cluster ${state.clusterId}.`);
-  return {
-    threadId: state.threadId, options: state.options, cluster, spentMs: state.agentMilliseconds,
-    ...(config.signal === undefined ? {} : { signal: config.signal }),
-  };
-}
-
-function applyJob(step: JobStep) {
-  return { clusters: { [step.update.clusterId]: step.update }, agentMilliseconds: step.chargedMs };
-}
-
-function wideningInput(state: ClusterTask, config: LangGraphRunnableConfig): WideningInput {
-  const widening = state.widenings[state.clusterId];
-  if (widening === undefined || state.accepted === null || state.fingerprints === null) throw new Error(`No widening of cluster ${state.clusterId}.`);
-  return {
-    threadId: state.threadId, options: state.options, fingerprints: state.fingerprints, widening, accepted: state.accepted,
-    ...(config.signal === undefined ? {} : { signal: config.signal }),
-  };
-}
-
-function applyWidening(step: WideningStep) {
-  return { widenings: { [step.update.clusterId]: step.update }, ...(step.accepted === null ? {} : { accepted: step.accepted }) };
-}
+export type StageId = (typeof stageIds)[number];
 
 /**
- * After the build and after each step of captures and compares: a compare for every captured case not yet compared
- * (unless compare is skipped) and a capture for each of the next uncaptured cases, one per lane; triage once every
- * case is compared, or nothing when triage is skipped and nothing is left.
+ * Compiles a stage without a checkpointer of its own, so it uses the workflow graph's. LangGraph gives a stage's run
+ * an unset `checkpoint_id` in its configuration, and a run whose configuration has that key does not apply the
+ * stored writes of the tasks that finished beside a failed one: a resumed stage would repeat them. The stage's run
+ * gets its configuration without the unset key, as the workflow graph's own run does.
  */
-function caseRoute(state: WorkflowStateValue, lanes: number): Send[] | "triage" {
-  const comparing = nodeMode("compare", state.options.only) !== "skip";
-  const sends: Send[] = [];
-  let capturing = 0;
-  state.plan.forEach((item, index) => {
-    if (state.captures[item.name] === undefined) {
-      if (capturing < lanes) sends.push(new Send("capture", { ...state, index }));
-      capturing++;
-    } else if (comparing && state.compares[item.name] === undefined) {
-      sends.push(new Send("compare", { ...state, index }));
-    }
-  });
-  if (sends.length > 0) return sends;
-  return comparing && nodeMode("triage", state.options.only) !== "skip" ? "triage" : [];
-}
-
-/** After the last widening (or repair, when widening is off): the next attempts when a cluster may have one, else the conclusion. */
-function loopRoute(state: WorkflowStateValue): "retry_repair" | "conclude" {
-  const plan = retryPlan(state.repairs, state.widenings, retryLimits(state.options, state.agentMilliseconds));
-  return plan.retry.length > 0 ? "retry_repair" : "conclude";
-}
-
-function repairInput(state: ClusterTask, config: LangGraphRunnableConfig): RepairInput {
-  const repair = state.repairs[state.clusterId];
-  const cluster = state.clusters[state.clusterId];
-  if (repair === undefined || cluster === undefined || state.diagnosisCheck === null) throw new Error(`No confirmed diagnosis to repair for cluster ${state.clusterId}.`);
-  return {
-    threadId: state.threadId, options: state.options, repair, diagnosis: cluster, check: state.diagnosisCheck, spentMs: state.agentMilliseconds,
-    ...(config.signal === undefined ? {} : { signal: config.signal }),
+function compileStage<G extends { compile(): { invoke(input: never, config?: LangGraphRunnableConfig): Promise<unknown> } }>(stage: G): ReturnType<G["compile"]> {
+  const graph = stage.compile() as ReturnType<G["compile"]>;
+  const invoke = graph.invoke.bind(graph);
+  graph.invoke = (input: never, config?: LangGraphRunnableConfig) => {
+    const configurable = config?.configurable;
+    if (configurable === undefined || !("checkpoint_id" in configurable) || configurable["checkpoint_id"] !== undefined) return invoke(input, config);
+    const { checkpoint_id: _unset, ...rest } = configurable;
+    return invoke(input, { ...config, configurable: rest });
   };
+  return graph;
+}
+
+/** After `repair` (without widening) or `widen`: `repair` again when a cluster is pending a next attempt, else the conclusion. */
+function nextAttemptRoute(state: WorkflowStateValue): "repair" | "conclude" {
+  return nextRepairRoute(state.repairs).kind === "end" ? "conclude" : "repair";
 }
 
 /**
- * build → capture(cases k…k+n-1) → compare(cases k…k+n-1) ∥ capture(cases k+n…k+2n-1) → … → triage → inventory → diagnosis,
- * with n the number of desktop lanes. `route_cases` sends each case to its node, so the compares of one step and the
- * captures of the next run in the same super-step and each is checkpointed. Diagnosis seals a
- * context per cluster, then `route_diagnosis` sends one job per cluster (hypotheses, then challenges) and waits
- * for quota when a job hit a usage limit; each job is one task, so a resumed thread repeats only unfinished jobs.
- * Repair then sends one attempt per confirmed cluster the same way, and waits for quota the same way. Widening
- * then takes the passed attempts one at a time: `route_widening` sends the first unfinished one to its next step
- * (the widened candidate or one level, the promotion or the rollback), so every step is checkpointed on its own. After
- * that, a cluster whose attempt was rejected and may have another goes back to `route_repair` through `retry_repair`, and
- * its passed next attempt is widened on the source accepted so far; when none may, `conclude` ends the thread with its outcome.
+ * start → capture → diagnose → repair → widen → conclude, each stage a subgraph of its own nodes (see the stage
+ * builders) that shares the thread's state, with its fan-outs and their checkpoints in the stage's namespace. The
+ * edges between the stages skip the stages a thread's options leave out: a thread that did not triage ends after
+ * `capture`, one without diagnosis concludes after it, one without repair after `diagnose`. A cluster whose attempt
+ * was rejected and may have another is pending again after `widen` (or `repair`, when widening is off), and goes back
+ * to `repair`; its passed next attempt is widened on the source accepted so far.
  */
 export function buildWorkflowGraph(steps: WorkflowSteps, diagnosis: DiagnosisSteps, repair: RepairSteps, widening: WideningSteps, loop: LoopSteps) {
-  return new StateGraph(WorkflowState)
-    .addNode("build", async (state: WorkflowStateValue, config: LangGraphRunnableConfig) => {
-      const only = state.options.only;
-      return { fingerprints: await steps.build(state.options, only === null || only === "capture", config.signal) };
-    })
-    .addNode("capture", async (state: CaseTask, config: LangGraphRunnableConfig) => {
-      const outcome = await steps.capture(context(state, "capture", config.signal), caseAt(state));
-      return { captures: { [outcome.case]: outcome } };
-    })
-    .addNode("compare", async (state: CaseTask, config: LangGraphRunnableConfig) => {
-      const item = caseAt(state);
-      const captured = state.captures[item.name];
-      if (captured === undefined) throw new Error(`compare ${item.name} ran before its capture.`);
-      const outcome = await steps.compare(context(state, "compare", config.signal), captured);
-      return { compares: { [outcome.case]: outcome } };
-    })
-    .addNode("route_cases", () => ({}))
-    .addNode("triage", async (state: WorkflowStateValue, config: LangGraphRunnableConfig) => {
-      const summary = await steps.triage({ threadId: state.threadId, plan: state.plan, captures: state.captures, compares: state.compares }, requireStore(config));
-      return { triageSummary: summary };
-    })
-    .addNode("inventory", async (state: WorkflowStateValue) => {
-      // A thread stored before the inventory existed has no such field, and its capture runs recorded no UI trees.
-      const recorded: InventorySummary | null | undefined = state.inventorySummary;
-      if (recorded === undefined) return {};
-      if (state.fingerprints === null) throw new Error("The inventory ran without the thread's inputs.");
-      const summary = await steps.inventory({ threadId: state.threadId, plan: state.plan, captures: state.captures, candidateSource: state.fingerprints.candidateSource });
-      return { inventorySummary: summary };
-    })
-    .addNode("prepare_diagnosis", async (state: WorkflowStateValue) => {
-      if (state.triageSummary === null || state.fingerprints === null) throw new Error("Diagnosis ran before triage.");
-      const clusters = await diagnosis.prepare({
-        threadId: state.threadId, triagePath: state.triageSummary.path, caseFile: state.options.caseFile, candidate: state.fingerprints.candidate, candidateSource: state.fingerprints.candidateSource,
-        fixChanges: usesFixChanges(state.options),
-      });
-      return { clusters };
-    })
-    .addNode("route_diagnosis", () => ({}))
-    .addNode("hypothesize", async (state: ClusterTask, config: LangGraphRunnableConfig) =>
-      applyJob(await diagnosis.hypothesize(jobInput(state, config), requireStore(config))))
-    .addNode("challenge", async (state: ClusterTask, config: LangGraphRunnableConfig) =>
-      applyJob(await diagnosis.challenge(jobInput(state, config), requireStore(config))))
-    .addNode("wait_for_quota", async (state: WorkflowStateValue, config: LangGraphRunnableConfig) => {
-      const waiting = Object.values(state.clusters).filter((cluster) => cluster.waiting !== null);
-      await diagnosis.waitForQuota(waiting.map((cluster) => cluster.waiting!), config.signal);
-      return { clusters: Object.fromEntries(waiting.map((cluster) => [cluster.clusterId, { clusterId: cluster.clusterId, waiting: null }])) };
-    })
-    .addNode("check", async (state: WorkflowStateValue, config: LangGraphRunnableConfig) => ({
-      diagnosisCheck: await diagnosis.check({ options: state.options, clusters: state.clusters, ...(config.signal === undefined ? {} : { signal: config.signal }) }, requireStore(config)),
-    }))
-    .addNode("finish_diagnosis", (state: WorkflowStateValue) => ({ diagnosisPath: diagnosis.finish(state.threadId, state.clusters, state.diagnosisCheck) }))
-    .addNode("prepare_repair", (state: WorkflowStateValue) => ({ repairs: repair.prepare(state.clusters, state.diagnosisCheck) }))
-    .addNode("route_repair", () => ({}))
-    .addNode("repair", async (state: ClusterTask, config: LangGraphRunnableConfig) => {
-      const step = await repair.repair(repairInput(state, config), requireStore(config));
-      return { repairs: { [step.update.clusterId]: step.update }, agentMilliseconds: step.chargedMs };
-    })
-    .addNode("wait_for_repair_quota", async (state: WorkflowStateValue, config: LangGraphRunnableConfig) => {
-      const waiting = Object.values(state.repairs).filter((item) => item.waiting !== null);
-      await repair.waitForQuota(waiting.map((item) => item.waiting!), config.signal);
-      return { repairs: Object.fromEntries(waiting.map((item) => [item.clusterId, { clusterId: item.clusterId, waiting: null }])) };
-    })
-    .addNode("finish_repair", (state: WorkflowStateValue) => ({ repairPath: repair.finish(state.threadId, state.repairs) }))
-    .addNode("prepare_widening", (state: WorkflowStateValue) => {
-      if (state.triageSummary === null) throw new Error("Widening ran before triage.");
-      const captured = state.plan.flatMap((item) => (state.captures[item.name] === undefined ? [] : [state.captures[item.name]!]));
-      const check = state.diagnosisCheck;
-      return widening.prepare({
-        threadId: state.threadId, repairs: state.repairs, clusters: state.clusters, triagePath: state.triageSummary.path, widenings: state.widenings, accepted: state.accepted ?? null,
-        candidateRuns: [
-          ...captured.map((outcome) => ({ runFolder: outcome.runFolder, status: outcome.status })),
-          ...(check === null ? [] : [{ runFolder: check.runFolder, status: check.execution.status }]),
-        ],
-      });
-    })
-    .addNode("route_widening", () => ({}))
-    .addNode("widen", async (state: ClusterTask, config: LangGraphRunnableConfig) => applyWidening(await widening.widen(wideningInput(state, config))))
-    .addNode("promote", async (state: ClusterTask, config: LangGraphRunnableConfig) =>
-      applyWidening(await widening.promote(wideningInput(state, config), requireStore(config))))
-    .addNode("roll_back", async (state: ClusterTask, config: LangGraphRunnableConfig) =>
-      applyWidening(await widening.rollBack(wideningInput(state, config), requireStore(config))))
-    .addNode("finish_widening", (state: WorkflowStateValue) => ({ wideningPath: widening.finish(state.threadId, state.widenings, state.accepted, state.earlierWidenings ?? []) }))
-    .addNode("retry_repair", (state: WorkflowStateValue) => {
-      const plan = retryPlan(state.repairs, state.widenings, retryLimits(state.options, state.agentMilliseconds));
-      return nextAttempts(plan.retry, state.repairs, state.widenings);
-    })
-    .addNode("conclude", (state: WorkflowStateValue) => {
-      if (state.triageSummary === null) throw new Error("The thread concluded before triage.");
-      const { document, path } = loop.conclude({
-        threadId: state.threadId, options: state.options, plan: state.plan, captures: state.captures, compares: state.compares,
-        triagePath: state.triageSummary.path, otherFindings: state.triageSummary.otherFindings, clusters: state.clusters ?? {}, check: state.diagnosisCheck ?? null,
-        repairs: state.repairs ?? {}, widenings: state.widenings ?? {}, accepted: state.accepted ?? null, agentMilliseconds: state.agentMilliseconds ?? 0,
-        startedUtc: state.startedUtc ?? null,
-      });
-      return { outcome: document, outcomePath: path };
-    })
-    .addEdge(START, "build")
-    .addConditionalEdges("build", (state: WorkflowStateValue) => {
+  return new StateGraph(ThreadState)
+    .addNode("start", compileStage(buildStartStage(steps)))
+    .addNode("capture", compileStage(buildCaptureStage(steps)))
+    .addNode("diagnose", compileStage(buildDiagnoseStage(diagnosis)))
+    .addNode("repair", compileStage(buildRepairStage(repair)))
+    .addNode("widen", compileStage(buildWidenStage(widening)))
+    .addNode("conclude", compileStage(buildConcludeStage(loop)))
+    .addEdge(START, "start")
+    .addConditionalEdges("start", (state: WorkflowStateValue) => {
       if (state.plan.length === 0) throw new SetupError("No case is planned, so nothing can be captured.");
-      return "route_cases";
-    }, ["route_cases"])
-    // Plain edges: the router runs once after every capture and compare of the step finished, and sees all their writes.
-    .addEdge("capture", "route_cases")
-    .addEdge("compare", "route_cases")
-    .addConditionalEdges("route_cases", (state: WorkflowStateValue) => caseRoute(state, steps.captureLanes), ["capture", "compare", "triage"])
-    // The inventory reads the same capture runs as triage, so it runs whenever triage does.
-    .addEdge("triage", "inventory")
-    .addConditionalEdges("inventory", (state: WorkflowStateValue) =>
-      (state.options.diagnosis && nodeMode("diagnose", state.options.only) !== "skip" ? "prepare_diagnosis" : "conclude"), ["prepare_diagnosis", "conclude"])
-    .addEdge("prepare_diagnosis", "route_diagnosis")
-    .addConditionalEdges("route_diagnosis", (state: WorkflowStateValue) => {
-      const route = nextDiagnosisRoute(state.clusters, (state.diagnosisCheck ?? null) !== null);
-      switch (route.kind) {
-        case "hypothesize":
-        case "challenge": return route.clusters.map((clusterId) => new Send(route.kind, { ...state, clusterId }));
-        case "end": return "finish_diagnosis";
-        default: return route.kind;
-      }
-    }, ["wait_for_quota", "hypothesize", "challenge", "check", "finish_diagnosis"])
-    // Plain edges: the router runs once after every job of the step finished, and sees all their writes.
-    .addEdge("hypothesize", "route_diagnosis")
-    .addEdge("challenge", "route_diagnosis")
-    .addEdge("wait_for_quota", "route_diagnosis")
-    .addEdge("check", "route_diagnosis")
-    .addConditionalEdges("finish_diagnosis", (state: WorkflowStateValue) => (repairs(state.options) ? "prepare_repair" : "conclude"), ["prepare_repair", "conclude"])
-    .addEdge("prepare_repair", "route_repair")
-    .addConditionalEdges("route_repair", (state: WorkflowStateValue) => {
-      const route = nextRepairRoute(state.repairs);
-      switch (route.kind) {
-        case "repair": return route.clusters.map((clusterId) => new Send("repair", { ...state, clusterId }));
-        case "end": return "finish_repair";
-        default: return route.kind;
-      }
-    }, ["wait_for_repair_quota", "repair", "finish_repair"])
-    // As with diagnosis, the router runs once after every attempt of the step finished.
-    .addEdge("repair", "route_repair")
-    .addEdge("wait_for_repair_quota", "route_repair")
-    .addConditionalEdges("finish_repair", (state: WorkflowStateValue) => (widens(state.options) ? "prepare_widening" : loopRoute(state)), ["prepare_widening", "retry_repair", "conclude"])
-    .addEdge("prepare_widening", "route_widening")
-    .addConditionalEdges("route_widening", (state: WorkflowStateValue) => {
-      const route = nextWideningRoute(state.widenings);
-      return route.kind === "end" ? "finish_widening" : [new Send(route.kind, { ...state, clusterId: route.clusterId })];
-    }, ["widen", "promote", "roll_back", "finish_widening"])
-    .addEdge("widen", "route_widening")
-    .addEdge("promote", "route_widening")
-    .addEdge("roll_back", "route_widening")
-    .addConditionalEdges("finish_widening", loopRoute, ["retry_repair", "conclude"])
-    .addEdge("retry_repair", "route_repair")
+      return "capture";
+    }, ["capture"])
+    .addConditionalEdges("capture", (state: WorkflowStateValue) => {
+      if (state.triageSummary === null) return END;
+      return state.options.diagnosis && nodeMode("diagnose", state.options.only) !== "skip" ? "diagnose" : "conclude";
+    }, ["diagnose", "conclude", END])
+    .addConditionalEdges("diagnose", (state: WorkflowStateValue) => (repairs(state.options) ? "repair" : "conclude"), ["repair", "conclude"])
+    .addConditionalEdges("repair", (state: WorkflowStateValue) => (widens(state.options) ? "widen" : nextAttemptRoute(state)), ["widen", "repair", "conclude"])
+    .addConditionalEdges("widen", nextAttemptRoute, ["repair", "conclude"])
     .addEdge("conclude", END);
 }

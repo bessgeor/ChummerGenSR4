@@ -294,7 +294,14 @@ export function diagnosisHarness(options: HarnessOptions) {
     start: (overrides: Partial<Arguments> = {}) => runWorkflow({ kind: "start", arguments: { ...baseArguments, ...overrides } }, dependencies),
     resume: (threadId: string) => runWorkflow({ kind: "resume", threadId }, dependencies),
     threadId: () => /Thread (wf-\S+):/.exec(lines.join("\n"))?.[1] ?? "",
-    state: async (threadId: string) => (await graph.getState({ configurable: { thread_id: threadId } })).values as WorkflowStateValue,
+    /** The thread's latest state: a thread stopped inside a stage holds it in that stage's checkpoint. */
+    state: async (threadId: string) => {
+      const snapshot = await graph.getState({ configurable: { thread_id: threadId } });
+      const stage = snapshot.tasks[0];
+      if (stage === undefined) return snapshot.values as WorkflowStateValue;
+      const inner = await graph.getState({ configurable: { thread_id: threadId, checkpoint_ns: `${stage.name}:${stage.id}` } });
+      return (inner.config.configurable?.["checkpoint_id"] === undefined ? snapshot : inner).values as WorkflowStateValue;
+    },
   };
 }
 
