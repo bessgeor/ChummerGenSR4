@@ -19,9 +19,11 @@
 | `host.test.ts` rerun, 15 times in a row | 15 of 15 passed. |
 | `host.test.ts` rerun, 20 times while three full `npm run workflow:test` runs ran at the same time | 20 of 20 passed. The three full runs, started together on the same worktree, each failed `a build still running at the deadline is stopped and rejects the attempt; a stopped run stays a setup error` (`workflow/tests/repair-service.test.ts:149`, `error: 'false == true'`, `expected: true`, `actual: false`, 235 s), and one also failed `a next attempt refused at the run budget keeps the rejection it followed`. These are load-induced timing failures of tests that measure wall-clock deadlines; they are not evidence about the discovery code. |
 | `npm run workflow:test`, four more runs, one at a time | 481 tests, 481 passed in each. |
+| `npm run workflow:test`, six more runs, one at a time, output kept: run A | Failed: 481 tests, 480 passed, 1 failed: `a change seen after a long gap between looks does not count as a heartbeat heard now` (`workflow/tests/lane-agent.test.ts`, 2259 ms). Output: `failureType: 'testCodeFailure'`, `code: 'ERR_ASSERTION'`, `expected: true`, `actual: false`, `operator: '=='`, `error: The expression evaluated to a falsy value: error.message.includes(\`npm run lane-agent -- --folder "${setup.laneFolder}"\`)`. |
+| `npm run workflow:test`, runs B to F of those six | 481 tests, 481 passed in each. |
 | `npm run openspec:validate` | Passed: 23 passed, 0 failed. |
 
-Runs 1 and 5 each failed one test of a different process-handling test file (`host.test.ts`, `lane-agent.test.ts`). This task touches neither file, and each of those tests passed alone and in the other full runs on the same code. The two failures are recorded as failures that this task does not address; their cause was not investigated.
+Across 15 full runs on this code, three each failed one test, and each time a different one: run 1 (`host.test.ts`; its output was not kept and the failure was not reproduced in 35 isolated reruns), run 5 and run A (both `lane-agent.test.ts`; output recorded above). This task touches none of these files, and each of those tests passed alone or in the other full runs. The failures are recorded as failures that this task does not address; their cause was not investigated. No output exists for run 1 and none is claimed.
 
 ## Fixture-tested scope
 
