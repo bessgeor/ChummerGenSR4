@@ -1,21 +1,16 @@
 import { dirname, join, resolve } from "node:path";
 import type { ParityCases } from "../../../contracts/generated/typescript/parity-cases.js";
-import { readRegistry, registryPaths, type RegistryPaths } from "../discovery/registry.js";
+import { readRegistry, registryPaths, renderCaseFile, type RegistryPaths } from "../discovery/registry.js";
 import { fixtureReference } from "../discovery/scenario-cases.js";
 import { SetupError } from "../host/setup-error.js";
 import type { Arguments } from "../options/arguments.js";
 import type { Environment, Profile } from "../options/profile.js";
 import { resolveRunOptions, type RunOptions } from "../options/run-options.js";
 import { writeDocument } from "../steps/write-document.js";
-import { caseName, readCaseFile } from "./case-plan.js";
+import { caseName, fixtureCaseFile, readCaseFile } from "./case-plan.js";
 
 /** The suite's file name in a thread's folder. */
 export const suiteFileName = "suite-cases.json";
-
-/** The fixture case file, which the suite starts with. */
-export function fixtureCaseFile(repositoryRoot: string): string {
-  return join(repositoryRoot, "parity", "cases", "characters.json");
-}
 
 type Characters = ParityCases["characters"];
 
@@ -37,9 +32,11 @@ export function composeSuite(fixtureFile: string, registry: RegistryPaths, suite
   const fixture = readCaseFile(fixtureFile);
   const folder = dirname(suitePath);
   const suite: ParityCases = { ...fixture, characters: moved(fixture.characters, fixtureFile, folder) };
-  if (readRegistry(registry) === null) return suite;
+  const admitted = readRegistry(registry);
+  if (admitted === null) return suite;
 
-  const discovered = readCaseFile(registry.caseFile);
+  // readRegistry has checked that the case file is this rendering.
+  const discovered = renderCaseFile(admitted);
   if (discovered.startupDelaySeconds !== fixture.startupDelaySeconds || discovered.settleMilliseconds !== fixture.settleMilliseconds) {
     throw new SetupError(`${registry.caseFile} has a startup delay of ${discovered.startupDelaySeconds} s and a settle time of ${discovered.settleMilliseconds} ms, `
       + `but ${fixtureFile} has ${fixture.startupDelaySeconds} s and ${fixture.settleMilliseconds} ms: its scenarios would be replayed under timings they were not proven with.`);
@@ -57,8 +54,9 @@ export function writeSuite(fixtureFile: string, registry: RegistryPaths, suitePa
 
 /** A new thread's options: without --case-file its case file is the suite, written into the thread's folder. */
 export function startOptions(args: Arguments, profile: Profile, env: Environment, repositoryRoot: string, threadFolder: string): RunOptions {
+  const options = resolveRunOptions(args, profile, env, repositoryRoot);
+  if (args.caseFile !== null) return options;
   const suite = join(threadFolder, suiteFileName);
-  const options = resolveRunOptions(args, profile, env, repositoryRoot, suite);
-  if (options.caseFile === suite) writeSuite(fixtureCaseFile(repositoryRoot), registryPaths(repositoryRoot), suite);
-  return options;
+  writeSuite(fixtureCaseFile(repositoryRoot), registryPaths(repositoryRoot), suite);
+  return { ...options, caseFile: suite };
 }
