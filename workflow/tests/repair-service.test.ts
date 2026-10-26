@@ -84,7 +84,7 @@ test("prepare starts a repair for each confirmed cluster only", async () => {
   deepStrictEqual(service.prepare(threadId, state.clusters, null), {});
 });
 
-test("a passed attempt edits only its own copy, is built and checked narrowly, archived, and its record labelled", async () => {
+test("a passed attempt edits only its own worktree, is built and checked narrowly, archived, and its record labelled", async () => {
   const setup = await diagnosed();
   const step = await setup.service.repair(setup.input(setup.repairs[cluster]!), setup.store);
   const recordId = `${setup.threadId}/${cluster}/repair/1`;
