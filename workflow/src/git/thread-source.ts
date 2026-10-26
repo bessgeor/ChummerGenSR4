@@ -70,13 +70,13 @@ export function threadSource(git: BranchGit, threadId: string, base: string, sna
     const found = git(["for-each-ref", "--format=%(objectname)", ref]).trim();
     return found.length === 0 ? null : found;
   };
+  for (const folder of compiledFolders) {
+    if (!existsSync(join(snapshotFolder, folder))) throw new SetupError(`The snapshot ${snapshotFolder} has no ${folder}/, which the candidate is compiled from.`);
+  }
   const found = existing();
   if (found !== null) {
     requireSourceOfSnapshot(git, threadId, found, base, snapshotFolder, indexFile);
     return found;
-  }
-  for (const folder of compiledFolders) {
-    if (!existsSync(join(snapshotFolder, folder))) throw new SetupError(`The snapshot ${snapshotFolder} has no ${folder}/, which the candidate is compiled from.`);
   }
   const commit = commitFolders(git, indexFile, base, snapshotFolder, sourceMessage(threadId), snapshotFolders) ?? base;
   try {

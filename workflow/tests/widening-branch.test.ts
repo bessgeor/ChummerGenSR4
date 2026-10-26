@@ -80,6 +80,11 @@ test("an existing source branch whose content is not the snapshot's is a setup e
   git(run.repo, "update-ref", "refs/heads/workflow/wf-11/source", sibling("class frmCreate { int other; }"));
   throws(() => threadSource(run.branchGit, "wf-11", run.snapshot.commit, run.snapshot.folder, join(scratch(), "source.index")),
     (error) => error instanceof SetupError && /does not hold the sealed snapshot: Chummer\/frmCreate\.cs differs/.test(error.message));
+  // A snapshot without Core/ is refused before an existing branch is looked at.
+  const bare = await thread("wf-13");
+  rmSync(join(bare.snapshot.folder, "Core"), { recursive: true });
+  throws(() => threadSource(bare.branchGit, "wf-13", bare.snapshot.commit, bare.snapshot.folder, join(scratch(), "source.index")),
+    (error) => error instanceof SetupError && /has no Core\/, which the candidate is compiled from/.test(error.message));
   // The snapshot itself changing is the same mismatch.
   const other = await thread("wf-12");
   write(other.snapshot.folder, "Chummer/frmCreate.cs", "class frmCreate { int later; }");
