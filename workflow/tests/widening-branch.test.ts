@@ -62,9 +62,28 @@ test("the thread's source commit holds the snapshot's uncommitted edits on the s
   equal(git(run.repo, "show", `${run.source}:Chummer/frmCreate.cs`), "class frmCreate { int moved; }");
   equal(git(run.repo, "ls-tree", "-r", "--name-only", run.source),
     [".gitignore", "Chummer/frmCreate.cs", "Chummer/untracked.cs", "Core/XmlManager.cs", "README.md", "bin/ChummerGenSR4.exe", "bin/data/skills.xml", "bin/lang/en-us.xml"].join("\n"));
-  // Asked again, or with another snapshot, the existing branch is the source.
-  write(run.snapshot.folder, "Chummer/frmCreate.cs", "class frmCreate { int later; }");
+  // Asked again with the same snapshot, the existing branch is the source.
   equal(threadSource(run.branchGit, "wf-1", run.snapshot.commit, run.snapshot.folder, join(scratch(), "source.index")), run.source);
+});
+
+test("an existing source branch whose content is not the snapshot's is a setup error, also a sibling commit with the same parent and message", async () => {
+  const run = await thread("wf-11");
+  const sibling = (content: string) => {
+    const index = join(scratch(), "sibling.index");
+    const env = { ...process.env, GIT_INDEX_FILE: index };
+    execFileSync("git", ["-C", run.repo, "read-tree", run.source], { env });
+    const blob = execFileSync("git", ["-C", run.repo, "hash-object", "-w", "--stdin"], { input: content, encoding: "utf8" }).trim();
+    execFileSync("git", ["-C", run.repo, "update-index", "--cacheinfo", `100644,${blob},Chummer/frmCreate.cs`], { env });
+    const tree = execFileSync("git", ["-C", run.repo, "write-tree"], { env, encoding: "utf8" }).trim();
+    return execFileSync("git", ["-C", run.repo, "commit-tree", tree, "-p", run.snapshot.commit, "-m", "Source captured by thread wf-11\n\nThe compiled source as the thread's candidate was built from it.\n"], { encoding: "utf8" }).trim();
+  };
+  git(run.repo, "update-ref", "refs/heads/workflow/wf-11/source", sibling("class frmCreate { int other; }"));
+  throws(() => threadSource(run.branchGit, "wf-11", run.snapshot.commit, run.snapshot.folder, join(scratch(), "source.index")),
+    (error) => error instanceof SetupError && /does not hold the sealed snapshot: Chummer\/frmCreate\.cs differs/.test(error.message));
+  // The snapshot itself changing is the same mismatch.
+  const other = await thread("wf-12");
+  write(other.snapshot.folder, "Chummer/frmCreate.cs", "class frmCreate { int later; }");
+  throws(() => threadSource(other.branchGit, "wf-12", other.snapshot.commit, other.snapshot.folder, join(scratch(), "source.index")), SetupError);
 });
 
 test("a snapshot equal to its commit is the source commit itself, and a snapshot without Core/ is a setup error", async () => {

@@ -13,7 +13,7 @@ import { FixRecordSchema } from "../fixes/fix-record.js";
 import { compiledFolders } from "../compiled-source.js";
 import type { BranchGit } from "../git/branch-git.js";
 import { snapshotFolders } from "../diagnosis/source-snapshot.js";
-import { sourceMessage, threadBranches } from "../git/thread-source.js";
+import { requireSourceOfSnapshot, sourceMessage, threadBranches } from "../git/thread-source.js";
 import type { Worktrees } from "../git/worktrees.js";
 import { SetupError } from "../host/setup-error.js";
 import { usesFixChanges, type RunOptions } from "../options/run-options.js";
@@ -163,6 +163,7 @@ export class WideningService {
     const sourceCommit = this.dependencies.worktrees.resolve(`refs/heads/${threadBranches.source(input.threadId)}`);
     if (sourceCommit === null) throw new SetupError(`The thread's source branch ${threadBranches.source(input.threadId)} does not exist, though its repair passed; restore it or start a new thread.`);
     this.requireThreadSource(input.threadId, sourceCommit, base!);
+    requireSourceOfSnapshot(this.dependencies.git, input.threadId, sourceCommit, base!, join(threadFolder, "diagnosis", "source"), join(threadFolder, "widening", "source.index"));
     const accepted: AcceptedState = {
       branch: `accepted/${input.threadId}`, base: base!, sourceCommit, commit: null, source: join(threadFolder, "diagnosis", "source"), build: null,
       baselineRuns, promoted: [],
