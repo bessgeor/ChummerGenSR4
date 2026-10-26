@@ -14,6 +14,7 @@ import { loadProfile } from "../options/profile.js";
 import { tuningFolder } from "../options/run-options.js";
 import { workflowPaths } from "../paths.js";
 import { SqliteStore } from "../store/sqlite-store.js";
+import { resolveAutoTuning } from "../tuning/auto-tuning.js";
 import { runEvalCommand } from "./eval-commands.js";
 
 const setupErrorStatus = 3;
@@ -37,6 +38,7 @@ async function main(): Promise<number> {
       agentSettings: () => resolveAgentSettings(loadProfile(process.env).agents),
       certificatesFolder: () => resolve(repositoryRoot, loadProfile(process.env).certificates ?? paths.certificates),
       tuningFolder: () => tuningFolder(loadProfile(process.env), repositoryRoot),
+      autoTuning: () => resolveAutoTuning(loadProfile(process.env).autoTuning),
       agents: agentRunners(process.env), quota: new QuotaWaiter(randomBytes(8).toString("hex"), undefined, log),
       createScratchFolder, signal: interruptSignal(),
     });

@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { AgentsProfileSchema } from "../agents/agent-settings.js";
+import { datasetNamePattern } from "../evals/dataset.js";
 import { SetupError } from "../host/setup-error.js";
 import { LanesSchema } from "../lanes/lane-settings.js";
 
@@ -17,6 +18,15 @@ export const ProfileSchema = z.strictObject({
   certificates: z.string().min(1).optional(),
   /** The folder of the active tuning configurations and the holdout ledger. */
   tuning: z.string().min(1).optional(),
+  /** When `tune auto` tunes the hypothesis prompt, and the dataset and cycle options it uses. */
+  autoTuning: z.strictObject({
+    /** How many new workflow hypothesis records make a tuning due. */
+    every: z.number().int().positive().optional(),
+    /** The dataset whose next version a tuning freezes. */
+    dataset: z.string().regex(datasetNamePattern, "a dataset name is lower-case letters, digits and dashes").optional(),
+    minPass: z.number().min(0).max(1).optional(),
+    candidates: z.number().int().min(1).max(3).optional(),
+  }).optional(),
   repair: z.strictObject({
     /** How long a repair attempt's model job and build may take together, in minutes; capped like a job's time limit. */
     deadlineMinutes: z.number().positive().max(35_000).optional(),

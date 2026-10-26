@@ -9,6 +9,7 @@ import type { EvalContext } from "../src/evals/eval-commands.js";
 import { noLabels, type EvalRecord } from "../src/evals/eval-record.js";
 import { createScratchFolder } from "../src/host/scratch-folder.js";
 import { workflowPaths } from "../src/paths.js";
+import { resolveAutoTuning } from "../src/tuning/auto-tuning.js";
 import { FakeAgents } from "./diagnosis-harness.js";
 import { scratch, triageDocument } from "./diagnosis-fixtures.js";
 
@@ -83,7 +84,7 @@ export function evalContext(overrides: Partial<EvalContext> = {}): EvalContext &
   return {
     paths: workflowPaths(scratch("workflow-eval-")), store: new InMemoryStore(), git: () => "", now: () => new Date("2026-10-02T09:00:00Z"),
     log: (line) => lines.push(line), agentSettings: () => resolveAgentSettings(undefined), agents: () => agents, certificatesFolder: () => certificates,
-    tuningFolder: () => tuning,
+    tuningFolder: () => tuning, autoTuning: () => resolveAutoTuning(undefined),
     quota: new QuotaWaiter("p", async () => undefined), createScratchFolder, lines,
     ...overrides,
   };
