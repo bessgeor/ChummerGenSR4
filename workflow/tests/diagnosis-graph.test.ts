@@ -12,6 +12,7 @@ import { nodeMode } from "../src/graph/workflow-graph.js";
 import { createScratchFolder } from "../src/host/scratch-folder.js";
 import { scratch, triageDocument } from "./diagnosis-fixtures.js";
 import { challengeAnswer, diagnosisHarness, FakeAgents, hypothesisAnswer, twoClusters, type Reply } from "./diagnosis-harness.js";
+import { stoppedStage } from "./stage-state.js";
 
 const quota: Reply = { failure: { kind: "quota_exhausted", message: "You've hit your usage limit" } };
 
@@ -198,6 +199,28 @@ test("a run killed during a challenge resumes without asking for the hypothesis 
   equal(agents.calls.filter((call) => call.kind === "hypothesis").length, 2);
   ok(agents.calls.filter((call) => call.kind === "challenge").length >= 3);
   deepStrictEqual(Object.values((await second.state(first.threadId())).clusters as Record<string, ClusterDiagnosis>).map((cluster) => cluster.status), ["challenged", "challenged"]);
+});
+
+test("a run killed during a challenge stops inside the diagnose stage and resumes there", async () => {
+  const checkpointer = new MemorySaver();
+  const store = new InMemoryStore();
+  const controller = new AbortController();
+  const agents = new FakeAgents((call, attempt) => {
+    if (call.kind === "challenge" && attempt === 1) {
+      setTimeout(() => controller.abort(), 10);
+      return { hang: true };
+    }
+    return { answer: call.kind === "hypothesis" ? hypothesisAnswer() : challengeAnswer() };
+  });
+  const killed = diagnosisHarness({ spots: [twoClusters[0]!], agents, checkpointer, store, signal: controller.signal });
+  equal(await killed.start(), 3);
+  const stopped = await stoppedStage(killed.graph, killed.threadId());
+  deepStrictEqual([stopped.next, stopped.inner], [["diagnose"], ["challenge"]]);
+  ok(stopped.namespace.startsWith("diagnose:"), stopped.namespace);
+  const resumed = diagnosisHarness({ spots: [twoClusters[0]!], agents, checkpointer, store, root: killed.root });
+  equal(await resumed.resume(killed.threadId()), 1);
+  deepStrictEqual(agents.calls.map((call) => call.kind), ["hypothesis", "challenge", "challenge"]);
+  deepStrictEqual(Object.values((await resumed.state(killed.threadId())).clusters as Record<string, ClusterDiagnosis>).map((cluster) => cluster.status), ["challenged"]);
 });
 
 test("once the run budget is spent no job starts and its cluster is budget_exhausted", async () => {

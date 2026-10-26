@@ -10,7 +10,7 @@ import { describeWidening, wideningStatus } from "../widening/widening-report.js
 import type { CaseDetails } from "../steps/case-details.js";
 import { describeCase } from "./case-report.js";
 import { describeDiagnosis, diagnosisStatus } from "./diagnosis-report.js";
-import type { buildWorkflowGraph } from "./workflow-graph.js";
+import { stageIds, type buildWorkflowGraph } from "./workflow-graph.js";
 import type { WorkflowStateValue } from "./workflow-state.js";
 
 export const setupErrorStatus = 3;
@@ -90,7 +90,7 @@ async function start(command: Extract<Command, { kind: "start" }>, dependencies:
   const cache = options.canonicalCache === null ? "off (--live-canonical)" : `${options.canonicalCache} (${options.canonicalCacheSource})`;
   dependencies.log(`Thread ${threadId}: ${plan.cases.length} cases, canonical cache ${cache}.`);
   const input: WorkflowStateValue = {
-    threadId, options, plan: [...plan.cases], fingerprints: null, captures: {}, compares: {}, triageSummary: null, inventorySummary: null,
+    threadId, options, plan: [...plan.cases], pendingCaseIndexes: [], fingerprints: null, captures: {}, compares: {}, triageSummary: null, inventorySummary: null,
     clusters: {}, agentMilliseconds: 0, diagnosisCheck: null, diagnosisPath: null, repairs: {}, repairPath: null, widenings: {}, earlierWidenings: [], accepted: null, wideningPath: null,
     startedUtc: dependencies.now().toISOString(), outcome: null, outcomePath: null,
   };
@@ -106,6 +106,11 @@ function requireCertificates(options: RunOptions, dependencies: RunDependencies)
 }
 
 async function checkResumable(threadId: string, dependencies: RunDependencies): Promise<void> {
+  // Read before the graph interprets the checkpoint: the nodes of a flat graph's thread are not the graph's.
+  if (await storedByFlatGraph(threadId, dependencies)) {
+    throw new SetupError(`Thread ${threadId} was checkpointed before the workflow graph had stages, so it cannot be resumed. `
+      + "Start a new run with the same options: it reuses the capture and compare steps the thread recorded.");
+  }
   const snapshot = await dependencies.graph.getState({ configurable: { thread_id: threadId } });
   const values = snapshot.values as Partial<WorkflowStateValue>;
   if (snapshot.config.configurable?.["checkpoint_id"] === undefined || values.plan === undefined || values.options === undefined) {
@@ -114,19 +119,22 @@ async function checkResumable(threadId: string, dependencies: RunDependencies): 
   if (snapshot.next.length === 0) {
     throw new SetupError(`Thread ${threadId} already finished; start a new run instead.`);
   }
-  if (values.triageSummary === null && await storedByCaseChain(threadId, dependencies)) {
-    throw new SetupError(`Thread ${threadId} was stored in an older checkpoint format and stopped before its triage, so it cannot continue. `
-      + "Start a new run with the same options: it reuses the steps the thread recorded.");
-  }
   requireCertificates(values.options, dependencies);
 }
 
-/** Whether the thread is in the older checkpoint format, whose state has the field `lastCaptured`. */
-async function storedByCaseChain(threadId: string, dependencies: RunDependencies): Promise<boolean> {
+/**
+ * Whether the thread's latest checkpoint names a node that is not a stage: a node that ran (`versions_seen`) or one
+ * that a channel would trigger (`branch:to:<node>`). The workflow graph's own checkpoints name only stages and
+ * LangGraph's reserved nodes; a flat graph's name `build` from its first step on.
+ */
+async function storedByFlatGraph(threadId: string, dependencies: RunDependencies): Promise<boolean> {
   const { checkpointer } = dependencies.graph;
-  if (checkpointer === undefined || typeof checkpointer === "boolean") return false;
-  const tuple = await checkpointer.getTuple({ configurable: { thread_id: threadId } });
-  return tuple !== undefined && "lastCaptured" in tuple.checkpoint.channel_values;
+  if (checkpointer === undefined || typeof checkpointer === "boolean") throw new SetupError("The workflow graph was compiled without a checkpointer.");
+  const tuple = await checkpointer.getTuple({ configurable: { thread_id: threadId, checkpoint_ns: "" } });
+  if (tuple === undefined) return false;
+  const triggered = Object.keys(tuple.checkpoint.channel_versions).flatMap((channel) => (channel.startsWith("branch:to:") ? [channel.slice("branch:to:".length)] : []));
+  const nodes = [...Object.keys(tuple.checkpoint.versions_seen), ...triggered];
+  return nodes.some((node) => !node.startsWith("__") && !(stageIds as readonly string[]).includes(node));
 }
 
 /** Reports a thread whose graph ran to its end; a result that cannot be read is a setup error, and the finished thread has nothing to resume. */
@@ -146,11 +154,13 @@ function finish(final: WorkflowStateValue, dependencies: RunDependencies): numbe
 /** Runs or resumes a thread and returns the exit status; any failure is a setup error, and an unfinished thread stays resumable. */
 export async function runWorkflow(command: Exclude<Command, { kind: "help" }>, dependencies: RunDependencies): Promise<number> {
   const { graph, log } = dependencies;
-  let threadId: string | null = command.kind === "resume" ? command.threadId : null;
+  // Set once the thread may run: a thread that is refused has nothing to resume.
+  let threadId: string | null = null;
   try {
     let final: WorkflowStateValue;
     if (command.kind === "resume") {
       await checkResumable(command.threadId, dependencies);
+      threadId = command.threadId;
       log(`Resuming thread ${command.threadId}.`);
       final = await graph.invoke(null, threadConfig(command.threadId, dependencies.signal));
     } else {

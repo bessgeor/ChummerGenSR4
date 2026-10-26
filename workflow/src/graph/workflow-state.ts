@@ -1,4 +1,4 @@
-import { Annotation } from "@langchain/langgraph";
+import { Annotation, type LastValue } from "@langchain/langgraph";
 import type { PlannedCase } from "../cases/case-plan.js";
 import type { CheckResult } from "../diagnosis/check.js";
 import { mergeClusters, type ClusterDiagnosis, type ClusterUpdate } from "../diagnosis/cluster-diagnosis.js";
@@ -29,6 +29,11 @@ export const WorkflowState = Annotation.Root({
   threadId: Annotation<string>(),
   options: Annotation<RunOptions>(),
   plan: Annotation<PlannedCase[]>(),
+  /** Case indexes currently queued for capture or compare inside the capture stage. */
+  pendingCaseIndexes: Annotation<number[], number[]>({
+    reducer: (_current, update) => update,
+    default: () => [],
+  }),
   fingerprints: Annotation<InputFingerprints | null>(),
   captures: byCase(),
   compares: byCase(),
@@ -79,6 +84,15 @@ export const WorkflowState = Annotation.Root({
 
 export type WorkflowStateValue = typeof WorkflowState.State;
 export type WorkflowStateUpdate = typeof WorkflowState.Update;
+
+/**
+ * The same state as the workflow graph holds it. A stage merges its nodes' writes through the reducers of
+ * `WorkflowState` and returns the whole state when it ends; the workflow graph takes that as the thread's state, since
+ * one stage runs at a time, so totals and lists are not counted twice and a removed widening stays removed.
+ */
+export const ThreadState = Annotation.Root(
+  Object.fromEntries(Object.keys(WorkflowState.spec).map((key) => [key, Annotation()])) as { [K in keyof WorkflowStateValue]: LastValue<WorkflowStateValue[K]> },
+);
 
 /** The payload `Send` gives the capture and compare nodes: the state plus the index of their case. */
 export type CaseTask = WorkflowStateValue & { readonly index: number };

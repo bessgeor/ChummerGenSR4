@@ -14,6 +14,7 @@ import { challengeAnswer, diagnosisHarness, FakeAgents, hypothesisAnswer, twoClu
 import { FakeRepairHost, patchedReply, repairedSource } from "./repair-fixtures.js";
 import { scratch } from "./diagnosis-fixtures.js";
 import { FakeWideningHost, writeCoverage, writeRun, type WideningScript } from "./widening-fixtures.js";
+import { stoppedStage } from "./stage-state.js";
 
 const first = "d-0000000000000100";
 const second = "d-0000000000000400";
@@ -223,6 +224,29 @@ test("a run killed during a level resumes at that level", async () => {
   equal(await resumed.resume(threadId), 1);
   deepStrictEqual(resumed.wideningHost.labels(), [`widen ${first} mode`, `widen ${first} suite`]);
   equal(resumed.wideningHost.builds.length, 0);
+  equal((await resumed.state(threadId)).widenings[first]!.status, "promoted");
+});
+
+test("a run killed during a level stops inside the widen stage and resumes there", async () => {
+  const checkpointer = new MemorySaver();
+  const store = new InMemoryStore();
+  const controller = new AbortController();
+  const killed = harness({
+    spots: [twoClusters[0]!],
+    script: { status: (request) => (request.label === `widen ${first} character` ? (setTimeout(() => controller.abort(), 10), "hang") : undefined) },
+    extra: { checkpointer, store, signal: controller.signal },
+  });
+  equal(await killed.start(), 3);
+  const threadId = killed.threadId();
+  const stopped = await stoppedStage(killed.graph, threadId);
+  deepStrictEqual([stopped.next, stopped.inner], [["widen"], ["widen"]]);
+  ok(stopped.namespace.startsWith("widen:"), stopped.namespace);
+  const resumed = harness({ spots: [twoClusters[0]!], extra: { checkpointer, store, root: killed.root, repository: killed.sourceRepository } });
+  equal(await resumed.resume(threadId), 1);
+  // Neither diagnosis nor repair runs again, and the widening goes on at the interrupted level.
+  equal(resumed.agents.calls.length, 0);
+  equal(resumed.repairHost.builds.length, 0);
+  deepStrictEqual(resumed.wideningHost.labels(), [`widen ${first} character`, `widen ${first} mode`, `widen ${first} suite`]);
   equal((await resumed.state(threadId)).widenings[first]!.status, "promoted");
 });
 
