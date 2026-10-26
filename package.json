@@ -10,6 +10,7 @@
     "start": "node --import tsx workflow/src/main.ts",
     "eval": "node --import tsx workflow/src/evals/eval-main.ts",
     "review": "node --import tsx workflow/src/review/review-main.ts",
+    "dashboard": "node --import tsx workflow/src/dashboard/dashboard-main.ts",
     "inventory": "node --import tsx workflow/src/inventory/inventory-main.ts",
     "discover": "node --import tsx workflow/src/discovery/discover-main.ts",
     "lane-agent": "node --import tsx workflow/src/lanes/lane-agent-main.ts",
@@ -22,7 +23,7 @@
     "contracts:generate": "node contracts/scripts/generate.mjs",
     "contracts:check": "node contracts/scripts/generate.mjs --check",
     "contracts:test": "tsc -p contracts && node --import tsx --test \"contracts/tests/*.test.ts\"",
-    "workflow:typecheck": "tsc -p workflow",
+    "workflow:typecheck": "tsc -p workflow && tsc -p workflow/src/dashboard/client",
     "workflow:test": "node --import tsx --test \"workflow/tests/**/*.test.ts\""
   },
   "devDependencies": {

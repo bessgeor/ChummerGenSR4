@@ -9,9 +9,15 @@
     "@langchain/langgraph-checkpoint-sqlite": "1.0.4",
     "@openai/codex-sdk": "0.159.3",
     "better-sqlite3": "12.11.1",
+    "esbuild": "0.28.2",
+    "mermaid": "11.4.1",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
     "zod": "4.6.5"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "9.6.0"
+    "@types/better-sqlite3": "9.6.0",
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1"
   }
 }
