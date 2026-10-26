@@ -20,6 +20,18 @@ New tests and behavior:
 - `diagnosis-graph.test.ts` and `widening-graph.test.ts` cover interrupted runs resumed from inside the `diagnose` and `widen` stages. Both pass in the full run above.
 - `graph.test.ts`, the refused flat thread: flat checkpoints stopped at build, capture and inventory are rejected with status 3; the error explains that a new thread reuses the recorded steps, and no misleading resume command is printed.
 
+## Task 2.1: docs
+
+`AGENTS.md` (Parity workflow) describes the six stages, what each holds, the exported `stageIds`, the routing as edges of the workflow graph, the fan-outs in their stage's checkpoint namespace, the drawing with `xray` and `getState` with subgraphs, and the refused resume of a thread checkpointed before the workflow graph had stages. `README.md` names the stages and what they show in a run's checkpoints, task stream and drawing.
+
+| Command | Result |
+| --- | --- |
+| `npm ci` | Installed the dependencies in a fresh checkout (exit 0); the first `npm run workflow:typecheck` before it failed with `error TS2688: Cannot find type definition file for 'node'.` because `node_modules` was missing. |
+| `npm run workflow:typecheck` | Passed (exit 0). |
+| `npm run workflow:test` | Passed: 492 tests, 492 passed, 0 failed, 0 cancelled, 0 skipped (exit 0). |
+| `npm run openspec:validate` | Passed strict validation (exit 0). |
+| SHA-256 of `bin/ChummerGenSR4.exe` | `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`; the executable was not built or launched. |
+
 ## Fixture-tested scope
 
 Graph tests use fake steps and model jobs with an in-memory checkpointer. The flat graph that stores the refused threads is a test copy (`flat-graph.ts`).
