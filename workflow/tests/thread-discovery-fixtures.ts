@@ -2,7 +2,11 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DiscoveryGraph, DiscoveryRunner, DiscoveryThread } from "../src/discovery/discovery-runner.js";
 import type { Concluded, DiscoveryOptions } from "../src/discovery/discovery-state.js";
+import type { ThreadDiscoverySteps } from "../src/discovery/thread-discovery.js";
 import { SetupError } from "../src/host/setup-error.js";
+
+/** The discovery of graphs whose threads never discover. */
+export const noDiscovery: ThreadDiscoverySteps = { discover: () => Promise.reject(new Error("discovery is off")) };
 
 /** What a fake discovery thread concludes: its exit status and its scenarios' cases, admissions and visual outcomes. */
 export type FakeConclusion = {
@@ -80,7 +84,7 @@ export class FakeDiscoveryRunner implements DiscoveryRunner {
     }));
     const admitted = this.conclusion.scenarios.filter((item) => item.admission === "admitted").map((item) => item.case!);
     writeFileSync(path, JSON.stringify({ schemaVersion: 1, threadId, registry: { before: 0, after: admitted.length, admitted, duplicates: [] }, scenarios }));
-    const concluded: Concluded = { path, exitStatus: this.conclusion.exitStatus, lines: [] };
+    const concluded: Concluded = { path, exitStatus: this.conclusion.exitStatus, lines: [`Report of ${threadId}`] };
     this.threads.set(threadId, { options: this.threads.get(threadId)!.options, concluded });
     return concluded;
   }

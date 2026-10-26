@@ -87,6 +87,8 @@ export class RunnerDiscovery implements ThreadDiscoverySteps {
         concluded = found.concluded;
         break;
     }
+    // Each scenario's execution and visual outcomes and the registry before and after, as npm run discover reports them.
+    for (const line of concluded.lines) this.log(line);
     this.log(`Discovery thread ${id} finished: exit ${concluded.exitStatus}; ${concluded.path}`);
     return readThreadDiscovery(id, concluded);
   }

@@ -92,7 +92,10 @@ export interface LoopSteps {
   conclude(input: ConcludeInput): Conclusion;
 }
 
-/** The nodes of the workflow graph, one per stage, in the order a thread reaches them; they never change. */
+/**
+ * The nodes of the workflow graph, one per stage, in the order a thread reaches them. A stored thread names its stages by
+ * these IDs, so an ID never changes; a new stage only adds one.
+ */
 export const stageIds = ["start", "capture", "discovery", "diagnose", "repair", "widen", "conclude"] as const;
 
 export type StageId = (typeof stageIds)[number];

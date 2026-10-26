@@ -18,8 +18,8 @@ import { SetupError } from "../src/host/setup-error.js";
 import type { Arguments, NodeName } from "../src/options/arguments.js";
 import { resolveRunOptions, type RunOptions } from "../src/options/run-options.js";
 import type { Profile } from "../src/options/profile.js";
-import { RunnerDiscovery, type ThreadDiscoverySteps } from "../src/discovery/thread-discovery.js";
-import { FakeDiscoveryRunner } from "./thread-discovery-fixtures.js";
+import { RunnerDiscovery } from "../src/discovery/thread-discovery.js";
+import { FakeDiscoveryRunner, noDiscovery } from "./thread-discovery-fixtures.js";
 import type { CompareReport } from "../../contracts/generated/typescript/parity-compare-report.js";
 import type { CaseDetails } from "../src/steps/case-details.js";
 import type { InputFingerprints } from "../src/steps/input-fingerprints.js";
@@ -172,9 +172,6 @@ const baseArguments: Arguments = {
   cases: [], captures: [], settingsOverlay: null, threshold: null, caseFile: null, canonicalCache: null,
   liveCanonical: false, noOcr: false, tessdata: null, only: null, recapture: false, noDiagnosis: false, noRepair: false, noWidening: false, noDiscovery: false, unattended: false, fixChanges: false,
 };
-
-/** These runs never discover: their options store no discovery settings. */
-const noDiscovery: ThreadDiscoverySteps = { discover: () => Promise.reject(new Error("discovery is off")) };
 
 /** A run that may discover: its options are resolved as `npm start` resolves them, without repair, and diagnosis only records that it ran. */
 type Discovering = { readonly runner: FakeDiscoveryRunner; readonly root: string; readonly profile?: Profile; readonly diagnosed: string[] };
@@ -632,7 +629,7 @@ test("a clean scope discovers in thread disc-<thread> from its own inventory, re
   });
   ok(state.outcome !== null);
   const started = run.lines.indexOf(`Discovery thread ${discoveryThread}: baseline ${threadId}, 2 targets at most.`);
-  ok(started > 0 && run.lines[started + 1] === `Discovery thread ${discoveryThread} finished: exit 1; ${state.threadDiscovery!.documentPath}`, run.lines.join("\n"));
+  deepStrictEqual(run.lines.slice(started + 1, started + 3), [`Report of ${discoveryThread}`, `Discovery thread ${discoveryThread} finished: exit 1; ${state.threadDiscovery!.documentPath}`]);
 });
 
 test("a scope with a difference, a failed step or another finding is diagnosed and does not discover", async () => {

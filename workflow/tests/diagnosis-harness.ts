@@ -32,7 +32,7 @@ import { LoopService } from "../src/loop/loop-service.js";
 import { fixesRootOf, openSpecArchiver, processOpenSpecCli, type FixChangeArchiver } from "../src/fixes/fix-archiver.js";
 import { plannedCase, readReport, repository, runFolders, scratch, triageDocument, type Spot } from "./diagnosis-fixtures.js";
 import type { DispatchedTuning } from "../src/tuning/tuning.js";
-import type { ThreadDiscoverySteps } from "../src/discovery/thread-discovery.js";
+import { noDiscovery } from "./thread-discovery-fixtures.js";
 
 export const hypothesisAnswer = (claim = "The Skills tab label moved in frmCreate."): HypothesisOutput => ({
   outcome: "hypothesis", reason: "The crops show a shifted label.",
@@ -143,9 +143,6 @@ const baseArguments: Arguments = {
   cases: [], captures: [], settingsOverlay: null, threshold: null, caseFile: null, canonicalCache: null,
   liveCanonical: false, noOcr: false, tessdata: null, only: null, recapture: false, noDiagnosis: false, noRepair: false, noWidening: false, noDiscovery: false, unattended: false, fixChanges: false,
 };
-
-/** These threads have differences or store no discovery settings, so they never discover. */
-const noDiscovery: ThreadDiscoverySteps = { discover: () => Promise.reject(new Error("discovery is off")) };
 
 const details: CaseDetails = {
   execution: { coverageValid: true, invalidReasons: [], contiguous: true, failures: 0, optionalAbsent: 0, canonicalSource: "live" },

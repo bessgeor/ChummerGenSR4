@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
 import { canonicalJson } from "../diagnosis/context.js";
 import { SetupError } from "../host/setup-error.js";
@@ -10,6 +10,11 @@ export type RegistryPaths = { readonly registry: string; readonly caseFile: stri
 
 export function registryPaths(repositoryRoot: string): RegistryPaths {
   return { registry: join(repositoryRoot, "parity", "discovery", "registry.json"), caseFile: join(repositoryRoot, "parity", "cases", "discovered.json") };
+}
+
+/** Whether a case file is the registry's own case file, whatever the letter case of its path. */
+export function isRegistryCaseFile(caseFile: string, paths: RegistryPaths): boolean {
+  return resolve(caseFile).toLowerCase() === resolve(paths.caseFile).toLowerCase();
 }
 
 /** A registry with the case timings it renders with and no entry. */

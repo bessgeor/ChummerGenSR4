@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import type { BaseStore } from "@langchain/langgraph-checkpoint";
 import type { z } from "zod";
 import { caseName, planCases, type PlannedCase } from "../cases/case-plan.js";
@@ -31,7 +31,7 @@ import { knownLabels, knownTabTexts, readLanguageStrings } from "./known-texts.j
 import { scenarioActions, validatePlan } from "./plan-validator.js";
 import { classFiles, rankPriors } from "./priors.js";
 import { rankPrompt, scenarioPrompt } from "./prompts.js";
-import { provedFor, readRegistry, type RegistryPaths } from "./registry.js";
+import { isRegistryCaseFile, provedFor, readRegistry, type RegistryPaths } from "./registry.js";
 import { scenarioName } from "./scenario-cases.js";
 import { computeTargets, TargetsDocumentSchema, type TargetsDocument } from "./targets.js";
 import { selectableRankings, validateRank, validateScenario } from "./validation.js";
@@ -111,7 +111,7 @@ export class DiscoveryService {
   /** Checks the baseline against the working tree and the candidate, builds the tools, writes the targets and seals the rank context. */
   async prepare(threadId: string, options: DiscoveryOptions, signal?: AbortSignal): Promise<Prepared> {
     const { repositoryRoot: root, git, paths, log } = this.dependencies;
-    if (resolve(options.caseFile).toLowerCase() === resolve(this.dependencies.registry.caseFile).toLowerCase()) {
+    if (isRegistryCaseFile(options.caseFile, this.dependencies.registry)) {
       throw new SetupError(`${options.caseFile} is the registry's own case file, which discovery rewrites; name the fixture case file with --case-file.`);
     }
     const folders = this.dependencies.folders.thread(threadId);
