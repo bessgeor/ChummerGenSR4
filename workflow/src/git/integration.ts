@@ -104,7 +104,8 @@ export function integrate(git: BranchGit, worktrees: Worktrees, request: Integra
       const parent = worktrees.parent(item.commit);
       inWorktree(["checkout", "--quiet", "-B", item.branch, item.commit]);
       try {
-        inWorktree(["rebase", "--quiet", "--no-autosquash", "--onto", tip, parent]);
+        // Pinned against the user's configuration: no other branch that points at the commit may move with it.
+        inWorktree(["rebase", "--quiet", "--no-autosquash", "--no-update-refs", "--onto", tip, parent]);
       } catch (error) {
         if (!(error instanceof GitCommandError)) throw error;
         const files = inWorktree(["diff", "--name-only", "--diff-filter=U"]).split(/\r?\n/).filter((path) => path.length > 0);
