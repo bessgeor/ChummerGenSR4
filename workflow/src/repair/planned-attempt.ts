@@ -2,13 +2,14 @@ import { join } from "node:path";
 import type { AgentFailure } from "../agents/agent-job.js";
 import type { ContextManifest } from "../diagnosis/context.js";
 import type { RepairStage } from "../evals/eval-record.js";
+import type { Worktrees } from "../git/worktrees.js";
 import type { ScratchFolder } from "../host/scratch-folder.js";
 import { planPrompt, subtaskPrompt } from "./plan-prompt.js";
 import { blockerClosure, PlanOutputSchema, planPromptVersion, subtaskPromptVersion, validatePlan, type PlanOutput, type Subtask } from "./plan-schemas.js";
 import type { RepairBrief } from "./repair-prompt.js";
 import { runRecordedJob, type AttemptJobs, type RecordedJob } from "./repair-job.js";
 import { RepairOutputSchema, validateRepair, type RepairOutput } from "./repair-schemas.js";
-import { applyJoin, joinChanges, joinedPaths, snapshotHashes, subtaskChanges, type JoinedFile, type SnapshotHashes, type SubtaskChange } from "./subtask-join.js";
+import { applyJoin, joinChanges, joinedPaths, subtaskChanges, type JoinedFile, type SourceBlobs, type SubtaskChange } from "./subtask-join.js";
 import { changesOutsideSource, stageWorkspace, workspaceIn, type AttemptWorkspace } from "./workspace.js";
 
 /** A subtask as the attempt's archive keeps it. */
@@ -65,10 +66,11 @@ export type PlannedAttemptInput = {
   readonly recordId: string;
   readonly brief: RepairBrief;
   readonly manifest: ContextManifest;
-  /** The attempt's workspace: the plan job reads it, and the join is written into its source copy. */
+  /** The attempt's workspace: the plan job reads its worktree, and the join is written into it. */
   readonly workspace: AttemptWorkspace;
   readonly contextFolder: string;
-  readonly snapshotFolder: string;
+  /** The worktrees, the thread's source commit, the attempt's branch and a subtask's branch. */
+  readonly git: { readonly worktrees: Worktrees; readonly source: string; readonly branch: string; readonly subtaskBranch: (task: number) => string };
   readonly logFile: (suffix: string) => string;
   readonly deadlineMs: number;
   readonly createScratchFolder: (prefix: string) => ScratchFolder;
@@ -88,7 +90,7 @@ export class PlannedAttempt {
   private readonly outcomes: SubtaskOutcome[] = [];
   private readonly changes = new Map<number, readonly SubtaskChange[]>();
   private plan: PlannedWork["plan"];
-  private hashes: SnapshotHashes | null = null;
+  private blobs: SourceBlobs | null = null;
 
   constructor(private readonly input: PlannedAttemptInput) {
     this.plan = { recordId: input.recordId, output: null, failure: null };
@@ -116,9 +118,9 @@ export class PlannedAttempt {
     return { kind: "quota", failure, records: this.records.map((record) => record.recordId), chargedMs };
   }
 
-  /** The snapshot's file hashes, taken once for the attempt. */
-  private snapshot(): SnapshotHashes {
-    return (this.hashes ??= snapshotHashes(this.input.snapshotFolder));
+  /** The source commit's blobs, taken once for the attempt. */
+  private snapshot(): SourceBlobs {
+    return (this.blobs ??= this.input.git.worktrees.blobs(this.input.git.source));
   }
 
   async run(): Promise<JobsOutcome> {
@@ -131,7 +133,7 @@ export class PlannedAttempt {
       workspace: { folder: workspace.source, readOnly: [workspace.context] }, timeoutMinutes: () => Math.min(jobs.choice.timeoutMinutes, input.deadlineMs / 60_000),
       logFile: input.logFile(""),
       stage: () => {
-        stageWorkspace(workspace, input.contextFolder, input.snapshotFolder);
+        stageWorkspace(workspace, input.contextFolder, (folder) => input.git.worktrees.add(folder, input.git.branch, input.git.source));
         this.started = jobs.now();
       },
       outside: () => changesOutsideSource(workspace, input.contextFolder),
@@ -183,8 +185,8 @@ export class PlannedAttempt {
     }
     const joined = joinChanges(this.snapshot(), plan.tasks.map((task) => ({ id: task.id, changes: this.changes.get(task.id)! })));
     if ("conflict" in joined) return this.finished({ rejection: conflictRejection(joined.conflict) });
-    applyJoin(joined.joined, input.workspace.source);
-    // What the joined source changes against the snapshot: a file a later subtask set back is not among them.
+    applyJoin(input.git.worktrees, joined.joined, input.workspace.source);
+    // What the joined source changes against the source commit: a file a later subtask set back is not among them.
     const files = joinedPaths(this.snapshot(), joined.joined);
     return this.finished({ answer: { outcome: "patched", reason: plan.reason, summary: plan.summary, files } });
   }
@@ -225,6 +227,9 @@ export class PlannedAttempt {
     const copy = workspaceIn(scratch, input.jobs.clusterId);
     const start = this.startOf(blockers);
     const label = `${input.label} subtask ${task.id}`;
+    const { worktrees } = input.git;
+    // The commit the subtask starts from: the source commit with its blockers' join, once its worktree is made.
+    let startCommit = input.git.source;
     try {
       const job = await runRecordedJob<RepairOutput>(input.jobs, {
         label, recordId: `${input.recordId}/task-${task.id}`, promptVersion: subtaskPromptVersion,
@@ -232,20 +237,22 @@ export class PlannedAttempt {
         images: crops(input.manifest, copy.context), schema: RepairOutputSchema, validate: validateRepair,
         workspace: { folder: copy.source, readOnly: [copy.context], writable: true },
         timeoutMinutes: () => Math.max(Math.min(input.jobs.choice.timeoutMinutes, this.minutesLeft()), 1 / 60), logFile: input.logFile(`-task-${task.id}`),
-        stage: () => {
-          stageWorkspace(copy, input.contextFolder, input.snapshotFolder);
-          applyJoin(start, copy.source);
-        },
+        stage: () => stageWorkspace(copy, input.contextFolder, (folder) => {
+          worktrees.add(folder, input.git.subtaskBranch(task.id), input.git.source);
+          applyJoin(worktrees, start, folder);
+          startCommit = worktrees.commitAll(folder, `Start of subtask ${task.id}: the changes of the subtasks that block it\n`) ?? input.git.source;
+        }),
         outside: () => changesOutsideSource(copy, input.contextFolder),
       });
       if (job === null) return { kind: "not-started" };
-      const changes = job.result.ok
-        ? subtaskChanges(this.snapshot(), copy.source, start, join(input.workspace.root, "subtasks", String(task.id)))
-        : [];
+      // Whatever the job left is the subtask's commit; only an answer makes it the subtask's change.
+      const commit = worktrees.commitAll(copy.source, `Subtask ${task.id}: ${task.title}\n`);
+      const changes = job.result.ok ? subtaskChanges(worktrees, startCommit, commit) : [];
       input.log(`${label}: ${job.result.ok ? `${job.result.output.outcome}, ${changes.length} files changed` : `${job.result.failure.kind}: ${job.result.failure.message}`}`);
       return { kind: "ran", job, changes };
     } finally {
       try {
+        worktrees.remove(copy.source);
         scratch.remove();
       } catch (error) {
         input.log(`${label}: the scratch folder ${scratch.path} could not be removed (${(error as Error).message}); remove it by hand.`);

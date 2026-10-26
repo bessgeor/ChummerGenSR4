@@ -7,7 +7,7 @@ import { fingerprintFolder, listFiles } from "../steps/fingerprint.js";
 export type AttemptWorkspace = {
   /** The attempt's scratch folder. */
   readonly root: string;
-  /** The writable copy of the source snapshot: the repair job's working folder and the build's source. */
+  /** The attempt's worktree of the repository on its own branch: the repair job's working folder and the build's source. */
   readonly source: string;
   /** The copy of the cluster's sealed context, which the job may only read. */
   readonly context: string;
@@ -18,7 +18,7 @@ export type AttemptWorkspace = {
   readonly patch: string;
 };
 
-/** Where an attempt's folders will be in its scratch folder; nothing exists there until `stageWorkspace` copies it. */
+/** Where an attempt's folders will be in its scratch folder; nothing exists there until `stageWorkspace` makes it. */
 export function workspaceIn(scratch: ScratchFolder, clusterId: string): AttemptWorkspace {
   return {
     root: scratch.path, source: join(scratch.path, "source"), context: join(scratch.path, clusterId), build: join(scratch.path, "build"),
@@ -27,18 +27,17 @@ export function workspaceIn(scratch: ScratchFolder, clusterId: string): AttemptW
 }
 
 /**
- * Copies the cluster's context and the thread's snapshot into the attempt's scratch folder. The snapshot has no
- * version history and the scratch folder lies outside the repository, so nothing the job can reach leads to the
- * repository's history, another attempt or another thread.
+ * Copies the cluster's context into the attempt's scratch folder, without history, and has `checkout` make the attempt's
+ * worktree at `source`. The scratch folder lies outside the repository, and nothing but the two lies in it.
  */
-export function stageWorkspace(workspace: AttemptWorkspace, contextFolder: string, snapshotFolder: string): void {
+export function stageWorkspace(workspace: AttemptWorkspace, contextFolder: string, checkout: (folder: string) => void): void {
   cpSync(contextFolder, workspace.context, { recursive: true });
-  cpSync(snapshotFolder, workspace.source, { recursive: true });
+  checkout(workspace.source);
 }
 
 /**
- * What a repair job changed outside the source copy, as sentences: the context copy differing from the sealed
- * context it was copied from, or anything in the scratch folder beside the two copies. Only the source copy may change.
+ * What a repair job changed outside its worktree, as sentences: the context copy differing from the sealed context it
+ * was copied from, or anything in the scratch folder beside the worktree and the context copy. Only the worktree may change.
  */
 export async function changesOutsideSource(workspace: AttemptWorkspace, contextFolder: string): Promise<string[]> {
   const changes: string[] = [];

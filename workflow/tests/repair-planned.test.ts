@@ -3,6 +3,8 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { BaseStore } from "@langchain/langgraph-checkpoint";
+import { processBranchGit } from "../src/git/branch-git.js";
+import { Worktrees } from "../src/git/worktrees.js";
 import { QuotaWaiter } from "../src/diagnosis/quota-waiter.js";
 import { EvalRecordSchema, putRecord, recordNamespace } from "../src/evals/eval-record.js";
 import { FixRecordSchema } from "../src/fixes/fix-record.js";
@@ -52,6 +54,12 @@ function edit(call: JobCall, edits: Readonly<Record<string, string>>, files: str
 
 type Replies = { readonly plan: () => Reply; readonly subtask: (id: number, call: JobCall, attempt: number) => Reply };
 
+/** The fixture repository's git and worktrees. */
+function gitOf(repository: string) {
+  const git = processBranchGit(repository);
+  return { git, worktrees: new Worktrees(git, repository) };
+}
+
 /** A thread whose diagnosis confirmed one cluster, with fix changes, and a repair service over it with fake agents and a fake host. */
 async function planned(replies: Replies, setup: { deadlineMinutes?: number; budgetMinutes?: number; durationMs?: number; pool?: number } = {}) {
   let current = replies;
@@ -67,15 +75,15 @@ async function planned(replies: Replies, setup: { deadlineMinutes?: number; budg
   const lines: string[] = [];
   const service = new RepairService({
     threadFolder: (id) => join(harness.root, "threads", id), agents: () => agents, quota: new QuotaWaiter("process-1", async () => {}, () => {}),
-    build: host.build, narrowCheck: host.narrowCheck, createScratchFolder, now: () => new Date(), log: (line) => lines.push(line),
+    build: host.build, narrowCheck: host.narrowCheck, createScratchFolder, ...gitOf(harness.sourceRepository), now: () => new Date(), log: (line) => lines.push(line),
   });
-  const repairs = service.prepare(state.clusters, state.diagnosisCheck);
+  const repairs = service.prepare(threadId, state.clusters, state.diagnosisCheck);
   const input = (repair: ClusterRepair, spentMs = state.agentMilliseconds): RepairInput => ({
     threadId, options: { ...state.options, fixChanges: true, repair: { deadlineMinutes: setup.deadlineMinutes ?? 60 }, agents: { ...state.options.agents, runBudgetMinutes: setup.budgetMinutes ?? 120 } },
     repair, diagnosis: state.clusters[cluster]!, check: state.diagnosisCheck!, spentMs,
   });
   return {
-    agents, host, service, lines, repairs, input, threadId, store: harness.store as BaseStore, root: harness.root, prefix: `${threadId}/${cluster}/repair`,
+    agents, host, service, lines, repairs, input, threadId, store: harness.store as BaseStore, root: harness.root, prefix: `${threadId}/${cluster}/repair`, repository: harness.sourceRepository,
     replace: (next: Replies) => {
       current = next;
     },
@@ -107,6 +115,21 @@ test("independent subtasks run together, a blocked one starts on their changes, 
   ok(calls[0]!.prompt.includes("Your folders, both read only"));
   for (const call of calls) ok(!existsSync(call.workspace.folder), call.workspace.folder);
   deepStrictEqual(setup.host.builtSources, [repairedSource]);
+  // Each subtask committed on its own branch; subtask 3 started at a commit holding the changes of 1 and 2, and the
+  // attempt commit on the source commit holds all three.
+  const { git } = gitOf(setup.repository);
+  const branch = `workflow/${setup.threadId}/repair/${cluster}/attempt-1`;
+  const source = git(["rev-parse", `workflow/${setup.threadId}/source`]).trim();
+  const changed = (from: string, to: string) => git(["diff", "--name-only", from, to]).trim().split("\n").filter((path) => path.length > 0);
+  for (const id of [1, 2]) equal(git(["rev-parse", `${branch}-task-${id}~1`]).trim(), source);
+  deepStrictEqual(changed(source, `${branch}-task-1`), ["Chummer/a.cs"]);
+  deepStrictEqual(changed(source, `${branch}-task-2`), ["Chummer/b.cs"]);
+  equal(git(["rev-parse", `${branch}-task-3~2`]).trim(), source);
+  deepStrictEqual(changed(source, `${branch}-task-3~1`), ["Chummer/a.cs", "Chummer/b.cs"]);
+  deepStrictEqual(changed(`${branch}-task-3~1`, `${branch}-task-3`), ["Chummer/frmCreate.cs"]);
+  equal(git(["rev-parse", `${branch}~1`]).trim(), source);
+  deepStrictEqual(changed(source, branch), ["Chummer/a.cs", "Chummer/b.cs", "Chummer/frmCreate.cs"]);
+  deepStrictEqual([step.update.attempt!.branch, step.update.attempt!.commit], [branch, git(["rev-parse", branch]).trim()]);
   const attempt = document(step.update.attempt!.folder);
   deepStrictEqual(attempt.patch!.files.map((file) => [file.path, file.change]), [["Chummer/a.cs", "added"], ["Chummer/b.cs", "added"], ["Chummer/frmCreate.cs", "modified"]]);
   deepStrictEqual(attempt.answer, { outcome: "patched", reason: "Three parts.", summary: "Restore the label and its helpers.", files: ["Chummer/a.cs", "Chummer/b.cs", "Chummer/frmCreate.cs"] });

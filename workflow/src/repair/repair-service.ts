@@ -9,13 +9,16 @@ import { readSealedManifest } from "../diagnosis/diagnosis-service.js";
 import type { QuotaWaiter } from "../diagnosis/quota-waiter.js";
 import { nextRecordId, recordNamespace, setLabels, type RepairStage } from "../evals/eval-record.js";
 import { draftFiles, draftFixRecord } from "../fixes/fix-draft.js";
+import type { BranchGit } from "../git/branch-git.js";
+import { threadBranches, threadSource } from "../git/thread-source.js";
+import type { Worktrees } from "../git/worktrees.js";
 import type { ScratchFolder } from "../host/scratch-folder.js";
 import { SetupError } from "../host/setup-error.js";
 import { usesFixChanges, type RunOptions } from "../options/run-options.js";
 import { attemptFolder, writeArchive, type AttemptDocument } from "./attempt-archive.js";
 import { judgeNarrowCheck, type AttemptBuild, type CheckRow, type NarrowCheck } from "./attempt-host.js";
 import type { AttemptSummary, CheckExecution, ClusterRepair, RepairStatus, RepairUpdate } from "./cluster-repair.js";
-import { computePatch, type Patch } from "./patch.js";
+import { commitPatch, type Patch } from "./patch.js";
 import { guardPatch } from "./patch-guard.js";
 import { PlannedAttempt, type JobsOutcome } from "./planned-attempt.js";
 import { repairPrompt, type RepairBrief } from "./repair-prompt.js";
@@ -33,6 +36,9 @@ export type RepairDependencies = {
   readonly narrowCheck: NarrowCheck;
   /** A scratch folder outside the repository, where an attempt gets its workspace. */
   readonly createScratchFolder: (prefix: string) => ScratchFolder;
+  /** The repository's git and worktrees: the thread's source commit, the attempts' worktrees, branches and commits. */
+  readonly git: BranchGit;
+  readonly worktrees: Worktrees;
   readonly now: () => Date;
   readonly log: (line: string) => void;
 };
@@ -62,9 +68,15 @@ type Ending = {
 
 type FinishedJobs = Extract<JobsOutcome, { kind: "finished" }>;
 
-/** The snapshot every attempt of a thread starts from: diagnosis's history-less copy of the source the candidate was built from. */
+/** Diagnosis's history-less copy of the source the candidate was built from, which the thread's source commit holds. */
 function snapshotFolder(threadFolder: string): string {
   return join(threadFolder, "diagnosis", "source");
+}
+
+/** The message of an attempt commit: what the job left in its worktree. */
+function attemptMessage(threadId: string, clusterId: string, attempt: number, recordId: string, summary: string | null): string {
+  return `Repair attempt ${attempt} of discrepancy ${clusterId}\n\n${summary ?? "The job's changes as it left them."}\n\n`
+    + `Workflow-Thread: ${threadId}\nDiscrepancy: ${clusterId}\nRepair-Attempt: ${recordId}\n`;
 }
 
 /**
@@ -77,10 +89,17 @@ export class RepairService {
 
   constructor(private readonly dependencies: RepairDependencies) {}
 
-  /** A pending repair for every cluster the check confirmed. */
-  prepare(clusters: Readonly<Record<string, ClusterDiagnosis>>, check: CheckResult | null): Record<string, ClusterRepair> {
+  /** A pending repair for every cluster the check confirmed, and the thread's source commit they start from when there is any. */
+  prepare(threadId: string, clusters: Readonly<Record<string, ClusterDiagnosis>>, check: CheckResult | null): Record<string, ClusterRepair> {
     const confirmed = Object.values(clusters).filter((cluster) => check?.clusters[cluster.clusterId]?.outcome === "confirmed");
+    if (confirmed.length > 0) this.sourceCommit(threadId, confirmed[0]!);
     return Object.fromEntries(confirmed.map((cluster) => [cluster.clusterId, { clusterId: cluster.clusterId, status: "pending", attempt: null, earlier: [], waiting: null, records: [] }]));
+  }
+
+  /** The thread's source commit, made from the snapshot the first time it is asked for. */
+  private sourceCommit(threadId: string, diagnosis: ClusterDiagnosis): string {
+    const threadFolder = this.dependencies.threadFolder(threadId);
+    return threadSource(this.dependencies.git, threadId, readSealedManifest(diagnosis).source.commit, snapshotFolder(threadFolder), join(threadFolder, "repair", "source.index"));
   }
 
   async waitForQuota(marks: readonly QuotaWaitMark[], signal?: AbortSignal): Promise<void> {
@@ -122,6 +141,8 @@ export class RepairService {
     }
     const before = [...repair.records, ...interrupted];
     const deadlineMs = settings.deadlineMinutes * 60_000;
+    const source = this.sourceCommit(input.threadId, diagnosis);
+    const branch = threadBranches.attempt(input.threadId, clusterId, attempt);
     const scratch = this.dependencies.createScratchFolder("workflow-repair-");
     const workspace = workspaceIn(scratch, clusterId);
     try {
@@ -144,10 +165,12 @@ export class RepairService {
       this.dependencies.log(`${label}: running ${planned ? "a plan and its subtasks " : ""}on ${choice.provider} (${choice.model ?? "default model"}, effort ${choice.effort}), deadline ${settings.deadlineMinutes} min.`);
       const outcome: JobsOutcome = planned
         ? await new PlannedAttempt({
-          label, jobs, recordId, brief, manifest, workspace, contextFolder: diagnosis.contextFolder, snapshotFolder: snapshotFolder(threadFolder), logFile, deadlineMs,
+          label, jobs, recordId, brief, manifest, workspace, contextFolder: diagnosis.contextFolder, logFile, deadlineMs,
+          git: { worktrees: this.dependencies.worktrees, source, branch, subtaskBranch: (task) => threadBranches.subtask(input.threadId, clusterId, attempt, task) },
           createScratchFolder: this.dependencies.createScratchFolder, log: this.dependencies.log,
         }).run()
-        : await this.singleJob(label, jobs, recordId, brief, workspace, diagnosis.contextFolder, snapshotFolder(threadFolder), logFile(""), settings.deadlineMinutes);
+        : await this.singleJob(label, jobs, recordId, brief, workspace, diagnosis.contextFolder, (folder) => this.dependencies.worktrees.add(folder, branch, source),
+          logFile(""), settings.deadlineMinutes);
       if (outcome.kind === "not-started" && outcome.records.length === 0) return this.budgetExhausted(label, clusterId, options.agents.runBudgetMinutes);
       if (outcome.kind === "quota") {
         this.dependencies.log(`${label}: ${outcome.failure.kind}: ${outcome.failure.message}`);
@@ -161,8 +184,12 @@ export class RepairService {
         rejection: { stage: "model", reason: `the run budget of ${options.agents.runBudgetMinutes} min was spent after ${outcome.records.length} of the attempt's jobs finished, before the next could start` },
       };
       if (finished.failure === null && !stoppedByBudget) this.dependencies.quota.reset();
-      const ending = await this.judge(label, input, workspace, finished, finished.started.getTime() + deadlineMs);
-      const document = this.document(input, manifest, attempt, recordId, finished, ending);
+      // Whatever the jobs left in the worktree is the attempt commit, also when a job failed: the branch keeps it.
+      const commit = existsSync(workspace.source)
+        ? this.dependencies.worktrees.commitAll(workspace.source, attemptMessage(input.threadId, clusterId, attempt, recordId, finished.answer?.summary ?? null))
+        : null;
+      const ending = await this.judge(label, input, workspace, finished, finished.started.getTime() + deadlineMs, source, commit);
+      const document = this.document(input, manifest, attempt, recordId, finished, ending, branch, commit);
       const folder = attemptFolder(threadFolder, clusterId, attempt);
       const draft = finished.planned !== null && document.outcome === "passed"
         ? draftFiles(draftFixRecord({
@@ -177,13 +204,14 @@ export class RepairService {
       const labels = { repair: { outcome: document.outcome, stage: ending.stage, reason: ending.reason, labelledUtc: this.dependencies.now().toISOString() } };
       for (const record of finished.records) await setLabels(store, record, labels);
       this.dependencies.log(`${label}: ${document.outcome}${ending.stage === null ? "" : ` at ${ending.stage}: ${ending.reason}`}; ${folder}`);
-      const summary: AttemptSummary = { attempt, recordId, folder, outcome: document.outcome, stage: ending.stage, reason: ending.reason, check: ending.check?.execution ?? null };
+      const summary: AttemptSummary = { attempt, recordId, folder, outcome: document.outcome, stage: ending.stage, reason: ending.reason, check: ending.check?.execution ?? null, branch, commit };
       const status: RepairStatus = stoppedByBudget ? "budget_exhausted" : finished.failure !== null && finished.failure.kind !== "timeout" ? "failed" : document.outcome;
       const records = [...before, ...finished.records.map((record) => record.recordId)];
       return { update: { clusterId, status, attempt: summary, records }, chargedMs: finished.records.reduce((sum, record) => sum + record.durationMs, 0) };
     } finally {
       // A leftover copy is not a failure of the attempt: its result is still recorded, and the copy is named for the operator.
       try {
+        this.dependencies.worktrees.remove(workspace.source);
         scratch.remove();
       } catch (error) {
         this.dependencies.log(`${label}: the scratch folder ${scratch.path} could not be removed (${(error as Error).message}); remove it by hand.`);
@@ -193,7 +221,7 @@ export class RepairService {
 
   /** The single repair job of an attempt in a thread without fix changes, in the attempt's writable copy. */
   private async singleJob(label: string, jobs: AttemptJobs, recordId: string, brief: RepairBrief, workspace: AttemptWorkspace,
-    contextFolder: string, snapshot: string, logFile: string, deadlineMinutes: number): Promise<JobsOutcome> {
+    contextFolder: string, checkout: (folder: string) => void, logFile: string, deadlineMinutes: number): Promise<JobsOutcome> {
     const ran = await runRecordedJob<RepairOutput>(jobs, {
       label, recordId, promptVersion: repairPromptVersion, prompt: repairPrompt(brief, { sourceFolder: workspace.source, contextFolder: workspace.context }),
       images: brief.manifest.members.flatMap((member) => [join(workspace.context, member.canonicalCrop), join(workspace.context, member.candidateCrop)]),
@@ -201,7 +229,7 @@ export class RepairService {
       workspace: { folder: workspace.source, readOnly: [workspace.context], writable: true },
       // The deadline starts with the model job, so the job may not run past it.
       timeoutMinutes: () => Math.min(jobs.choice.timeoutMinutes, deadlineMinutes), logFile,
-      stage: () => stageWorkspace(workspace, contextFolder, snapshot),
+      stage: () => stageWorkspace(workspace, contextFolder, checkout),
       outside: () => changesOutsideSource(workspace, contextFolder),
     });
     if (ran === null) return { kind: "not-started", records: [], started: null, planned: null };
@@ -214,9 +242,10 @@ export class RepairService {
   }
 
   /** `attempt.json` of a finished attempt. */
-  private document(input: RepairInput, manifest: ContextManifest, attempt: number, recordId: string, outcome: FinishedJobs, ending: Ending): AttemptDocument {
+  private document(input: RepairInput, manifest: ContextManifest, attempt: number, recordId: string, outcome: FinishedJobs, ending: Ending,
+    branch: string, commit: string | null): AttemptDocument {
     return {
-      schemaVersion: 1, threadId: input.threadId, clusterId: input.repair.clusterId, attempt, recordId, contextHash: input.diagnosis.contextHash,
+      schemaVersion: 1, threadId: input.threadId, clusterId: input.repair.clusterId, attempt, recordId, contextHash: input.diagnosis.contextHash, branch, commit,
       snapshotIdentity: manifest.source.identity, hypothesisRecord: input.diagnosis.hypothesis!.recordId, agent: outcome.records[0]!.agent,
       answer: outcome.answer, failure: outcome.failure,
       patch: ending.patch === null ? null : { files: ending.patch.files, added: ending.patch.added, removed: ending.patch.removed },
@@ -228,9 +257,9 @@ export class RepairService {
   }
 
   /** The guard, the build and the narrow check of an attempt whose model jobs finished, each only when the step before passed. */
-  private async judge(label: string, input: RepairInput, workspace: AttemptWorkspace, jobs: FinishedJobs, deadline: number): Promise<Ending> {
+  private async judge(label: string, input: RepairInput, workspace: AttemptWorkspace, jobs: FinishedJobs, deadline: number, source: string, commit: string | null): Promise<Ending> {
     const { answer, failure } = jobs;
-    const patch = computePatch(snapshotFolder(this.dependencies.threadFolder(input.threadId)), workspace.source, workspace.patch);
+    const patch = commitPatch(this.dependencies.worktrees, source, commit, workspace.patch);
     const rejected = (stage: RepairStage, reason: string, rest: Partial<Ending> = {}): Ending => ({ patch, guard: [], build: null, check: null, ...rest, stage, reason });
     if (failure !== null) return rejected(failure.kind === "timeout" ? "deadline" : "model", `${failure.kind}: ${failure.message}`);
     if (jobs.rejection !== null) return rejected(jobs.rejection.stage, jobs.rejection.reason);

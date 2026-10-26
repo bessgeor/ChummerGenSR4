@@ -26,7 +26,8 @@ import { RepairService } from "../src/repair/repair-service.js";
 import { FakeRepairHost } from "./repair-fixtures.js";
 import { FakeWideningHost } from "./widening-fixtures.js";
 import { captureNames } from "../src/cases/case-plan.js";
-import { processBranchGit, type BranchGit } from "../src/widening/accepted-branch.js";
+import { processBranchGit, type BranchGit } from "../src/git/branch-git.js";
+import { Worktrees } from "../src/git/worktrees.js";
 import { WideningService, type WideningDependencies } from "../src/widening/widening-service.js";
 import { LoopService } from "../src/loop/loop-service.js";
 import { fixesRootOf, openSpecArchiver, processOpenSpecCli, type FixChangeArchiver } from "../src/fixes/fix-archiver.js";
@@ -254,17 +255,19 @@ export function diagnosisHarness(options: HarnessOptions) {
     }, checkCapture, createScratchFolder: options.createScratchFolder ?? createScratchFolder, now: () => new Date("2026-10-01T12:00:00Z"), log,
   });
   const repairHost = options.repair?.host(root) ?? new FakeRepairHost(root);
+  const plainGit = processBranchGit(sourceRepository);
+  const branchGit = options.widening?.git?.(plainGit) ?? plainGit;
+  const worktrees = new Worktrees(branchGit, sourceRepository);
   const repair = new RepairService({
     threadFolder: (threadId) => join(root, "threads", threadId), agents: () => agents, quota, build: repairHost.build, narrowCheck: repairHost.narrowCheck,
-    createScratchFolder: options.createScratchFolder ?? createScratchFolder, now: () => new Date(), log,
+    createScratchFolder: options.createScratchFolder ?? createScratchFolder, git: branchGit, worktrees, now: () => new Date(), log,
   });
   const allCases = [...cases, ...(options.widening?.extraCases ?? []).map((name) => plannedCase(root, name))];
   const caseCaptures = (caseName: string) => captureNames(allCases.find((item) => item.name === caseName)!);
   const wideningHost = options.widening?.host(root, caseCaptures) ?? new FakeWideningHost(root, caseCaptures);
-  const branchGit = processBranchGit(sourceRepository);
   const widening = new WideningService({
     threadFolder: (threadId) => join(root, "threads", threadId), build: wideningHost.build, capture: wideningHost.capture, allCases: () => allCases,
-    git: options.widening?.git?.(branchGit) ?? branchGit, now: () => new Date("2026-10-01T13:00:00Z"), log,
+    git: branchGit, worktrees, now: () => new Date("2026-10-01T13:00:00Z"), log,
     // The fixture repository has no fixes root; the real one of this checkout holds the schema.
     fixes: { root: fixesRootOf(fixesRepository), archive: options.widening?.archive ?? openSpecArchiver(processOpenSpecCli(fixesRepository)) },
     inputs: options.widening?.inputs ?? { environment: async () => "environment-1", changed: async () => [] },
