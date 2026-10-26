@@ -1,4 +1,5 @@
-import type { GraphKind, StageId } from "./snapshot.js";
+// Shared by the server and the React client.
+import { stageIds, type GraphKind, type StageId } from "./snapshot.js";
 
 export const stageTitles: Readonly<Record<StageId, string>> = {
   start: "Start thread",
@@ -11,51 +12,36 @@ export const stageTitles: Readonly<Record<StageId, string>> = {
   tune: "Tune",
 };
 
-/** Each graph's nodes by stage; every node of a compiled graph must be listed exactly once (the graph tests check it). */
-const stageNodes: Readonly<Record<GraphKind, Partial<Record<StageId, readonly string[]>>>> = {
-  loop: {},
-  workflow: {
-    start: ["build"],
-    capture: ["capture", "compare", "route_cases", "triage", "inventory"],
-    diagnose: ["prepare_diagnosis", "route_diagnosis", "hypothesize", "challenge", "wait_for_quota", "check", "finish_diagnosis"],
-    repair: ["prepare_repair", "route_repair", "repair", "wait_for_repair_quota", "finish_repair", "retry_repair"],
-    widen: ["prepare_widening", "route_widening", "widen", "promote", "roll_back", "finish_widening"],
-    conclude: ["conclude"],
-  },
-  discovery: {
-    discovery: ["prepare", "route_rank", "rank", "wait_for_rank_quota", "select", "route_scenarios", "scenario", "wait_for_scenario_quota", "validate", "execute", "register", "conclude"],
-  },
-  tuning: {},
-};
+/** The stage a graph's tasks belong to when no stage subgraph runs them: the discovery and tuning graphs are each one stage. */
+const graphStage: Readonly<Record<GraphKind, StageId | null>> = { loop: null, workflow: null, discovery: "discovery", tuning: "tune" };
 
 /** The nodes LangGraph adds to every graph. */
 export const frameNodes: readonly string[] = ["__start__", "__end__"];
 
-/** The stage a graph's node belongs to, or null for a node the map does not know. */
-export function nodeStage(graph: GraphKind, node: string): StageId | null {
-  for (const [stage, nodes] of Object.entries(stageNodes[graph]) as [StageId, readonly string[]][]) {
-    if (nodes.includes(node)) return stage;
-  }
-  return null;
+function isStage(name: string): name is StageId {
+  return (stageIds as readonly string[]).includes(name);
 }
 
-/** Every `<graph>:<node>` of a stage, in the map's order. */
-export function stageMembers(stage: StageId): string[] {
-  return (Object.entries(stageNodes) as [GraphKind, Partial<Record<StageId, readonly string[]>>][]).flatMap(([graph, stages]) => (stages[stage] ?? []).map((node) => `${graph}:${node}`));
+/**
+ * The stage of a task: the outermost stage subgraph on its path (the nodes of the parent graphs that run it, outermost
+ * first), else the stage its whole graph is (so the discovery graph's own `conclude` is discovery), else its own node
+ * when that is a stage subgraph.
+ */
+export function taskStage(graph: GraphKind, path: readonly string[], node: string): StageId | null {
+  return path.find(isStage) ?? graphStage[graph] ?? (isStage(node) ? node : null);
 }
 
 /** Nodes that route, prepare or finish a stage: they take no time of their own, so durations leave them out. */
 export function isRoutingNode(node: string): boolean {
-  return /^(route|prepare|finish)_/.test(node) || node === "route_cases";
+  return /^(route|prepare|finish)_/.test(node);
 }
 
-/** A node's ID in the grouped drawing: `<stage>:<node>`, which LangGraph draws inside a subgraph named after the stage, as it draws a real subgraph's nodes. */
-export function groupedId(graph: GraphKind, node: string): string {
-  const stage = nodeStage(graph, node);
-  return stage === null ? node : `${stage}:${node}`;
-}
-
-/** The Mermaid ID LangGraph gives a grouped node: it replaces every character but letters, digits and underscores. */
-export function drawnId(stage: StageId | null, node: string): string {
-  return (stage === null ? node : `${stage}:${node}`).replace(/[^a-zA-Z0-9_]/g, "_");
+/**
+ * The Mermaid IDs a task's node may have in LangGraph's xray drawing, best first. LangGraph names a subgraph's node
+ * `<subgraph>:<node>` and replaces every character but letters, digits and underscores; it draws a subgraph of a single
+ * node as that subgraph's own node, so the path's outer nodes follow.
+ */
+export function drawnIds(path: readonly string[], node: string): string[] {
+  const names = [...path, node];
+  return names.map((_, index) => names.slice(0, names.length - index).join(":").replace(/[^a-zA-Z0-9_]/g, "_"));
 }

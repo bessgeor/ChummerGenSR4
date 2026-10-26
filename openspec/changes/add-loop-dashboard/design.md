@@ -31,7 +31,7 @@ The workflow graph's stages are real LangGraph subgraphs (`start`, `capture`, `d
 
 ### Node view
 
-`getGraphAsync({ xray: true })` lists each subgraph's nodes as `<stage>:<node>`, and LangGraph's `drawMermaid()` draws each stage as a subgraph. The page shows that drawing as LangGraph returns it, adding only the marks on running nodes.
+`getGraphAsync({ xray: true })` lists each subgraph's nodes as `<stage>:<node>`, and LangGraph's `drawMermaid()` draws each stage as a subgraph. The page shows that drawing as LangGraph returns it, adding only the marks on running nodes. LangGraph draws a stage of a single node (`start`, `conclude`) as that one node under the stage's ID, so the page marks a running node by its `<stage>_<node>` ID when the drawing has it and by its stage's ID otherwise.
 
 ### Running tasks
 

@@ -36,6 +36,8 @@ export type StageView = {
 export type TaskView = {
   readonly graph: GraphKind;
   readonly thread: string;
+  /** The nodes of the parent graphs that run the task, outermost first, such as its stage subgraph; empty for a node of the graph itself. */
+  readonly path: readonly string[];
   readonly node: string;
   readonly stage: StageId | null;
   /** The case, cluster or discovery target the task works on, or null. */
@@ -84,7 +86,7 @@ export type Snapshot = {
   readonly problems: readonly Problem[];
 };
 
-/** Each graph's own Mermaid drawing, from `getGraphAsync().drawMermaid()`. */
+/** Each graph's own Mermaid drawing, from `getGraphAsync({ xray: true }).drawMermaid()`. */
 export type GraphDrawings = Readonly<Partial<Record<GraphKind, string>>>;
 
 /** What the page posts to pause or resume the loop (lane null) or one lane. */

@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
-import { graphKinds } from "./snapshot.js";
+import { graphKinds, stageIds } from "./snapshot.js";
 
 /** The loop's folder, `out/loop/<loop>/`, and its documents. */
 export function loopFiles(loopRoot: string, loopId: string) {
@@ -32,6 +32,8 @@ export type LoopState = z.infer<typeof LoopStateSchema>;
 export const ActivityLineSchema = z.object({
   thread: z.string(),
   graph: z.enum(graphKinds),
+  /** The stage subgraph that ran the node; absent from lines written before the workflow had stage subgraphs. */
+  stage: z.enum(stageIds).nullable().optional(),
   node: z.string(),
   subject: z.string().nullable(),
   lane: z.string().nullable(),

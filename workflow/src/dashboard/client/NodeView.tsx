@@ -2,7 +2,7 @@ import mermaid from "mermaid";
 import { useEffect, useState } from "react";
 import { markRunning } from "../drawing.js";
 import type { GraphDrawings, GraphKind, TaskView } from "../snapshot.js";
-import { drawnId } from "../stages.js";
+import { drawnIds } from "../stages.js";
 
 const dark = matchMedia("(prefers-color-scheme: dark)").matches;
 // The stage boxes take the page's accent; the nodes keep LangGraph's own styles. Drawings keep their natural size and scroll.
@@ -17,10 +17,10 @@ let renders = 0;
 
 /** One graph's drawing from LangGraph, as LangGraph draws it, with the nodes running now marked. */
 function Drawing({ kind, drawing, tasks }: { kind: GraphKind; drawing: string; tasks: readonly TaskView[] }) {
-  const running = tasks.map((task) => task.node);
+  const running = tasks.map((task) => [...task.path, task.node].join(":"));
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const source = markRunning(drawing, tasks.map((task) => drawnId(task.stage, task.node)));
+  const source = markRunning(drawing, tasks.map((task) => drawnIds(task.path, task.node)));
   useEffect(() => {
     let current = true;
     mermaid.render(`graph-${kind}-${++renders}`, source)

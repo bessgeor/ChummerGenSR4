@@ -6,8 +6,8 @@ import { listRecords, type EvalRecord } from "../evals/eval-record.js";
 import type { GraphReader } from "./graphs.js";
 import { loopFiles, LoopControlSchema, LoopDocumentSchema, LoopStateSchema, readActivity, readJson, type ActivityLine, type LoopControl, type LoopDocument, type LoopState } from "./loop-documents.js";
 import { stageStats, type ThreadFacts } from "./stage-stats.js";
-import { stageMembers, stageTitles } from "./stages.js";
-import { stageIds, type LaneView, type LoopStatus, type LoopView, type Problem, type Snapshot, type TaskView } from "./snapshot.js";
+import { stageTitles } from "./stages.js";
+import { stageIds, type LaneView, type StageId, type LoopStatus, type LoopView, type Problem, type Snapshot, type TaskView } from "./snapshot.js";
 
 /** Where the dashboard reads from. */
 export type DashboardSources = {
@@ -148,6 +148,10 @@ export async function takeSnapshot(sources: DashboardSources, requested: string 
     activity: loop === null ? null : loop.activity,
     tunings: loop === null ? folders(sources.tuningCycles).length : loop.document.threads.filter((thread) => thread.graph === "tuning").length,
   });
+  const members: Partial<Record<StageId, string[]>> = {};
+  for (const reader of sources.graphs) {
+    for (const [stage, nodes] of Object.entries(await reader.stageNodes()) as [StageId, string[]][]) members[stage] = [...(members[stage] ?? []), ...nodes];
+  }
   const running = tasks.filter((task) => task.state === "running").length;
   const view: LoopView | null = loop === null || loopId === null ? null : {
     id: loopId, status: loopStatus(loop.document, loop.state, loop.control, loop.stateAgeMs, running),
@@ -157,7 +161,7 @@ export async function takeSnapshot(sources: DashboardSources, requested: string 
   return {
     generatedUtc: sources.now().toISOString(), loops, loop: view, live: view !== null && view.status !== "stale" && view.status !== "ended",
     stages: stageIds.map((id) => ({
-      id, title: stageTitles[id], nodes: stageMembers(id),
+      id, title: stageTitles[id], nodes: members[id] ?? [],
       running: tasks.filter((task) => task.stage === id && task.state === "running").length,
       paused: tasks.filter((task) => task.stage === id && task.state === "paused").length,
       stats: stats[id],

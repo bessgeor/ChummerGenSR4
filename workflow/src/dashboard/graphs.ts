@@ -2,14 +2,17 @@ import { existsSync } from "node:fs";
 import Database from "better-sqlite3";
 import type { StateSnapshot } from "@langchain/langgraph";
 import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
-import { Graph, type Edge, type Node } from "@langchain/core/runnables/graph";
-import { groupedId, nodeStage } from "./stages.js";
-import type { GraphKind, TaskView } from "./snapshot.js";
+import type { RunnableConfig } from "@langchain/core/runnables";
+import type { Edge, Node } from "@langchain/core/runnables/graph";
+import { frameNodes, taskStage } from "./stages.js";
+import type { GraphKind, StageId, TaskView } from "./snapshot.js";
 
-/** What the dashboard needs of a compiled graph: its drawing and a thread's state. It never invokes one. */
-export type InspectableGraph = {
-  getState(config: { configurable: { thread_id: string } }): Promise<StateSnapshot>;
-  getGraphAsync(): Promise<{ nodes: Record<string, Node>; edges: Edge[] }>;
+type Drawable = { getGraphAsync(config: RunnableConfig & { xray?: boolean }): Promise<{ nodes: Record<string, Node>; edges: Edge[]; drawMermaid(): string }> };
+
+/** What the dashboard needs of a compiled graph: its drawing, its stage subgraphs and a thread's state. It never invokes one. */
+export type InspectableGraph = Drawable & {
+  getState(config: { configurable: Record<string, unknown> }, options?: { subgraphs?: boolean }): Promise<StateSnapshot>;
+  getSubgraphsAsync(): AsyncGenerator<[string, Drawable]>;
 };
 
 /** A graph of the loop: its builder, compiled with inert steps, and its checkpoint file. */
@@ -40,6 +43,7 @@ export class GraphReader {
   private readonly database: Database.Database | null;
   private readonly saver: SqliteSaver | undefined;
   readonly graph: InspectableGraph;
+  private members: Promise<Partial<Record<StageId, string[]>>> | undefined;
 
   constructor(readonly source: GraphSource) {
     // A graph that has not run has no checkpoint file; opening one would create it, so its threads are simply none. The saver's
@@ -50,21 +54,35 @@ export class GraphReader {
     this.graph = source.compile(this.saver);
   }
 
-  /**
-   * LangGraph's own drawing of the compiled graph with its nodes grouped by stage. Each node is renamed `<stage>:<node>`,
-   * the way a real subgraph's nodes are named, so LangGraph's `drawMermaid()` draws each stage as a subgraph itself.
-   */
+  /** LangGraph's own drawing of the compiled graph with its subgraphs drawn inside it (`xray`): each stage subgraph is a Mermaid subgraph. */
   async drawing(): Promise<string> {
-    const drawn = await this.graph.getGraphAsync();
-    const id = (node: string) => groupedId(this.source.kind, node);
-    const nodes = Object.fromEntries(Object.values(drawn.nodes).map((node) => [id(node.id), { ...node, id: id(node.id), name: id(node.name) }]));
-    const edges = drawn.edges.map((edge) => ({ ...edge, source: id(edge.source), target: id(edge.target) }));
-    return new Graph({ nodes, edges }).drawMermaid();
+    return (await this.graph.getGraphAsync({ xray: true })).drawMermaid();
   }
 
   /** The node names of the compiled graph, without LangGraph's start and end. */
   async nodes(): Promise<string[]> {
-    return Object.keys((await this.graph.getGraphAsync()).nodes).filter((node) => node !== "__start__" && node !== "__end__");
+    return Object.keys((await this.graph.getGraphAsync({})).nodes).filter((node) => !frameNodes.includes(node));
+  }
+
+  /** The graph's nodes by stage, as `<graph>:<node>`: a stage subgraph's own nodes, or the graph's nodes when the whole graph is one stage. */
+  stageNodes(): Promise<Partial<Record<StageId, string[]>>> {
+    this.members ??= this.readStageNodes();
+    return this.members;
+  }
+
+  private async readStageNodes(): Promise<Partial<Record<StageId, string[]>>> {
+    const members: Partial<Record<StageId, string[]>> = {};
+    const add = (stage: StageId | null, nodes: readonly string[]) => {
+      if (stage !== null) members[stage] = [...(members[stage] ?? []), ...nodes.map((node) => `${this.source.kind}:${node}`)];
+    };
+    const subgraphs = new Map<string, Drawable>();
+    for await (const [name, subgraph] of this.graph.getSubgraphsAsync()) subgraphs.set(name, subgraph);
+    for (const node of await this.nodes()) {
+      const subgraph = subgraphs.get(node);
+      if (subgraph === undefined) add(taskStage(this.source.kind, [], node), [node]);
+      else add(taskStage(this.source.kind, [node], node), Object.keys((await subgraph.getGraphAsync({})).nodes).filter((inner) => !frameNodes.includes(inner)));
+    }
+    return members;
   }
 
   /** The threads with the most recent checkpoints, newest first. */
@@ -76,26 +94,35 @@ export class GraphReader {
   }
 
   /**
-   * The thread's tasks of its next step that have not finished: running, or paused at an interrupt. A pushed task's
-   * subject comes from the send its path points at in the checkpoint's pending sends.
+   * The thread's tasks of its next step that have not finished: running, or paused at an interrupt. A task that runs a
+   * subgraph, such as a stage, stands for that subgraph's own open tasks, read from the subgraph's state in its namespace.
+   * A pushed task's subject comes from the send its path points at in that checkpoint's pending sends.
    */
   async openTasks(thread: string): Promise<TaskView[]> {
     if (this.saver === undefined) return [];
-    const config = { configurable: { thread_id: thread } };
-    const snapshot = await this.graph.getState(config);
+    return this.open(thread, await this.graph.getState({ configurable: { thread_id: thread } }, { subgraphs: true }), []);
+  }
+
+  private async open(thread: string, snapshot: StateSnapshot, path: readonly string[]): Promise<TaskView[]> {
     if (snapshot.tasks.length === 0) return [];
-    const tuple = await this.saver.getTuple(config);
+    const tuple = await this.saver!.getTuple(snapshot.config);
     const sends = (tuple?.checkpoint.channel_values as Record<string, unknown> | undefined)?.["__pregel_tasks"];
     const since = snapshot.createdAt ?? new Date(0).toISOString();
-    return snapshot.tasks.flatMap((task): TaskView[] => {
-      if (task.result !== undefined || task.error !== undefined) return [];
-      const path = task.path ?? [];
-      const send = path[0] === "__pregel_push" && typeof path[1] === "number" && Array.isArray(sends) ? (sends[path[1]] as { args?: unknown } | undefined) : undefined;
-      return [{
-        graph: this.source.kind, thread, node: task.name, stage: nodeStage(this.source.kind, task.name),
+    const tasks: TaskView[] = [];
+    for (const task of snapshot.tasks) {
+      if (task.result !== undefined || task.error !== undefined) continue;
+      if (task.state !== undefined && "tasks" in task.state) {
+        tasks.push(...await this.open(thread, task.state, [...path, task.name]));
+        continue;
+      }
+      const at = task.path ?? [];
+      const send = at[0] === "__pregel_push" && typeof at[1] === "number" && Array.isArray(sends) ? (sends[at[1]] as { args?: unknown } | undefined) : undefined;
+      tasks.push({
+        graph: this.source.kind, thread, path, node: task.name, stage: taskStage(this.source.kind, path, task.name),
         subject: sendSubject(send?.args), lane: null, sinceUtc: since, state: task.interrupts.length > 0 ? "paused" : "running",
-      }];
-    });
+      });
+    }
+    return tasks;
   }
 
   close(): void {

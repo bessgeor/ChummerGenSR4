@@ -1,6 +1,6 @@
 import type { EvalRecord } from "../evals/eval-record.js";
 import type { ActivityLine } from "./loop-documents.js";
-import { isRoutingNode, nodeStage } from "./stages.js";
+import { isRoutingNode, taskStage } from "./stages.js";
 import { stageIds, type Count, type Duration, type StageId, type StageStats } from "./snapshot.js";
 
 /** What a thread's documents contribute: its triage totals and its clusters' dispositions, each null when the document is absent. */
@@ -36,7 +36,7 @@ const recordKinds: Partial<Record<StageId, readonly EvalRecord["jobKind"][]>> = 
 };
 
 function duration(stage: StageId, input: StatsInput): Duration {
-  const logged = (input.activity ?? []).filter((line) => !isRoutingNode(line.node) && nodeStage(line.graph, line.node) === stage)
+  const logged = (input.activity ?? []).filter((line) => !isRoutingNode(line.node) && (line.stage ?? taskStage(line.graph, [], line.node)) === stage)
     .map((line) => Math.max(0, Date.parse(line.finishedUtc) - Date.parse(line.startedUtc) - line.pausedMs));
   if (logged.length > 0) return { p80Ms: p80(logged), samples: logged.length, source: "activity" };
   const kinds = recordKinds[stage] ?? [];

@@ -16,19 +16,30 @@ import { graphSources } from "../src/dashboard/graph-sources.js";
 import { GraphReader, sendSubject, type GraphSource } from "../src/dashboard/graphs.js";
 import { loopFiles, type LoopControl, type LoopDocument, type LoopState } from "../src/dashboard/loop-documents.js";
 import { p80, stageStats, type StatsInput } from "../src/dashboard/stage-stats.js";
-import { drawnId, frameNodes, nodeStage } from "../src/dashboard/stages.js";
+import { stageIds as workflowStageIds } from "../src/graph/workflow-graph.js";
+import { drawnIds, frameNodes, taskStage } from "../src/dashboard/stages.js";
+import { stageIds } from "../src/dashboard/snapshot.js";
 import { scratch } from "./diagnosis-fixtures.js";
 import { record } from "./eval-fixtures.js";
 
 const minute = 60_000;
 
-test("every node of every compiled graph belongs to a stage", async () => {
+test("every node of every compiled graph belongs to a stage, and the workflow's stage subgraphs are the dashboard's stages", async () => {
+  for (const stage of workflowStageIds) ok((stageIds as readonly string[]).includes(stage), `the dashboard has no stage ${stage}`);
   for (const source of graphSources(scratch("dashboard-graphs-"))) {
     const reader = new GraphReader(source);
     const nodes = await reader.nodes();
     ok(nodes.length > 0, `${source.kind} has nodes`);
-    for (const node of nodes) ok(nodeStage(source.kind, node) !== null, `${source.kind} node ${node} has no stage`);
+    for (const node of nodes) ok(taskStage(source.kind, [], node) !== null, `${source.kind} node ${node} has no stage`);
     ok(!nodes.some((node) => frameNodes.includes(node)));
+    const members = await reader.stageNodes();
+    if (source.kind === "workflow") {
+      deepStrictEqual(Object.keys(members), [...workflowStageIds]);
+      deepStrictEqual(members.start, ["workflow:build"]);
+      ok(members.diagnose?.includes("workflow:hypothesize"));
+    } else {
+      deepStrictEqual(members.discovery, nodes.map((node) => `discovery:${node}`));
+    }
     match(await reader.drawing(), /graph TD;/);
     deepStrictEqual(reader.recentThreads(5), [], "a graph without a checkpoint file has no threads, and none is created");
     reader.close();
@@ -43,20 +54,27 @@ test("a send's subject is its cluster, its target or its planned case", () => {
   equal(sendSubject(null), null);
 });
 
-/** A two-task graph named like the workflow's capture and repair, so the stage map applies; `release` lets the slow task finish. */
+/** A graph whose `repair` stage subgraph sends a capture and a repair, like the workflow's stages; `release` lets the slow task finish. */
 function testGraph() {
   let release = () => {};
   const held = new Promise<void>((resolve) => { release = resolve; });
   const State = Annotation.Root({
     plan: Annotation<{ name: string }[]>(), done: Annotation<string[]>({ reducer: (left, right) => [...left, ...right], default: () => [] }),
   });
-  const build = () => new StateGraph(State)
-    .addNode("build", () => ({}))
+  const stage = () => new StateGraph(State)
+    .addNode("prepare_repair", () => ({}))
     .addNode("capture", async (state: { index: number; plan: { name: string }[] }) => ({ done: [state.plan[state.index]!.name] }))
     .addNode("repair", async (state: { clusterId: string }) => { await held; return { done: [state.clusterId] }; })
-    .addEdge(START, "build")
-    .addConditionalEdges("build", (state) => [new Send("capture", { ...state, index: 1 }), new Send("repair", { ...state, clusterId: "d-0000000000000100" })], ["capture", "repair"])
+    .addEdge(START, "prepare_repair")
+    .addConditionalEdges("prepare_repair", (state) => [new Send("capture", { ...state, index: 1 }), new Send("repair", { ...state, clusterId: "d-0000000000000100" })], ["capture", "repair"])
     .addEdge("capture", END)
+    .addEdge("repair", END)
+    .compile();
+  const build = () => new StateGraph(State)
+    .addNode("build", () => ({}))
+    .addNode("repair", stage())
+    .addEdge(START, "build")
+    .addEdge("build", "repair")
     .addEdge("repair", END);
   return { build, release: () => release() };
 }
@@ -69,7 +87,7 @@ test("running tasks and their subjects come from the checkpoint of a thread anot
   const config = { configurable: { thread_id: "wf-live" } };
   const running = runner.invoke({ plan: [{ name: "case-a" }, { name: "case-b" }] }, config);
   const source: GraphSource = { kind: "workflow", checkpoints, compile: (checkpointer) => graph.build().compile(checkpointer === undefined ? {} : { checkpointer }) };
-  // The capture finishes at once and the repair waits, so the step's checkpoint holds one finished and one open task.
+  // The capture finishes at once and the repair waits, so the stage's checkpoint in its namespace holds one finished and one open task.
   let tasks: Awaited<ReturnType<GraphReader["openTasks"]>> = [];
   for (let attempt = 0; attempt < 100; attempt++) {
     const reader = new GraphReader(source);
@@ -82,8 +100,8 @@ test("running tasks and their subjects come from the checkpoint of a thread anot
     }
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
-  deepStrictEqual(tasks.map(({ graph: kind, node, stage, subject, state }) => ({ kind, node, stage, subject, state })),
-    [{ kind: "workflow", node: "repair", stage: "repair", subject: "d-0000000000000100", state: "running" }]);
+  deepStrictEqual(tasks.map(({ graph: kind, path, node, stage, subject, state }) => ({ kind, path, node, stage, subject, state })),
+    [{ kind: "workflow", path: ["repair"], node: "repair", stage: "repair", subject: "d-0000000000000100", state: "running" }]);
   graph.release();
   await running;
   const reader = new GraphReader(source);
@@ -247,6 +265,21 @@ test("the snapshot shows the newest loop, its lanes, its stats and an unreadable
   match(missing.problems.map((problem) => problem.message).join("\n"), /There is no loop loop-unknown/);
 });
 
+test("the snapshot has a stage box for every stage subgraph of the workflow, listing that subgraph's nodes", async () => {
+  const fixture = fixtureRoot();
+  const readers = graphSources(fixture.root).map((source) => new GraphReader(source));
+  try {
+    const snapshot = await takeSnapshot({ ...fixture.sources, graphs: readers }, null);
+    for (const id of workflowStageIds) ok(snapshot.stages.some((stage) => stage.id === id), `no box for stage ${id}`);
+    deepStrictEqual(snapshot.stages.find((stage) => stage.id === "start")!.nodes, ["workflow:build"]);
+    ok(snapshot.stages.find((stage) => stage.id === "capture")!.nodes.includes("workflow:route_cases"));
+    ok(snapshot.stages.find((stage) => stage.id === "discovery")!.nodes.includes("discovery:conclude"));
+    deepStrictEqual(snapshot.stages.find((stage) => stage.id === "conclude")!.nodes, ["workflow:conclude"]);
+  } finally {
+    for (const reader of readers) reader.close();
+  }
+});
+
 test("a control writes the loop's control file and keeps the other flags; an ended loop and an unknown lane are refused", async () => {
   const fixture = fixtureRoot();
   const now = new Date("2026-10-25T10:06:00.000Z");
@@ -286,9 +319,14 @@ test("the server serves the page, the snapshot and the controls only to its own 
 });
 
 test("running nodes are marked in LangGraph's drawing without changing it", () => {
-  const drawing = "graph TD;\n\tbuild(build)\n";
+  const drawing = "graph TD;\n\tstart(start)\n\tcapture_capture(capture)\n\trepair_repair(repair)\n";
   equal(markRunning(drawing, []), drawing);
-  match(markRunning(drawing, ["capture", "capture", "repair"]), /^graph TD;\n\tbuild\(build\)\n\tclassDef running .*\n\tclass capture,repair running;\n$/);
+  equal(markRunning(drawing, [["missing"]]), drawing);
+  deepStrictEqual(drawnIds(["capture"], "capture"), ["capture_capture", "capture"]);
+  deepStrictEqual(drawnIds([], "rank"), ["rank"]);
+  // A stage of one node is drawn as the stage itself, so its node is marked by the stage's ID.
+  match(markRunning(drawing, [drawnIds(["capture"], "capture"), drawnIds(["capture"], "capture"), drawnIds(["repair"], "repair"), drawnIds(["start"], "build")]),
+    /^graph TD;\n(\t.*\n){3}\tclassDef running .*\n\tclass capture_capture,repair_repair,start running;\n$/);
 });
 
 test("the React client bundles", async () => {
@@ -297,13 +335,12 @@ test("the React client bundles", async () => {
   match(bundle, /api\/snapshot/);
 });
 
-test("LangGraph draws each stage as a subgraph of the grouped graph, keeping every node and edge", async () => {
+test("LangGraph draws each stage subgraph of the workflow inside its drawing", async () => {
   const reader = new GraphReader(graphSources(scratch("dashboard-drawing-"))[0]!);
   const drawing = await reader.drawing();
   reader.close();
   for (const stage of ["capture", "diagnose", "repair", "widen"]) match(drawing, new RegExp(`\\tsubgraph ${stage}\\n`));
-  match(drawing, new RegExp(`\\t${drawnId("diagnose", "hypothesize")}\\(hypothesize\\)`));
-  match(drawing, /\t__start__ --> start_build;/);
-  equal((drawing.match(/-->|-\.->/g) ?? []).length, 43, "every edge of the workflow graph is drawn");
-  equal(drawnId(null, "build"), "build");
+  match(drawing, new RegExp(`\\t${drawnIds(["diagnose"], "hypothesize")[0]}\\(hypothesize\\)`));
+  // LangGraph draws a stage of a single node as that node.
+  match(drawing, /\t__start__ --> start;/);
 });
