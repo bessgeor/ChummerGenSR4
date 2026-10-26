@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, rmSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { SetupError } from "../host/setup-error.js";
 import { GitCommandError, type BranchGit } from "./branch-git.js";
 
@@ -9,6 +9,9 @@ export type BlobId = string | null;
 
 /** One file a commit changes against another, by blob. */
 export type ChangedFile = { readonly path: string; readonly before: BlobId; readonly after: BlobId; /** Either side is a symbolic link or a submodule, not a file. */ readonly special: boolean };
+
+/** A worktree's `.git` file (null when it is not a file) and the branch and commit the repository has it on. */
+export type WorktreeState = { readonly gitFile: string | null; readonly branch: string | null; readonly head: string | null };
 
 const zeroBlob = /^0+$/;
 
@@ -48,17 +51,40 @@ export class Worktrees {
     this.git(["worktree", "prune"]);
   }
 
-  /** The repository's worktrees with the branch each has checked out (null when detached). */
-  list(): { folder: string; branch: string | null }[] {
-    const items: { folder: string; branch: string | null }[] = [];
+  /** The repository's worktrees with the branch each has checked out (null when detached) and its HEAD commit. */
+  list(): { folder: string; branch: string | null; head: string | null }[] {
+    const items: { folder: string; branch: string | null; head: string | null }[] = [];
     for (const block of this.git(["worktree", "list", "--porcelain"]).split(/\r?\n\r?\n/)) {
       const lines = block.split(/\r?\n/);
       const folder = lines.find((line) => line.startsWith("worktree "))?.slice("worktree ".length);
       if (folder === undefined) continue;
       const branch = lines.find((line) => line.startsWith("branch refs/heads/"))?.slice("branch refs/heads/".length) ?? null;
-      items.push({ folder, branch });
+      const head = lines.find((line) => line.startsWith("HEAD "))?.slice("HEAD ".length) ?? null;
+      items.push({ folder, branch, head });
     }
     return items;
+  }
+
+  /**
+   * A worktree's git state: its `.git` file, which ties the folder to the repository, and the branch and commit the
+   * repository has it on, read from the repository's own git folder rather than through the worktree.
+   */
+  state(folder: string): WorktreeState {
+    const path = join(folder, ".git");
+    const gitFile = existsSync(path) && statSync(path).isFile() ? readFileSync(path, "utf8") : null;
+    const entry = this.list().find((item) => samePath(item.folder, folder));
+    return { gitFile, branch: entry?.branch ?? null, head: entry?.head ?? null };
+  }
+
+  /** How a worktree's git state differs from `expected`, as sentences; empty when it does not. */
+  changedState(folder: string, expected: WorktreeState): string[] {
+    const now = this.state(folder);
+    const changes: string[] = [];
+    if (now.gitFile !== expected.gitFile) changes.push(`the worktree's .git file ${now.gitFile === null ? "is gone" : "changed"}`);
+    if (now.branch !== expected.branch || now.head !== expected.head) {
+      changes.push(`the worktree is on ${now.branch ?? "no branch"} at ${now.head ?? "no commit"}, not on ${expected.branch ?? "no branch"} at ${expected.head ?? "no commit"}`);
+    }
+    return changes;
   }
 
   /** Stages every change of the worktree (within `paths`, when given) and returns whether anything differs from its HEAD. */

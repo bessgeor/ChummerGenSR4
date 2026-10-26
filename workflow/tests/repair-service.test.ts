@@ -1,4 +1,5 @@
 import { deepStrictEqual, equal, ok, rejects } from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -245,13 +246,21 @@ test("a spent run budget starts no repair job", async () => {
   equal(setup.agents.calls.filter((call) => call.kind === "repair").length, 0);
 });
 
-test("a job that changes its context copy or adds to the scratch folder ends the run as infra, before any build", async () => {
+test("a job that changes its context copy or its worktree's git state, or adds to the scratch folder, ends the run as infra before any commit or build", async () => {
   const tamper: { name: string; touch: (context: string, scratch: string) => void; reason: RegExp }[] = [
     { name: "context.json", touch: (context) => writeFileSync(join(context, "context.json"), "{}"), reason: /context copy's files changed/ },
     { name: "evidence image", touch: (context) => writeFileSync(join(context, "evidence", "1-candidate.png"), "not the crop"), reason: /context copy's files changed/ },
     { name: "new context file", touch: (context) => writeFileSync(join(context, "note.txt"), "x"), reason: /context copy gained note\.txt/ },
     { name: "removed context file", touch: (context) => rmSync(join(context, "context.json")), reason: /context copy lost context\.json/ },
     { name: "scratch folder", touch: (_, scratch) => writeFileSync(join(scratch, "stash.cs"), "x"), reason: /scratch folder holds stash\.cs/ },
+    // The worktree's git state: its tie to the repository, and the commit its branch is at. Git hides the `.git` file on
+    // Windows, so it is written in place.
+    { name: ".git file", touch: (_, scratch) => writeFileSync(join(scratch, "source", ".git"), "gitdir: elsewhere\n", { flag: "r+" }), reason: /the worktree's \.git file changed/ },
+    { name: "removed .git file", touch: (_, scratch) => rmSync(join(scratch, "source", ".git")), reason: /the worktree's \.git file is gone/ },
+    {
+      name: "own commit", touch: (_, scratch) => execFileSync("git", ["-C", join(scratch, "source"), "commit", "-q", "--allow-empty", "-m", "by the job"]),
+      reason: /the worktree is on workflow\/.+\/attempt-1 at [0-9a-f]{40}, not on workflow\/.+\/attempt-1 at [0-9a-f]{40}/,
+    },
   ];
   for (const item of tamper) {
     const edit = patchedReply({ "Chummer/frmCreate.cs": repairedSource });
@@ -262,11 +271,16 @@ test("a job that changes its context copy or adds to the scratch folder ends the
       },
     });
     await rejects(setup.service.repair(setup.input(setup.repairs[cluster]!), setup.store),
-      (error: Error) => error instanceof SetupError && /outside its source copy/.test(error.message) && item.reason.test(error.message), item.name);
+      (error: Error) => error instanceof SetupError && /what only its worktree's files may change/.test(error.message) && item.reason.test(error.message), item.name);
     const stored = EvalRecordSchema.parse((await setup.store.get(recordNamespace("repair"), `${setup.threadId}/${cluster}/repair/1`))!.value);
     deepStrictEqual([stored.result.status, stored.labels.repair], ["infra", null], item.name);
     deepStrictEqual([setup.host.builds.length, setup.host.checks.length], [0, 0], item.name);
     ok(!existsSync(join(setup.folder, "repair", cluster, "attempt-1")), item.name);
+    // No attempt commit was made: the branch is where the job left it.
+    const git = processBranchGit(setup.harness.sourceRepository);
+    const branch = git(["rev-parse", `workflow/${setup.threadId}/repair/${cluster}/attempt-1`]).trim();
+    const source = git(["rev-parse", `workflow/${setup.threadId}/source`]).trim();
+    equal(item.name === "own commit" ? git(["rev-parse", `${branch}~1`]).trim() : branch, source, item.name);
   }
 });
 

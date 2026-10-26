@@ -26,7 +26,7 @@ import { runRecordedJob, type AttemptJobs } from "./repair-job.js";
 import { repairDocument, writeRepairDocument } from "./repair-report.js";
 import { maximumSubtasks } from "./plan-schemas.js";
 import { RepairOutputSchema, repairPromptVersion, validateRepair, type RepairOutput } from "./repair-schemas.js";
-import { changesOutsideSource, stageWorkspace, workspaceIn, type AttemptWorkspace } from "./workspace.js";
+import { changesOutsideSource, stageWorkspace, workspaceIn, WorktreeGuard, type AttemptWorkspace } from "./workspace.js";
 
 export type RepairDependencies = {
   readonly threadFolder: (threadId: string) => string;
@@ -170,7 +170,7 @@ export class RepairService {
           createScratchFolder: this.dependencies.createScratchFolder, log: this.dependencies.log,
         }).run()
         : await this.singleJob(label, jobs, recordId, brief, workspace, diagnosis.contextFolder, (folder) => this.dependencies.worktrees.add(folder, branch, source),
-          logFile(""), settings.deadlineMinutes);
+          logFile(""), settings.deadlineMinutes, new WorktreeGuard(this.dependencies.worktrees));
       if (outcome.kind === "not-started" && outcome.records.length === 0) return this.budgetExhausted(label, clusterId, options.agents.runBudgetMinutes);
       if (outcome.kind === "quota") {
         this.dependencies.log(`${label}: ${outcome.failure.kind}: ${outcome.failure.message}`);
@@ -221,7 +221,7 @@ export class RepairService {
 
   /** The single repair job of an attempt in a thread without fix changes, in the attempt's writable copy. */
   private async singleJob(label: string, jobs: AttemptJobs, recordId: string, brief: RepairBrief, workspace: AttemptWorkspace,
-    contextFolder: string, checkout: (folder: string) => void, logFile: string, deadlineMinutes: number): Promise<JobsOutcome> {
+    contextFolder: string, checkout: (folder: string) => void, logFile: string, deadlineMinutes: number, guard: WorktreeGuard): Promise<JobsOutcome> {
     const ran = await runRecordedJob<RepairOutput>(jobs, {
       label, recordId, promptVersion: repairPromptVersion, prompt: repairPrompt(brief, { sourceFolder: workspace.source, contextFolder: workspace.context }),
       images: brief.manifest.members.flatMap((member) => [join(workspace.context, member.canonicalCrop), join(workspace.context, member.candidateCrop)]),
@@ -229,8 +229,11 @@ export class RepairService {
       workspace: { folder: workspace.source, readOnly: [workspace.context], writable: true },
       // The deadline starts with the model job, so the job may not run past it.
       timeoutMinutes: () => Math.min(jobs.choice.timeoutMinutes, deadlineMinutes), logFile,
-      stage: () => stageWorkspace(workspace, contextFolder, checkout),
-      outside: () => changesOutsideSource(workspace, contextFolder),
+      stage: () => stageWorkspace(workspace, contextFolder, (folder) => {
+        checkout(folder);
+        guard.record(folder);
+      }),
+      outside: () => changesOutsideSource(workspace, contextFolder, guard),
     });
     if (ran === null) return { kind: "not-started", records: [], started: null, planned: null };
     const { record, result } = ran;

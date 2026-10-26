@@ -10,7 +10,7 @@ import type { RepairBrief } from "./repair-prompt.js";
 import { runRecordedJob, type AttemptJobs, type RecordedJob } from "./repair-job.js";
 import { RepairOutputSchema, validateRepair, type RepairOutput } from "./repair-schemas.js";
 import { applyJoin, joinChanges, joinedPaths, subtaskChanges, type JoinedFile, type SourceBlobs, type SubtaskChange } from "./subtask-join.js";
-import { changesOutsideSource, stageWorkspace, workspaceIn, type AttemptWorkspace } from "./workspace.js";
+import { changesOutsideSource, stageWorkspace, workspaceIn, WorktreeGuard, type AttemptWorkspace } from "./workspace.js";
 
 /** A subtask as the attempt's archive keeps it. */
 export type SubtaskOutcome = {
@@ -126,6 +126,7 @@ export class PlannedAttempt {
   async run(): Promise<JobsOutcome> {
     const { input } = this;
     const { workspace, jobs } = input;
+    const guard = new WorktreeGuard(input.git.worktrees);
     const ran = await runRecordedJob<PlanOutput>(jobs, {
       label: `${input.label} plan`, recordId: input.recordId, promptVersion: planPromptVersion,
       prompt: planPrompt(input.brief, { sourceFolder: workspace.source, contextFolder: workspace.context }),
@@ -133,10 +134,13 @@ export class PlannedAttempt {
       workspace: { folder: workspace.source, readOnly: [workspace.context] }, timeoutMinutes: () => Math.min(jobs.choice.timeoutMinutes, input.deadlineMs / 60_000),
       logFile: input.logFile(""),
       stage: () => {
-        stageWorkspace(workspace, input.contextFolder, (folder) => input.git.worktrees.add(folder, input.git.branch, input.git.source));
+        stageWorkspace(workspace, input.contextFolder, (folder) => {
+          input.git.worktrees.add(folder, input.git.branch, input.git.source);
+          guard.record(folder);
+        });
         this.started = jobs.now();
       },
-      outside: () => changesOutsideSource(workspace, input.contextFolder),
+      outside: () => changesOutsideSource(workspace, input.contextFolder, guard),
     });
     if (ran === null) return { kind: "not-started", records: [], started: null, planned: null };
     this.records.push(ran.record);
@@ -230,6 +234,7 @@ export class PlannedAttempt {
     const { worktrees } = input.git;
     // The commit the subtask starts from: the source commit with its blockers' join, once its worktree is made.
     let startCommit = input.git.source;
+    const guard = new WorktreeGuard(worktrees);
     try {
       const job = await runRecordedJob<RepairOutput>(input.jobs, {
         label, recordId: `${input.recordId}/task-${task.id}`, promptVersion: subtaskPromptVersion,
@@ -241,8 +246,9 @@ export class PlannedAttempt {
           worktrees.add(folder, input.git.subtaskBranch(task.id), input.git.source);
           applyJoin(worktrees, start, folder);
           startCommit = worktrees.commitAll(folder, `Start of subtask ${task.id}: the changes of the subtasks that block it\n`) ?? input.git.source;
+          guard.record(folder);
         }),
-        outside: () => changesOutsideSource(copy, input.contextFolder),
+        outside: () => changesOutsideSource(copy, input.contextFolder, guard),
       });
       if (job === null) return { kind: "not-started" };
       // Whatever the job left is the subtask's commit; only an answer makes it the subtask's change.

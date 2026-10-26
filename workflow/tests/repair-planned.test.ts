@@ -1,4 +1,5 @@
-import { deepStrictEqual, equal, ok } from "node:assert/strict";
+import { deepStrictEqual, equal, ok, rejects } from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -9,6 +10,7 @@ import { QuotaWaiter } from "../src/diagnosis/quota-waiter.js";
 import { EvalRecordSchema, putRecord, recordNamespace } from "../src/evals/eval-record.js";
 import { FixRecordSchema } from "../src/fixes/fix-record.js";
 import { createScratchFolder } from "../src/host/scratch-folder.js";
+import { SetupError } from "../src/host/setup-error.js";
 import type { AttemptDocument } from "../src/repair/attempt-archive.js";
 import type { ClusterRepair } from "../src/repair/cluster-repair.js";
 import { blockerClosure, validatePlan, type PlanOutput, type Subtask } from "../src/repair/plan-schemas.js";
@@ -184,6 +186,23 @@ test("a subtask whose changes differ from its answer, that declines or that fail
   equal(third.update.attempt!.stage, "model");
   ok(third.update.attempt!.reason!.startsWith("invalid_output: subtask 1:"), third.update.attempt!.reason!);
   equal(third.update.attempt!.attempt, 3);
+});
+
+test("a subtask that commits in its worktree itself ends the run as infra, and nothing is joined or built", async () => {
+  const setup = await planned({
+    plan: () => ({ answer: plan([task(1, ["Chummer/a.cs"])]) }),
+    subtask: (_id, call) => {
+      const reply = edit(call, { "Chummer/a.cs": "a" });
+      execFileSync("git", ["-C", call.workspace.folder, "add", "--all"]);
+      execFileSync("git", ["-C", call.workspace.folder, "commit", "-q", "-m", "by the job"]);
+      return reply;
+    },
+  });
+  await rejects(setup.service.repair(setup.input(setup.repairs[cluster]!), setup.store),
+    (error: Error) => error instanceof SetupError && /the worktree is on workflow\/.+\/attempt-1-task-1 at [0-9a-f]{40}, not on/.test(error.message));
+  equal(setup.host.builds.length, 0);
+  const git = processBranchGit(setup.repository);
+  equal(git(["rev-parse", `workflow/${setup.threadId}/repair/${cluster}/attempt-1`]).trim(), git(["rev-parse", `workflow/${setup.threadId}/source`]).trim());
 });
 
 test("a plan that declines or breaks the rules rejects the attempt at stage model without a subtask", async () => {

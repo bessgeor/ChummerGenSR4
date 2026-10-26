@@ -1,5 +1,6 @@
 import { cpSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import type { Worktrees, WorktreeState } from "../git/worktrees.js";
 import type { ScratchFolder } from "../host/scratch-folder.js";
 import { fingerprintFolder, listFiles } from "../steps/fingerprint.js";
 
@@ -35,12 +36,30 @@ export function stageWorkspace(workspace: AttemptWorkspace, contextFolder: strin
   checkout(workspace.source);
 }
 
+/** The git state a job's worktree had when the job got it, so a job that changed it is caught before anything is committed. */
+export class WorktreeGuard {
+  private expected: WorktreeState | null = null;
+
+  constructor(private readonly worktrees: Worktrees) {}
+
+  /** Records the worktree's state once it is ready for the job. */
+  record(folder: string): void {
+    this.expected = this.worktrees.state(folder);
+  }
+
+  /** What the job changed of the worktree's git state; nothing before the state was recorded. */
+  changes(folder: string): string[] {
+    return this.expected === null ? [] : this.worktrees.changedState(folder, this.expected);
+  }
+}
+
 /**
- * What a repair job changed outside its worktree, as sentences: the context copy differing from the sealed context it
- * was copied from, or anything in the scratch folder beside the worktree and the context copy. Only the worktree may change.
+ * What a repair job changed besides its worktree's files, as sentences: the worktree's git state (its `.git` file, its
+ * branch or its commit), the context copy differing from the sealed context it was copied from, or anything in the
+ * scratch folder beside the worktree and the context copy. Only the worktree's files may change.
  */
-export async function changesOutsideSource(workspace: AttemptWorkspace, contextFolder: string): Promise<string[]> {
-  const changes: string[] = [];
+export async function changesOutsideSource(workspace: AttemptWorkspace, contextFolder: string, guard: WorktreeGuard): Promise<string[]> {
+  const changes: string[] = [...guard.changes(workspace.source)];
   const expected = new Set(["source", workspace.context.slice(workspace.root.length + 1)]);
   for (const entry of readdirSync(workspace.root)) {
     if (!expected.has(entry)) changes.push(`the scratch folder holds ${entry}, which the job did not get`);

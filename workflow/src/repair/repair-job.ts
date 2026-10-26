@@ -73,7 +73,7 @@ export async function runRecordedJob<T>(jobs: AttemptJobs, spec: RecordedJobSpec
   // Only the job's own folder may change, whichever provider ran it.
   const outside = await spec.outside();
   const result: AgentResult<T> = outside.length === 0 ? ran
-    : { ok: false, failure: { kind: "infra", message: `${spec.label}: the job changed files outside its source copy: ${outside.join("; ")}.` }, usage: ran.usage, durationMs: ran.durationMs, sessionId: ran.sessionId };
+    : { ok: false, failure: { kind: "infra", message: `${spec.label}: the job changed what only its worktree's files may change: ${outside.join("; ")}.` }, usage: ran.usage, durationMs: ran.durationMs, sessionId: ran.sessionId };
   const record: EvalRecord = {
     schemaVersion: 2, recordId: spec.recordId, jobKind: "repair", origin: "workflow", threadId: jobs.threadId, subject: { kind: "discrepancy-cluster", id: jobs.clusterId },
     challenged: null, contextHash: jobs.contextHash, promptVersion: spec.promptVersion,
