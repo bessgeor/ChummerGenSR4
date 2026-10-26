@@ -66,11 +66,25 @@ The tests run the workflow graph with the fake discovery runner, as for task 3.1
 
 The discovery thread's own report, relayed while the stage runs, ends with a summary line that also starts with `Discovery:`; the end-of-run report's `Discovery:` line is the one after the inventory line.
 
+### Task 5.1: docs
+
+`AGENTS.md` (Parity workflow, Interaction discovery, Loop, Evaluation, Tuning) and `README.md` describe the default suite, the `discovery` stage, `--no-discovery`, the profile's `discovery.targets`, the discovery's place in the exit status, the `Discovery:` report line and `outcome.json`, and the rank and scenario configurations and certificates of a thread that may discover.
+
+| Command | Result |
+| --- | --- |
+| `npm run workflow:typecheck` | Passed. |
+| `npm run workflow:test`, run 1 (before the wording fix in `AGENTS.md`) | 508 tests, 508 passed. |
+| `npm run workflow:test`, run 2 (the branch's docs) | 508 tests, 508 passed. |
+| `npm run openspec:validate` | Passed: 23 passed, 0 failed. |
+| `(Get-FileHash bin/ChummerGenSR4.exe -Algorithm SHA256).Hash` | `9FF3009946F0212842EB5AA803C3D8E1697752040229F52B25F584E7B0AE9E56`, the canonical hash. |
+
 ## Fixture-tested scope
 
 The runner (`composeDiscovery`, `discoveryRunner`, `hostDiscovery`) is tested with the discovery harness's fake jobs and capture runner: starting a new thread (an ID that already has a thread is refused), resuming an unfinished thread without running its finished jobs again (a finished or absent thread is refused), and reading a finished thread's conclusion by ID without running anything (an absent thread is refused). The discovery graph tests run on the same composition as the entry points.
 
 ## Live evidence
+
+None for task 5.1: it changes only `AGENTS.md`, `README.md` and this change's files, and `bin/ChummerGenSR4.exe` was not run, built or touched; its SHA-256 at the end of task 5.1 is `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`.
 
 None for task 4.1: it changes no capture, compare or app behaviour, and `bin/ChummerGenSR4.exe` was not run, built or touched; its SHA-256 at the end of task 4.1 is `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`.
 
