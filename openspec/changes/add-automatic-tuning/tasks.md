@@ -4,7 +4,7 @@ Each task names the tasks it builds on as `(after: …)`, by number in this list
 
 ## 1. Trigger and state
 
-- [ ] 1.1 Add `autoTuning` to the profile, the count of new hypothesis records and `out/evals/tuning/auto.json`. Evidence: workflow tests for not due, due, `--force`, records added during a tuning, and an invalid profile.
+- [x] 1.1 Add `autoTuning` to the profile, the count of new hypothesis records and `out/evals/tuning/auto.json`. Evidence: workflow tests for not due, due, `--force`, records added during a tuning, and an invalid profile.
 
 ## 2. Freeze and cycle
 
