@@ -11,7 +11,7 @@ export function buildConcludeStage(loop: LoopSteps) {
         threadId: state.threadId, options: state.options, plan: state.plan, captures: state.captures, compares: state.compares,
         triagePath: state.triageSummary.path, otherFindings: state.triageSummary.otherFindings, clusters: state.clusters ?? {}, check: state.diagnosisCheck ?? null,
         repairs: state.repairs ?? {}, widenings: state.widenings ?? {}, accepted: state.accepted ?? null, agentMilliseconds: state.agentMilliseconds ?? 0,
-        startedUtc: state.startedUtc ?? null,
+        startedUtc: state.startedUtc ?? null, discovery: state.threadDiscovery ?? null,
       });
       return { outcome: document, outcomePath: path };
     })

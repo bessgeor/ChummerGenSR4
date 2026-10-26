@@ -19,7 +19,7 @@ import type { Arguments, NodeName } from "../src/options/arguments.js";
 import { resolveRunOptions, type RunOptions } from "../src/options/run-options.js";
 import type { Profile } from "../src/options/profile.js";
 import { RunnerDiscovery } from "../src/discovery/thread-discovery.js";
-import { FakeDiscoveryRunner, noDiscovery } from "./thread-discovery-fixtures.js";
+import { FakeDiscoveryRunner, noDiscovery, type FakeConclusion } from "./thread-discovery-fixtures.js";
 import type { CompareReport } from "../../contracts/generated/typescript/parity-compare-report.js";
 import type { CaseDetails } from "../src/steps/case-details.js";
 import type { InputFingerprints } from "../src/steps/input-fingerprints.js";
@@ -156,13 +156,16 @@ const noWidening: WideningSteps = {
 /** Records each conclusion; the loop itself is tested with the diagnosis harness. */
 class FakeLoop implements LoopSteps {
   readonly concluded: string[] = [];
+  readonly inputs: ConcludeInput[] = [];
 
   conclude(input: ConcludeInput): Conclusion {
     this.concluded.push(input.threadId);
+    this.inputs.push(input);
     const document: OutcomeDocument = {
       threadId: input.threadId, outcome: "verified_for_scope", scope: { cases: input.plan.map((item) => item.name), captures: null },
       problems: { cases: [], otherFindings: 0 }, clusters: [], accepted: null,
-      measures: { clusters: 0, fixed: 0, fixRate: null, attempts: 0, modelMilliseconds: 0, elapsedMilliseconds: null }, concludedUtc: "2026-10-01T12:00:00Z",
+      measures: { clusters: 0, fixed: 0, fixRate: null, attempts: 0, modelMilliseconds: 0, elapsedMilliseconds: null }, discovery: input.discovery,
+      concludedUtc: "2026-10-01T12:00:00Z",
     };
     return { document, path: "outcome.json" };
   }
@@ -613,7 +616,7 @@ test("a clean scope discovers in thread disc-<thread> from its own inventory, re
     ],
   };
   const run = harness(["a", "b"], new FakeSteps(), new MemorySaver(), undefined, setup);
-  ok((await run.startRun()) !== 3, run.lines.join("\n"));
+  equal(await run.startRun(), 1, run.lines.join("\n"));
   const threadId = run.threadId();
   const discoveryThread = `disc-${threadId}`;
   deepStrictEqual(setup.runner.calls, [`start ${discoveryThread}`]);
@@ -629,7 +632,10 @@ test("a clean scope discovers in thread disc-<thread> from its own inventory, re
   });
   ok(state.outcome !== null);
   const started = run.lines.indexOf(`Discovery thread ${discoveryThread}: baseline ${threadId}, 2 targets at most.`);
-  deepStrictEqual(run.lines.slice(started + 1, started + 3), [`Report of ${discoveryThread}`, `Discovery thread ${discoveryThread} finished: exit 1; ${state.threadDiscovery!.documentPath}`]);
+  const { documentPath } = state.threadDiscovery!;
+  deepStrictEqual(run.lines.slice(started + 1, started + 4), [
+    `Report of ${discoveryThread}`, `Discovery: 4 targets; registry 0 -> 2 entries; ${documentPath}`, `Discovery thread ${discoveryThread} finished: exit 1; ${documentPath}`,
+  ]);
 });
 
 test("a scope with a difference, a failed step or another finding is diagnosed and does not discover", async () => {
@@ -665,7 +671,45 @@ test("--no-discovery, --no-diagnosis, --only and the registry's case file turn d
     const state = await stateOf(run);
     deepStrictEqual([setup.runner.calls, state.options.discovery, state.threadDiscovery], [[], null, null], name);
     deepStrictEqual([setup.diagnosed, run.loop.concluded], [diagnoses ? [run.threadId()] : [], [run.threadId()]], name);
+    deepStrictEqual([run.loop.inputs[0]!.discovery, state.outcome?.discovery], [null, null], name);
+    ok(!run.lines.some((line) => line.startsWith("Discovery")), name);
   }
+});
+
+test("the exit status counts the discovery's status 0, 1 or 2, and the report and the outcome show the discovery after the triage and inventory lines", async () => {
+  const conclusions: [number, FakeConclusion, string][] = [
+    [0, { exitStatus: 0, scenarios: [{ case: "build-x@s1", admission: "admitted", outcome: "clear" }] }, "1 admitted (build-x@s1), 0 differing"],
+    [1, {
+      exitStatus: 1,
+      scenarios: [{ case: "build-x@s1", admission: "admitted", outcome: "finding" }, { case: "build-y@s2", admission: "admitted", outcome: "clear" }],
+    }, "2 admitted (build-x@s1, build-y@s2), 1 differing (build-x@s1)"],
+    [2, { exitStatus: 2, scenarios: [{ case: null, admission: null, outcome: null }] }, "0 admitted, 0 differing"],
+  ];
+  for (const [status, conclusion, found] of conclusions) {
+    const setup = discovering();
+    setup.runner.conclusion = conclusion;
+    const run = harness(["a"], new FakeSteps(), new MemorySaver(), undefined, setup);
+    equal(await run.startRun(), status, run.lines.join("\n"));
+    const threadId = run.threadId();
+    const state = await stateOf(run);
+    const documentPath = join(setup.root, "discovery", `disc-${threadId}`, "discovery.json");
+    deepStrictEqual([run.loop.inputs[0]!.discovery, state.outcome?.discovery, state.outcome?.outcome], [state.threadDiscovery, state.threadDiscovery, "verified_for_scope"], `${status}`);
+    // The end-of-run report: the triage and inventory lines, the discovery's line, the outcome and the exit status.
+    const report = run.lines.slice(run.lines.findIndex((line) => line.startsWith("Triage: ")));
+    deepStrictEqual(report.map((line) => line.split(":")[0]), ["Triage", "Inventory", "Discovery", "Outcome", `Thread ${threadId} finished`], report.join("\n"));
+    equal(report[2], `Discovery: disc-${threadId} exit ${status}; ${found}; ${documentPath}`);
+    equal(report.at(-1), `Thread ${threadId} finished: exit ${status}.`);
+  }
+});
+
+test("the exit status is the highest of the capture, compare and discovery statuses", () => {
+  const discovery = (exit: number) => ({ threadId: "disc-wf", exitStatus: exit, admitted: [], differing: [], documentPath: "discovery.json" });
+  const step = (status: 0 | 1 | 2): Record<string, StepOutcome> => ({ a: { case: "a", status, runFolder: "runs/a", key: "k", reusedFrom: null } });
+  deepStrictEqual([
+    exitStatus({ captures: step(2), compares: step(0), threadDiscovery: discovery(1) }), exitStatus({ captures: step(0), compares: step(2), threadDiscovery: discovery(1) }),
+    exitStatus({ captures: step(0), compares: step(1), threadDiscovery: discovery(2) }), exitStatus({ captures: step(0), compares: step(1), threadDiscovery: discovery(0) }),
+    exitStatus({ captures: step(0), compares: step(0), threadDiscovery: null }),
+  ], [2, 2, 2, 1, 0]);
 });
 
 test("a thread stopped during its discovery resumes the same discovery thread without capturing again or starting another", async () => {

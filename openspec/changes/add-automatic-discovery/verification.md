@@ -47,11 +47,32 @@ The graph tests for this task, in `workflow/tests/graph.test.ts`, run the workfl
 `workflow/tests/thread-discovery.test.ts` covers the discovery thread's options, the read of a finished discovery thread without running it, and an unreadable `discovery.json` (setup error). `workflow/tests/options.test.ts` and `workflow/tests/tuning-dispatch.test.ts` cover `--no-discovery`, the profile's `discovery.targets`, the stored rank and scenario configurations and the rank and scenario certificates an unattended thread that may discover needs.
 
 The workflow state records the discovery as `threadDiscovery`: LangGraph refuses a state field with the name of a node, and the stage is `discovery`.
+
+### Task 4.1: status, outcome and report
+
+| Command | Result |
+| --- | --- |
+| `npm run workflow:typecheck` | Passed. |
+| `node --import tsx --test workflow/tests/graph.test.ts workflow/tests/loop-service.test.ts workflow/tests/thread-discovery.test.ts workflow/tests/discovery-runner.test.ts` | 38 tests, 38 passed. |
+| `npm run workflow:test`, run 1 (before the review fixes) | 507 tests, 507 passed. |
+| `npm run workflow:test`, run 2 (the branch's code) | 508 tests, 508 passed. |
+| `npm run openspec:validate` | Passed: 23 passed, 0 failed. |
+
+The tests run the workflow graph with the fake discovery runner, as for task 3.1:
+
+- `workflow/tests/graph.test.ts`: a clean scope whose discovery concludes with status 0, 1 or 2 makes `npm start` exit with 0, 1 or 2; the end-of-run report prints, in this order, the triage line, the inventory line, `Discovery: disc-<thread> exit <status>; <n> admitted (<cases>), <m> differing (<cases>); <discovery.json>`, the outcome line and the exit status; the conclusion gets the thread's discovery and the outcome stays `verified_for_scope`. A thread that does not discover prints no `Discovery:` report line and concludes with discovery null. `exitStatus` takes the highest of the capture, compare and discovery statuses (a capture or compare status 2 stays above a discovery status 1).
+- `workflow/tests/loop-service.test.ts`: `outcome.json` holds the discovery (thread, exit status, admitted and differing scenarios, `discovery.json`) and the outcome `verified_for_scope` when an admitted scenario differs; without discovery it holds `discovery: null`.
+- `workflow/tests/thread-discovery.test.ts`: a discovery conclusion with an exit status other than 0, 1 or 2 is a setup error.
+
+The discovery thread's own report, relayed while the stage runs, ends with a summary line that also starts with `Discovery:`; the end-of-run report's `Discovery:` line is the one after the inventory line.
+
 ## Fixture-tested scope
 
 The runner (`composeDiscovery`, `discoveryRunner`, `hostDiscovery`) is tested with the discovery harness's fake jobs and capture runner: starting a new thread (an ID that already has a thread is refused), resuming an unfinished thread without running its finished jobs again (a finished or absent thread is refused), and reading a finished thread's conclusion by ID without running anything (an absent thread is refused). The discovery graph tests run on the same composition as the entry points.
 
 ## Live evidence
+
+None for task 4.1: it changes no capture, compare or app behaviour, and `bin/ChummerGenSR4.exe` was not run, built or touched; its SHA-256 at the end of task 4.1 is `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`.
 
 None for task 3.1: it changes no capture, compare or app behaviour, and `bin/ChummerGenSR4.exe` was not run, built or touched; its SHA-256 at the end of task 3.1 is `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`.
 
@@ -62,3 +83,5 @@ None for task 2.1: it changes no capture, compare or app behaviour, and `bin/Chu
 `npm run discover` against a real thread, with real jobs and a live capture run, is not part of this task's evidence.
 
 A workflow thread that discovers through the real discovery runner, real jobs and a live capture run is not part of task 3.1's evidence. In task 3.1 the workflow's exit status and `outcome.json` do not include the discovery.
+
+The exit status, `outcome.json` and the `Discovery:` report line of task 4.1 are tested with the fake discovery runner only; no thread has discovered through the real runner and a live capture run.

@@ -16,7 +16,7 @@ Each task names the tasks it builds on as `(after: …)`, by number in this list
 
 ## 4. Status, outcome and report
 
-- [ ] 4.1 (after: 3.1) Count the discovery's status in the exit status and show the discovery in `outcome.json` and the report. Evidence: workflow tests for statuses 0, 1 and 2 of the discovery and the report lines.
+- [x] 4.1 (after: 3.1) Count the discovery's status in the exit status and show the discovery in `outcome.json` and the report. Evidence: workflow tests for statuses 0, 1 and 2 of the discovery and the report lines.
 
 ## 5. Docs
 

@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { CasePlan } from "../cases/case-plan.js";
 import { SetupError } from "../host/setup-error.js";
+import { threadDiscoveryLines, threadDiscoveryStatus } from "../discovery/thread-discovery.js";
 import type { Command } from "../options/arguments.js";
 import type { RunOptions } from "../options/run-options.js";
 import { inventoryLines } from "../inventory/inventory-service.js";
@@ -53,11 +54,13 @@ export function threadConfig(threadId: string, signal: AbortSignal | undefined) 
   };
 }
 
-/** The highest finished status of every capture and compare, of the diagnosis, of the repair and of the widening; the outcome does not count. */
-export function exitStatus(state: Pick<WorkflowStateValue, "captures" | "compares"> & Partial<Pick<WorkflowStateValue, "clusters" | "diagnosisCheck" | "repairs" | "widenings" | "earlierWidenings">>): number {
+/** The highest finished status of every capture and compare, of the diagnosis, of the repair, of the widening and of the discovery; the outcome does not count. */
+export function exitStatus(state: Pick<WorkflowStateValue, "captures" | "compares">
+  & Partial<Pick<WorkflowStateValue, "clusters" | "diagnosisCheck" | "repairs" | "widenings" | "earlierWidenings" | "threadDiscovery">>): number {
   const statuses = [...Object.values(state.captures), ...Object.values(state.compares)].map((outcome) => outcome.status);
   const widenings = [...(state.earlierWidenings ?? []), ...Object.values(state.widenings ?? {})];
-  return Math.max(0, ...statuses, diagnosisStatus(state.clusters ?? {}, state.diagnosisCheck ?? null), repairStatus(state.repairs ?? {}), wideningStatus(widenings));
+  return Math.max(0, ...statuses, diagnosisStatus(state.clusters ?? {}, state.diagnosisCheck ?? null), repairStatus(state.repairs ?? {}), wideningStatus(widenings),
+    threadDiscoveryStatus(state.threadDiscovery ?? null));
 }
 
 function report(state: WorkflowStateValue, readCase: RunDependencies["readCase"], log: (line: string) => void): void {
@@ -74,6 +77,8 @@ function report(state: WorkflowStateValue, readCase: RunDependencies["readCase"]
   }
   // A thread checkpointed before the inventory existed has no such field at all.
   for (const line of inventoryLines(state.inventorySummary, state.triageSummary !== null)) log(line);
+  // A thread checkpointed before discovery existed has no such field at all.
+  for (const line of threadDiscoveryLines(state.threadDiscovery ?? null)) log(line);
   // A thread checkpointed before diagnosis existed has no such fields at all.
   for (const line of describeDiagnosis(state.clusters ?? {}, state.diagnosisCheck ?? null, state.diagnosisPath ?? null)) log(line);
   for (const line of describeRepair(state.repairs ?? {}, state.repairPath ?? null)) log(line);
