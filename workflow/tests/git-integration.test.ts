@@ -88,6 +88,23 @@ test("a commit that does not rebase cleanly is not merged, nor any after it", ()
   equal(repo.worktrees.list().length, 1);
 });
 
+test("a rebase that fails without a conflict is an error, not a conflict, and leaves no rebase behind", () => {
+  const repo = repositoryOnMain();
+  const first = repo.commitOn(repo.start, "Fix d-1", { "Chummer/frmCreate.cs": "create fixed\n" });
+  write(repo.root, "README.md", "moved on\n");
+  repo.run("add", "README.md");
+  repo.run("commit", "-q", "-m", "main moved");
+  const before = repo.run("rev-parse", "main");
+  // The replay has to write a commit, and signing it fails.
+  repo.run("config", "commit.gpgsign", "true");
+  repo.run("config", "gpg.program", "node");
+  const request = repo.request([repo.item("d-1", first)]);
+  throws(() => integrate(repo.git, repo.worktrees, request), (error) => error instanceof SetupError && /rebase/.test(error.message));
+  equal(repo.run("rev-parse", "main"), before);
+  equal(repo.worktrees.list().length, 1);
+  equal(repo.run("for-each-ref", "refs/heads/workflow/wf-1/integration"), "");
+});
+
 test("a branch no worktree has checked out is moved by compare-and-swap, and one that moved meanwhile is a setup error", () => {
   const repo = repositoryOnMain();
   repo.run("branch", "release");

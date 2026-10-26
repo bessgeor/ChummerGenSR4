@@ -110,6 +110,8 @@ export function integrate(git: BranchGit, worktrees: Worktrees, request: Integra
         if (!(error instanceof GitCommandError)) throw error;
         const files = inWorktree(["diff", "--name-only", "--diff-filter=U"]).split(/\r?\n/).filter((path) => path.length > 0);
         inWorktree(["rebase", "--abort"]);
+        // A rebase that stopped with no file to resolve did not conflict: it failed, and that is not a result of the merge.
+        if (files.length === 0) throw error;
         inWorktree(["checkout", "--quiet", "--detach", tip]);
         blocked = item.name;
         items.push({ name: item.name, status: "conflict", branch: item.branch, mergeCommit: null, reason: `the rebase onto ${request.branch} conflicts${files.length === 0 ? "" : ` in ${files.join(", ")}`}`, files });

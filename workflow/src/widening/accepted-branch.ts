@@ -71,7 +71,11 @@ export function promote(promotion: Promotion): string | null {
   }
   const head = worktrees.head(worktree);
   let fix: string;
-  if (head !== promotion.start && worktrees.trailer(head, "Repair-Record") === trailers.record) {
+  if (head !== promotion.start) {
+    // Only the promotion's own commit, made on the start before an interruption, may be on the worktree's branch.
+    if (worktrees.trailer(head, "Repair-Record") !== trailers.record || worktrees.parent(head) !== promotion.start) {
+      throw new SetupError(`The widened worktree ${worktree} is at ${head}, not at its start ${promotion.start}; a commit that is not this promotion's was made on its branch, and nothing is promoted.`);
+    }
     fix = head;
   } else {
     worktrees.stage(worktree);

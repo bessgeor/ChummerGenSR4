@@ -20,8 +20,21 @@ export class GitCommandError extends SetupError {
   }
 }
 
-/** Settings every command gets, so the machine's configuration cannot quote paths or change line endings of the diff text. */
-const pinned = ["-c", "core.quotepath=false"];
+/** The empty tree, which git knows without an object: attributes are read from it instead of from the working tree. */
+const emptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+/** Commands that read the working tree's attributes: git cannot clean up a conflicting rebase or merge with the empty tree's. */
+const treeAttributesKept = new Set(["rebase", "merge"]);
+
+/**
+ * Settings every command gets, so the machine's configuration cannot quote paths, and no line-ending conversion or
+ * attribute of the machine or the repository changes the bytes a file has when it is staged or checked out: a worktree
+ * holds the bytes of the snapshot the candidate was built from.
+ */
+const pinned = [
+  "-c", "core.quotepath=false", "-c", "core.autocrlf=false", "-c", "core.safecrlf=false", "-c", "core.eol=lf",
+  "-c", "core.attributesFile=/dev/null",
+];
 
 /**
  * The repository's git: commands run with its git folder (found once) in `cwd`, or in a worktree when `worktree` is given,
@@ -31,7 +44,8 @@ export function processBranchGit(repositoryRoot: string): BranchGit {
   let gitFolder: string | null = null;
   const run = (args: readonly string[], options: GitOptions = {}) => {
     try {
-      return execFileSync("git", [...pinned, ...args], {
+      const attributes = args.some((arg) => treeAttributesKept.has(arg)) ? [] : [`--attr-source=${emptyTree}`];
+      return execFileSync("git", [...pinned, ...attributes, ...args], {
         cwd: options.cwd ?? repositoryRoot, env: { ...process.env, ...options.env }, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, windowsHide: true,
         stdio: ["pipe", "pipe", "pipe"], ...(options.input === undefined ? {} : { input: options.input }),
       });

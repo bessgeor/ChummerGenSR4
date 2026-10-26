@@ -1,6 +1,6 @@
 import { deepStrictEqual, equal, notEqual, ok, throws } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createSourceSnapshot, processGit } from "../src/diagnosis/source-snapshot.js";
@@ -91,6 +91,24 @@ test("an existing source branch whose content is not the snapshot's is a setup e
   throws(() => threadSource(other.branchGit, "wf-12", other.snapshot.commit, other.snapshot.folder, join(scratch(), "source.index")), SetupError);
 });
 
+test("line-ending settings and attributes of the machine and the repository do not change the bytes of the source commit or of a worktree", async () => {
+  const repo = repository();
+  git(repo, "config", "core.autocrlf", "true");
+  write(repo, ".gitattributes", "* text eol=crlf\n");
+  git(repo, "add", "-A");
+  git(repo, "commit", "-q", "-m", "everything");
+  // An edit with LF endings only, as the candidate is built from it.
+  write(repo, "Chummer/frmCreate.cs", "class frmCreate\n{\n    int lf;\n}\n");
+  const snapshot = await createSourceSnapshot(repo, join(scratch(), "source"), processGit(repo));
+  const branchGit = processBranchGit(repo);
+  const source = threadSource(branchGit, "wf-14", snapshot.commit, snapshot.folder, join(scratch(), "source.index"));
+  const bytes = readFileSync(join(snapshot.folder, "Chummer", "frmCreate.cs"));
+  ok(!bytes.includes("\r"));
+  const worktree = join(scratch(), "source");
+  new Worktrees(branchGit, repo).add(worktree, threadBranches.widening("wf-14", "d-1", 1), source);
+  ok(readFileSync(join(worktree, "Chummer", "frmCreate.cs")).equals(bytes));
+});
+
 test("a snapshot equal to its commit is the source commit itself, and a snapshot without Core/ is a setup error", async () => {
   const run = await thread("wf-2", true);
   equal(run.source, run.snapshot.commit);
@@ -164,6 +182,23 @@ test("a widened worktree that stages the accepted tree has nothing to commit", a
   equal(promote(run.promotion("d-1", worktree, null)), null);
   equal(run.branch.tip(), null);
   equal(run.worktrees.head(worktree), run.source);
+});
+
+test("a widened worktree whose branch has a commit that is not the promotion's is a setup error and moves nothing", async () => {
+  const run = await thread("wf-15");
+  const worktree = run.widened("d-1", run.source, { "Chummer/untracked.cs": "stray" });
+  run.worktrees.stage(worktree);
+  const stray = run.worktrees.commitStaged(worktree, "Something else\n");
+  write(worktree, "Chummer/frmCreate.cs", "class frmCreate { int restored; }");
+  run.worktrees.stage(worktree);
+  throws(() => promote(run.promotion("d-1", worktree, null)), (error) => error instanceof SetupError && /not at its start/.test(error.message));
+  equal(run.branch.tip(), null);
+  equal(run.worktrees.head(worktree), stray);
+  // The promotion's own commit with another parent than the start is refused the same way.
+  const made = run.worktrees.commitStaged(worktree, `Fix discrepancy d-1\n\nRepair-Record: wf-15/d-1/repair/1\n`);
+  throws(() => promote(run.promotion("d-1", worktree, null)), (error) => error instanceof SetupError && /not at its start/.test(error.message));
+  equal(run.branch.tip(), null);
+  notEqual(run.worktrees.parent(made), run.source);
 });
 
 test("a widened worktree without Core/ is a setup error and makes no commit", async () => {
