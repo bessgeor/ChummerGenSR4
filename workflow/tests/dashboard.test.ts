@@ -273,7 +273,8 @@ test("the snapshot has a stage box for every stage subgraph of the workflow, lis
     for (const id of workflowStageIds) ok(snapshot.stages.some((stage) => stage.id === id), `no box for stage ${id}`);
     deepStrictEqual(snapshot.stages.find((stage) => stage.id === "start")!.nodes, ["workflow:build"]);
     ok(snapshot.stages.find((stage) => stage.id === "capture")!.nodes.includes("workflow:route_cases"));
-    ok(snapshot.stages.find((stage) => stage.id === "discovery")!.nodes.includes("discovery:conclude"));
+    // The workflow's discovery stage runs a discovery thread, whose own graph's nodes are that stage too.
+    deepStrictEqual(snapshot.stages.find((stage) => stage.id === "discovery")!.nodes.slice(0, 2), ["workflow:discover", "discovery:prepare"]);
     deepStrictEqual(snapshot.stages.find((stage) => stage.id === "conclude")!.nodes, ["workflow:conclude"]);
   } finally {
     for (const reader of readers) reader.close();

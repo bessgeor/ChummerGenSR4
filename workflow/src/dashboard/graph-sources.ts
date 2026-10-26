@@ -12,7 +12,7 @@ export function graphSources(repositoryRoot: string): GraphSource[] {
   return [
     {
       kind: "workflow", checkpoints: workflowPaths(repositoryRoot).checkpoints,
-      compile: (checkpointer) => buildWorkflowGraph(inert, inert, inert, inert, inert).compile(checkpointer === undefined ? {} : { checkpointer }),
+      compile: (checkpointer) => buildWorkflowGraph(inert, inert, inert, inert, inert, inert).compile(checkpointer === undefined ? {} : { checkpointer }),
     },
     {
       kind: "discovery", checkpoints: discoveryPaths(repositoryRoot).checkpoints,
