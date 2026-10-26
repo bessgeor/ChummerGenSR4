@@ -272,8 +272,12 @@ test("a change seen after a long gap between looks does not count as a heartbeat
     clearInterval(beating);
   }
   const started = Date.now();
-  await rejects(remote.run(node("process.exit(0)"), setup.workingFolder, () => {}),
-    (error: Error) => error instanceof SetupError && error.message.includes(`npm run lane-agent -- --folder "${setup.laneFolder}"`));
+  // The assertion names the error it got, so a failure shows which way the run was refused.
+  await rejects(remote.run(node("process.exit(0)"), setup.workingFolder, () => {}), (error: Error) => {
+    ok(error instanceof SetupError, `not a setup error: ${error.stack ?? error.message}`);
+    ok(error.message.includes(`npm run lane-agent -- --folder "${setup.laneFolder}"`), `another setup error: ${error.message}`);
+    return true;
+  });
   ok(Date.now() - started >= 500, "the change seen after the gap starts a new observation that has to see another one");
   ok(!existsSync(requestsFolder(setup.laneFolder)) || readdirSync(requestsFolder(setup.laneFolder)).length === 0, "no request went to the silent agent");
 
@@ -347,8 +351,10 @@ test("the files of an answered request that no workflow collects are removed aft
   writeFileSync(files.request, JSON.stringify({ id: "uncollected", label: "x", command: process.execPath, args: ["-e", ""], cwd: setup.workingFolder, desktop: false }));
   await served.start();
   try {
-    // The files of the request are removed together, and a reader may see the folder between two removals.
-    for (let waited = 0; readdirSync(requestsFolder(setup.laneFolder)).length > 0; waited += 20) {
+    // The files of the request are removed together, and a reader may see the folder between two removals; the
+    // agent logs the removal once every file is gone, which a reader may see a moment after the folder is empty.
+    const removed = () => setup.log.some((line) => line.startsWith("uncollected: removed"));
+    for (let waited = 0; readdirSync(requestsFolder(setup.laneFolder)).length > 0 || !removed(); waited += 20) {
       ok(waited < 10_000, `the request was never removed: ${readdirSync(requestsFolder(setup.laneFolder)).join(", ")}`);
       await new Promise((resolve) => setTimeout(resolve, 20));
     }

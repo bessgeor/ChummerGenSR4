@@ -22,6 +22,8 @@ type Setup = {
   readonly build?: BuildBehaviour;
   readonly check?: CheckBehaviour;
   readonly deadlineMinutes?: number;
+  /** The service's clock; by default the real one. */
+  readonly now?: () => Date;
 };
 
 /** A thread whose diagnosis confirmed one cluster, and a repair service over it with fake agents and a fake host. */
@@ -42,7 +44,7 @@ async function diagnosed(setup: Setup = {}) {
     threadFolder, agents: () => agents, quota: new QuotaWaiter("process-1", async (milliseconds) => {
       sleeps.push(milliseconds);
     }), build: host.build, narrowCheck: host.narrowCheck,
-    createScratchFolder, now: () => new Date(), log: (line) => lines.push(line),
+    createScratchFolder, now: setup.now ?? (() => new Date()), log: (line) => lines.push(line),
   });
   const repairs = service.prepare(state.clusters, state.diagnosisCheck);
   const input = (repair: ClusterRepair, overrides: Partial<RepairInput> = {}): RepairInput => ({
@@ -143,7 +145,10 @@ test("each stage rejects an attempt with its reason, and the steps after it do n
 });
 
 test("a build still running at the deadline is stopped and rejects the attempt; a stopped run stays a setup error", async () => {
-  const setup = await diagnosed({ build: "hang", deadlineMinutes: 0.003 });
+  // The service's clock stands still, so the time the job and the archive take on a busy machine is never counted
+  // against the deadline: the build alone runs into it, after its full 180 ms.
+  const frozen = new Date("2026-10-01T12:00:00Z");
+  const setup = await diagnosed({ build: "hang", deadlineMinutes: 0.003, now: () => frozen });
   const step = await setup.service.repair(setup.input(setup.repairs[cluster]!), setup.store);
   deepStrictEqual([step.update.status, step.update.attempt?.stage], ["rejected", "deadline"]);
   ok(/still running at the deadline/.test(step.update.attempt!.reason!));
@@ -152,7 +157,9 @@ test("a build still running at the deadline is stopped and rejects the attempt; 
   const again = await diagnosed({ build: "hang" });
   const controller = new AbortController();
   const running = again.service.repair(again.input(again.repairs[cluster]!, { signal: controller.signal }), again.store);
-  setTimeout(() => controller.abort(), 100);
+  // The run is stopped once the build is running, however long the job before it took.
+  while (again.host.builds.length === 0) await new Promise((resolve) => setTimeout(resolve, 10));
+  controller.abort();
   await rejects(running, /stopped/);
 });
 
