@@ -17,6 +17,20 @@ export type ThreadDiscovery = {
   readonly documentPath: string;
 };
 
+/** What the thread's discovery adds to its exit status: its status when that is 1 or 2, else 0. */
+export function threadDiscoveryStatus(discovery: ThreadDiscovery | null): number {
+  return discovery !== null && (discovery.exitStatus === 1 || discovery.exitStatus === 2) ? discovery.exitStatus : 0;
+}
+
+const named = (cases: readonly string[]): string => (cases.length === 0 ? "" : ` (${cases.join(", ")})`);
+
+/** The report's `Discovery:` line; none when the thread did not discover. */
+export function threadDiscoveryLines(discovery: ThreadDiscovery | null): string[] {
+  if (discovery === null) return [];
+  return [`Discovery: ${discovery.threadId} exit ${discovery.exitStatus}; ${discovery.admitted.length} admitted${named(discovery.admitted)}, `
+    + `${discovery.differing.length} differing${named(discovery.differing)}; ${discovery.documentPath}`];
+}
+
 /** The ID of a workflow thread's discovery thread: one per workflow thread, so a resumed workflow thread finds it. */
 export function discoveryThreadId(workflowThread: string): string {
   return `disc-${workflowThread}`;

@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import type { PlannedCase } from "../cases/case-plan.js";
 import type { CheckResult } from "../diagnosis/check.js";
 import type { ClusterDiagnosis } from "../diagnosis/cluster-diagnosis.js";
+import type { ThreadDiscovery } from "../discovery/thread-discovery.js";
 import type { RunOptions } from "../options/run-options.js";
 import type { ClusterRepair } from "../repair/cluster-repair.js";
 import { readDocument } from "../steps/read-document.js";
@@ -35,6 +36,8 @@ export type ConcludeInput = {
   readonly agentMilliseconds: number;
   /** When the thread started, or null for a thread stored before it was recorded. */
   readonly startedUtc: string | null;
+  /** The thread's discovery, or null when it did not discover. */
+  readonly discovery: ThreadDiscovery | null;
 };
 
 /** The thread's outcome and the path of its `outcome.json`. */
@@ -69,6 +72,7 @@ export class LoopService {
         modelMilliseconds: input.agentMilliseconds,
         elapsedMilliseconds: input.startedUtc === null ? null : now.getTime() - Date.parse(input.startedUtc),
       },
+      discovery: input.discovery,
       concludedUtc: now.toISOString(),
     };
     const path = join(this.dependencies.threadFolder(input.threadId), "outcome.json");

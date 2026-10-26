@@ -1,3 +1,4 @@
+import type { ThreadDiscovery } from "../discovery/thread-discovery.js";
 import type { ClusterEnd } from "./disposition.js";
 
 export const threadOutcomes = ["verified_for_scope", "findings_remaining", "budget_exhausted"] as const;
@@ -28,6 +29,8 @@ export type OutcomeDocument = {
   readonly clusters: readonly ClusterEnd[];
   readonly accepted: { readonly branch: string; readonly commit: string | null } | null;
   readonly measures: LoopMeasures;
+  /** The thread's discovery, or null when it did not discover; it does not change the outcome. */
+  readonly discovery: ThreadDiscovery | null;
   readonly concludedUtc: string;
 };
 
