@@ -632,7 +632,10 @@ test("a clean scope discovers in thread disc-<thread> from its own inventory, re
   });
   ok(state.outcome !== null);
   const started = run.lines.indexOf(`Discovery thread ${discoveryThread}: baseline ${threadId}, 2 targets at most.`);
-  deepStrictEqual(run.lines.slice(started + 1, started + 3), [`Report of ${discoveryThread}`, `Discovery thread ${discoveryThread} finished: exit 1; ${state.threadDiscovery!.documentPath}`]);
+  const { documentPath } = state.threadDiscovery!;
+  deepStrictEqual(run.lines.slice(started + 1, started + 4), [
+    `Report of ${discoveryThread}`, `Discovery: 4 targets; registry 0 -> 2 entries; ${documentPath}`, `Discovery thread ${discoveryThread} finished: exit 1; ${documentPath}`,
+  ]);
 });
 
 test("a scope with a difference, a failed step or another finding is diagnosed and does not discover", async () => {
@@ -691,20 +694,22 @@ test("the exit status counts the discovery's status 0, 1 or 2, and the report an
     const state = await stateOf(run);
     const documentPath = join(setup.root, "discovery", `disc-${threadId}`, "discovery.json");
     deepStrictEqual([run.loop.inputs[0]!.discovery, state.outcome?.discovery, state.outcome?.outcome], [state.threadDiscovery, state.threadDiscovery, "verified_for_scope"], `${status}`);
-    const at = (prefix: string) => run.lines.findIndex((line) => line.startsWith(prefix));
-    equal(run.lines[at("Inventory: ") + 1], `Discovery: disc-${threadId} exit ${status}; ${found}; ${documentPath}`);
-    ok(at("Triage: ") < at("Inventory: ") && at("Discovery: ") < at("Outcome: "), run.lines.join("\n"));
-    equal(run.lines.at(-1), `Thread ${threadId} finished: exit ${status}.`);
+    // The end-of-run report: the triage and inventory lines, the discovery's line, the outcome and the exit status.
+    const report = run.lines.slice(run.lines.findIndex((line) => line.startsWith("Triage: ")));
+    deepStrictEqual(report.map((line) => line.split(":")[0]), ["Triage", "Inventory", "Discovery", "Outcome", `Thread ${threadId} finished`], report.join("\n"));
+    equal(report[2], `Discovery: disc-${threadId} exit ${status}; ${found}; ${documentPath}`);
+    equal(report.at(-1), `Thread ${threadId} finished: exit ${status}.`);
   }
 });
 
-test("a capture or compare status above the discovery's stays the exit status, and a discovery status outside 1 and 2 adds nothing", () => {
+test("the exit status is the highest of the capture, compare and discovery statuses", () => {
   const discovery = (exit: number) => ({ threadId: "disc-wf", exitStatus: exit, admitted: [], differing: [], documentPath: "discovery.json" });
   const step = (status: 0 | 1 | 2): Record<string, StepOutcome> => ({ a: { case: "a", status, runFolder: "runs/a", key: "k", reusedFrom: null } });
   deepStrictEqual([
-    exitStatus({ captures: step(2), compares: step(0), threadDiscovery: discovery(1) }), exitStatus({ captures: step(0), compares: step(1), threadDiscovery: discovery(2) }),
-    exitStatus({ captures: step(0), compares: step(0), threadDiscovery: discovery(3) }), exitStatus({ captures: step(0), compares: step(0), threadDiscovery: null }),
-  ], [2, 2, 0, 0]);
+    exitStatus({ captures: step(2), compares: step(0), threadDiscovery: discovery(1) }), exitStatus({ captures: step(0), compares: step(2), threadDiscovery: discovery(1) }),
+    exitStatus({ captures: step(0), compares: step(1), threadDiscovery: discovery(2) }), exitStatus({ captures: step(0), compares: step(1), threadDiscovery: discovery(0) }),
+    exitStatus({ captures: step(0), compares: step(0), threadDiscovery: null }),
+  ], [2, 2, 2, 1, 0]);
 });
 
 test("a thread stopped during its discovery resumes the same discovery thread without capturing again or starting another", async () => {

@@ -45,3 +45,10 @@ test("a discovery document that cannot be read is a setup error", async () => {
   writeFileSync(concluded.path, JSON.stringify({ registry: {} }));
   await rejects(new RunnerDiscovery(runner, () => {}).discover({ threadId: "wf-1", options }), (error: unknown) => error instanceof SetupError && error.message.includes("does not match its schema"));
 });
+
+test("a discovery conclusion with an exit status other than 0, 1 or 2 is a setup error", async () => {
+  const runner = new FakeDiscoveryRunner(scratch(), { exitStatus: 3, scenarios: [] });
+  runner.finish("disc-wf-1", threadDiscoveryOptions("wf-1", options));
+  await rejects(new RunnerDiscovery(runner, () => {}).discover({ threadId: "wf-1", options }),
+    (error: unknown) => error instanceof SetupError && error.message === "Discovery thread disc-wf-1 concluded with exit status 3; a conclusion has 0, 1 or 2.");
+});

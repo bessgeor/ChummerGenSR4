@@ -84,7 +84,9 @@ export class FakeDiscoveryRunner implements DiscoveryRunner {
     }));
     const admitted = this.conclusion.scenarios.filter((item) => item.admission === "admitted").map((item) => item.case!);
     writeFileSync(path, JSON.stringify({ schemaVersion: 1, threadId, registry: { before: 0, after: admitted.length, admitted, duplicates: [] }, scenarios }));
-    const concluded: Concluded = { path, exitStatus: this.conclusion.exitStatus, lines: [`Report of ${threadId}`] };
+    // The real report ends with a summary line of its own that starts with `Discovery: ` as well.
+    const lines = [`Report of ${threadId}`, `Discovery: ${this.conclusion.scenarios.length} targets; registry 0 -> ${admitted.length} entries; ${path}`];
+    const concluded: Concluded = { path, exitStatus: this.conclusion.exitStatus, lines };
     this.threads.set(threadId, { options: this.threads.get(threadId)!.options, concluded });
     return concluded;
   }

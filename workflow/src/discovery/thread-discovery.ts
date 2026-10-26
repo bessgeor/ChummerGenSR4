@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SetupError } from "../host/setup-error.js";
 import type { RunOptions } from "../options/run-options.js";
 import { readDocument } from "../steps/read-document.js";
 import type { DispatchedTuning } from "../tuning/tuning.js";
@@ -17,9 +18,9 @@ export type ThreadDiscovery = {
   readonly documentPath: string;
 };
 
-/** What the thread's discovery adds to its exit status: its status when that is 1 or 2, else 0. */
+/** What the thread's discovery adds to its exit status: its status (0, 1 or 2; a setup error is thrown, never concluded), or 0 without discovery. */
 export function threadDiscoveryStatus(discovery: ThreadDiscovery | null): number {
-  return discovery !== null && (discovery.exitStatus === 1 || discovery.exitStatus === 2) ? discovery.exitStatus : 0;
+  return discovery?.exitStatus ?? 0;
 }
 
 const named = (cases: readonly string[]): string => (cases.length === 0 ? "" : ` (${cases.join(", ")})`);
@@ -61,8 +62,9 @@ const DiscoveryResultSchema = z.looseObject({
   })),
 });
 
-/** What a concluded discovery thread found, read from its `discovery.json`; a document that cannot be read is a setup error. */
+/** What a concluded discovery thread found, read from its `discovery.json`; a document that cannot be read or an exit status other than 0, 1 or 2 is a setup error. */
 export function readThreadDiscovery(threadId: string, concluded: Concluded): ThreadDiscovery {
+  if (![0, 1, 2].includes(concluded.exitStatus)) throw new SetupError(`Discovery thread ${threadId} concluded with exit status ${concluded.exitStatus}; a conclusion has 0, 1 or 2.`);
   const document = readDocument(concluded.path, DiscoveryResultSchema);
   const differing = document.scenarios.flatMap((item) => (item.case !== null && item.admission === "admitted" && item.visual?.outcome === "finding" ? [item.case] : []));
   return { threadId, exitStatus: concluded.exitStatus, admitted: document.registry.admitted, differing, documentPath: concluded.path };

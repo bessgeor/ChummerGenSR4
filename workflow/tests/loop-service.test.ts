@@ -1,5 +1,5 @@
 import { deepStrictEqual, equal } from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -36,11 +36,15 @@ function conclude(discovery: ThreadDiscovery | null): OutcomeDocument {
     threadId: "wf-1", options, plan: [item], captures: { [item.name]: step }, compares: { [item.name]: step }, triagePath, otherFindings: 0, clusters: {}, check: null,
     repairs: {}, widenings: {}, accepted: null, agentMilliseconds: 0, startedUtc: null, discovery,
   };
-  const service = new LoopService({ threadFolder: (threadId) => join(root, "threads", threadId), now: () => new Date("2026-10-01T12:00:00Z") });
-  const { document, path } = service.conclude(input);
-  const written = JSON.parse(readFileSync(path, "utf8")) as OutcomeDocument;
-  deepStrictEqual(written, document);
-  return written;
+  try {
+    const service = new LoopService({ threadFolder: (threadId) => join(root, "threads", threadId), now: () => new Date("2026-10-01T12:00:00Z") });
+    const { document, path } = service.conclude(input);
+    const written = JSON.parse(readFileSync(path, "utf8")) as OutcomeDocument;
+    deepStrictEqual(written, document);
+    return written;
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 }
 
 test("outcome.json records the thread's discovery, and an admitted scenario that differs leaves the outcome verified for the scope", () => {
