@@ -23,6 +23,10 @@ export const ProfileSchema = z.strictObject({
     /** How many attempts a cluster may get in a thread, the first included. */
     maxAttempts: z.number().int().min(1).max(10).optional(),
   }).optional(),
+  discovery: z.strictObject({
+    /** How many targets get a scenario job when a thread whose scope shows no difference discovers. */
+    targets: z.number().int().min(1).max(10).optional(),
+  }).optional(),
 });
 export type Profile = z.infer<typeof ProfileSchema>;
 

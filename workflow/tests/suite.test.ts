@@ -121,6 +121,8 @@ test("a new thread without --case-file writes its suite and uses it; with --case
   const options = startOptions(start([]), {}, { LOCALAPPDATA: root }, root, threadFolder);
   equal(options.caseFile, join(threadFolder, suiteFileName));
   deepStrictEqual(JSON.parse(readFileSync(options.caseFile, "utf8")), compose(root));
+  // The thread captures the suite, and its discovery starts from the fixture cases.
+  deepStrictEqual(options.discovery, { caseFile: fixtureCaseFile(root), targets: 3 });
 
   const other = join(root, "out", "workflow", "threads", "wf-2");
   const given = startOptions(start(["--case-file", "parity/cases/characters.json"]), {}, { LOCALAPPDATA: root }, root, other);

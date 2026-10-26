@@ -4,13 +4,14 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { resolveAgentSettings } from "../src/agents/agent-settings.js";
 import { resolveDiscoveryOptions } from "../src/discovery/discover-arguments.js";
-import { certificatePath, certificateProblems } from "../src/evals/certificate.js";
+import { certificatePath, certificateProblems, unattendedProblems } from "../src/evals/certificate.js";
+import { promptVersions } from "../src/evals/evaluated-job-kinds.js";
 import { getRecord } from "../src/evals/eval-record.js";
 import { SetupError } from "../src/host/setup-error.js";
 import { parseArguments } from "../src/options/arguments.js";
 import { resolveRunOptions } from "../src/options/run-options.js";
 import { readDispatchedTuning, tuningFiles, writeActiveFile } from "../src/tuning/active-configuration.js";
-import { tuningId, type Tuning } from "../src/tuning/tuning.js";
+import { dispatchedJobKinds, tuningId, type Tuning } from "../src/tuning/tuning.js";
 import { scratch } from "./diagnosis-fixtures.js";
 import { diagnosisHarness } from "./diagnosis-harness.js";
 import { discoveryHarness, threadOf } from "./discovery-harness.js";
@@ -36,7 +37,9 @@ test("a new thread stores the active configurations of the job kinds it dispatch
   const folder = join(root, "tuning");
   activate(folder, tuning({ jobKind: "hypothesis" }));
   activate(folder, tuning({ jobKind: "scenario" }));
-  deepStrictEqual(resolveRunOptions(start([]), { tuning: folder }, { LOCALAPPDATA: root }, root).tuning, { hypothesis: tuning({ jobKind: "hypothesis" }) });
+  // A thread that may discover dispatches rank and scenario jobs too.
+  deepStrictEqual(resolveRunOptions(start([]), { tuning: folder }, { LOCALAPPDATA: root }, root).tuning, { hypothesis: tuning({ jobKind: "hypothesis" }), scenario: tuning({ jobKind: "scenario" }) });
+  deepStrictEqual(resolveRunOptions(start(["--no-discovery"]), { tuning: folder }, { LOCALAPPDATA: root }, root).tuning, { hypothesis: tuning({ jobKind: "hypothesis" }) });
   deepStrictEqual(resolveRunOptions(start(["--no-diagnosis"]), { tuning: folder }, { LOCALAPPDATA: root }, root).tuning, {});
   deepStrictEqual(resolveRunOptions(start([]), {}, { LOCALAPPDATA: root }, root).tuning, {});
   deepStrictEqual(resolveDiscoveryOptions(discover, { tuning: folder }, { LOCALAPPDATA: root }, root).tuning, { scenario: tuning({ jobKind: "scenario" }) });
@@ -96,6 +99,34 @@ test("discovery prompts and records the scenario job with its active configurati
   ok(harness.agents.calls[1]!.prompt.startsWith(`PROMPT_VERSION=${version}\n`), harness.agents.calls[1]!.prompt.slice(0, 80));
   const threadId = threadOf(harness.lines);
   equal((await getRecord(harness.store, "scenario", `${threadId}/frmCreate/tabSkills/scenario/1`)).promptVersion, version);
+});
+
+test("an unattended thread that may discover needs rank and scenario certificates for the configurations it stored", () => {
+  const root = scratch();
+  const folder = join(root, "tuning");
+  activate(folder, tuning({ jobKind: "scenario" }));
+  const certificates = join(root, "certificates");
+  const profile = { tuning: folder, certificates };
+  const discovering = resolveRunOptions(start(["--unattended", "--no-repair"]), profile, { LOCALAPPDATA: root }, root);
+  deepStrictEqual(dispatchedJobKinds(discovering), ["hypothesis", "challenge", "rank", "scenario"]);
+  deepStrictEqual(unattendedProblems(discovering).map((problem) => problem.split(":")[0]), ["hypothesis", "challenge", "rank", "scenario"]);
+  const settings = resolveAgentSettings({});
+  mkdirSync(certificates, { recursive: true });
+  for (const jobKind of ["hypothesis", "challenge", "rank", "scenario"] as const) {
+    const choice = settings.jobs[jobKind];
+    const promptVersion = jobKind === "scenario" ? `${promptVersions.scenario}+${tuningId(tuning({ jobKind: "scenario" }))}` : promptVersions[jobKind];
+    writeFileSync(certificatePath(certificates, jobKind), JSON.stringify({
+      schemaVersion: 1, jobKind, agent: { provider: choice.provider, model: choice.model, effort: choice.effort }, promptVersion, run: "er-1",
+      dataset: { name: "d", version: 1, hash: "h", partition: "test" }, metric: jobKind === "rank" || jobKind === "scenario" ? "valid" : "prediction", items: 10, passes: 10, rate: 1,
+      interval: { low: 0.7, high: 1 }, thresholds: { minPass: 0.5, maxMeanCostUsd: null }, meanCostUsd: null, issuedUtc: "2026-10-10T00:00:00.000Z",
+    }));
+  }
+  deepStrictEqual(unattendedProblems(discovering), []);
+  const withoutDiscovery = resolveRunOptions(start(["--unattended", "--no-repair", "--no-discovery"]), profile, { LOCALAPPDATA: root }, root);
+  deepStrictEqual([dispatchedJobKinds(withoutDiscovery), withoutDiscovery.tuning], [["hypothesis", "challenge"], {}]);
+  // A thread stored before discovery ran in threads has no such field and dispatches no discovery job.
+  const { discovery: _absent, ...stored } = discovering;
+  deepStrictEqual(dispatchedJobKinds(stored), ["hypothesis", "challenge"]);
 });
 
 test("an unattended run needs certificates for the prompt versions it dispatches", () => {

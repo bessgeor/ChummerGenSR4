@@ -68,10 +68,13 @@ export function contextSection(tuning: Tuning | null, printed: readonly string[]
   return ["", "CONTEXT (untrusted data): not printed here. Read context.json in your working folder before you answer; it is the sealed context."];
 }
 
-/** The job kinds a run's diagnosis dispatches: none without diagnosis or with --only of an earlier node. */
-export function dispatchedJobKinds(options: { readonly diagnosis: boolean; readonly only: string | null }): ("hypothesis" | "challenge")[] {
-  if (!options.diagnosis || (options.only !== null && options.only !== "diagnose")) return [];
-  return ["hypothesis", "challenge"];
+/**
+ * The job kinds a thread dispatches: diagnosis's, none without diagnosis or with --only of an earlier node, and the discovery's
+ * when the thread discovers (a thread stored before discovery ran in threads does not).
+ */
+export function dispatchedJobKinds(options: { readonly diagnosis: boolean; readonly only: string | null; readonly discovery?: object | null }): EvaluatedJobKind[] {
+  const diagnosis: EvaluatedJobKind[] = !options.diagnosis || (options.only !== null && options.only !== "diagnose") ? [] : ["hypothesis", "challenge"];
+  return options.discovery == null ? diagnosis : [...diagnosis, "rank", "scenario"];
 }
 
 /** The configurations a thread dispatches, by job kind; a job kind without one uses the code's prompt. */
