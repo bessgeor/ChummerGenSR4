@@ -92,7 +92,7 @@ async function start(command: Extract<Command, { kind: "start" }>, dependencies:
   const input: WorkflowStateValue = {
     threadId, options, plan: [...plan.cases], pendingCaseIndexes: [], fingerprints: null, captures: {}, compares: {}, triageSummary: null, inventorySummary: null,
     clusters: {}, agentMilliseconds: 0, diagnosisCheck: null, diagnosisPath: null, repairs: {}, repairPath: null, widenings: {}, earlierWidenings: [], accepted: null, wideningPath: null,
-    startedUtc: dependencies.now().toISOString(), outcome: null, outcomePath: null,
+    threadDiscovery: null, startedUtc: dependencies.now().toISOString(), outcome: null, outcomePath: null,
   };
   return { threadId, input };
 }
@@ -101,7 +101,7 @@ async function start(command: Extract<Command, { kind: "start" }>, dependencies:
 function requireCertificates(options: RunOptions, dependencies: RunDependencies): void {
   const problems = dependencies.certificateProblems(options);
   if (problems.length > 0) {
-    throw new SetupError(`--unattended needs a certificate for every job kind diagnosis dispatches:\n  ${problems.join("\n  ")}`);
+    throw new SetupError(`--unattended needs a certificate for every job kind the thread dispatches:\n  ${problems.join("\n  ")}`);
   }
 }
 

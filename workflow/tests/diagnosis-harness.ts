@@ -32,6 +32,7 @@ import { LoopService } from "../src/loop/loop-service.js";
 import { fixesRootOf, openSpecArchiver, processOpenSpecCli, type FixChangeArchiver } from "../src/fixes/fix-archiver.js";
 import { plannedCase, readReport, repository, runFolders, scratch, triageDocument, type Spot } from "./diagnosis-fixtures.js";
 import type { DispatchedTuning } from "../src/tuning/tuning.js";
+import { noDiscovery } from "./thread-discovery-fixtures.js";
 
 export const hypothesisAnswer = (claim = "The Skills tab label moved in frmCreate."): HypothesisOutput => ({
   outcome: "hypothesis", reason: "The crops show a shifted label.",
@@ -140,7 +141,7 @@ const fingerprints = (candidateSource: string): InputFingerprints => ({
 
 const baseArguments: Arguments = {
   cases: [], captures: [], settingsOverlay: null, threshold: null, caseFile: null, canonicalCache: null,
-  liveCanonical: false, noOcr: false, tessdata: null, only: null, recapture: false, noDiagnosis: false, noRepair: false, noWidening: false, unattended: false, fixChanges: false,
+  liveCanonical: false, noOcr: false, tessdata: null, only: null, recapture: false, noDiagnosis: false, noRepair: false, noWidening: false, noDiscovery: false, unattended: false, fixChanges: false,
 };
 
 const details: CaseDetails = {
@@ -270,7 +271,7 @@ export function diagnosisHarness(options: HarnessOptions) {
   });
   const checkpointer = options.checkpointer ?? new MemorySaver();
   const store = options.store ?? new InMemoryStore();
-  const graph = buildWorkflowGraph(steps, diagnosis, repair, widening, new LoopService({ threadFolder: (threadId) => join(root, "threads", threadId), now: () => new Date("2026-10-01T14:00:00Z") })).compile({ checkpointer, store });
+  const graph = buildWorkflowGraph(steps, diagnosis, repair, widening, new LoopService({ threadFolder: (threadId) => join(root, "threads", threadId), now: () => new Date("2026-10-01T14:00:00Z") }), noDiscovery).compile({ checkpointer, store });
   const settings = resolveAgentSettings({ ...(options.budgetMinutes === undefined ? {} : { runBudgetMinutes: options.budgetMinutes }) });
   const dependencies: RunDependencies = {
     graph,

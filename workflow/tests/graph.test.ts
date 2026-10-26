@@ -1,11 +1,14 @@
 import { deepStrictEqual, equal, ok, rejects } from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { InMemoryStore, MemorySaver, type StateSnapshot } from "@langchain/langgraph";
 import { resolveAgentSettings } from "../src/agents/agent-settings.js";
 import type { PlannedCase } from "../src/cases/case-plan.js";
 import { buildFlatGraph } from "./flat-graph.js";
 import { buildLegacyCaseGraph } from "./legacy-case-graph.js";
-import { buildWorkflowGraph, nodeMode, stageIds, type DiagnosisSteps, type InventoryInput, type LoopSteps, type RepairSteps, type WideningSteps, type WorkflowSteps } from "../src/graph/workflow-graph.js";
+import { buildWorkflowGraph, discovers, nodeMode, stageIds, type DiagnosisSteps, type InventoryInput, type LoopSteps, type RepairSteps, type WideningSteps, type WorkflowSteps } from "../src/graph/workflow-graph.js";
 import { inventoryLines, type InventorySummary } from "../src/inventory/inventory-service.js";
 import type { WorkflowStateValue } from "../src/graph/workflow-state.js";
 import type { Conclusion, ConcludeInput } from "../src/loop/loop-service.js";
@@ -13,7 +16,10 @@ import type { OutcomeDocument } from "../src/loop/outcome.js";
 import { exitStatus, runWorkflow, type RunDependencies } from "../src/graph/run-workflow.js";
 import { SetupError } from "../src/host/setup-error.js";
 import type { Arguments, NodeName } from "../src/options/arguments.js";
-import type { RunOptions } from "../src/options/run-options.js";
+import { resolveRunOptions, type RunOptions } from "../src/options/run-options.js";
+import type { Profile } from "../src/options/profile.js";
+import { RunnerDiscovery } from "../src/discovery/thread-discovery.js";
+import { FakeDiscoveryRunner, noDiscovery } from "./thread-discovery-fixtures.js";
 import type { CompareReport } from "../../contracts/generated/typescript/parity-compare-report.js";
 import type { CaseDetails } from "../src/steps/case-details.js";
 import type { InputFingerprints } from "../src/steps/input-fingerprints.js";
@@ -72,10 +78,14 @@ class FakeSteps implements WorkflowSteps {
     return { ...capture, status: this.compareStatus[capture.case] ?? 0 };
   }
 
+  /** What triage finds: discrepancies in clusters (one per discrepancy) and other findings. */
+  triageFinds = { discrepancies: 0, otherFindings: 0 };
+
   async triage(input: { plan: readonly PlannedCase[] }) {
     this.calls.push("triage");
     if (this.failTriage) throw new SetupError("triage exited with 3");
-    return { path: "triage.json", discrepancies: 0, clusters: 0, newClusters: 0, otherFindings: 0, cases: input.plan.length };
+    const { discrepancies, otherFindings } = this.triageFinds;
+    return { path: "triage.json", discrepancies, clusters: discrepancies, newClusters: discrepancies, otherFindings, cases: input.plan.length };
   }
 
   failInventory = false;
@@ -160,32 +170,53 @@ class FakeLoop implements LoopSteps {
 
 const baseArguments: Arguments = {
   cases: [], captures: [], settingsOverlay: null, threshold: null, caseFile: null, canonicalCache: null,
-  liveCanonical: false, noOcr: false, tessdata: null, only: null, recapture: false, noDiagnosis: false, noRepair: false, noWidening: false, unattended: false, fixChanges: false,
+  liveCanonical: false, noOcr: false, tessdata: null, only: null, recapture: false, noDiagnosis: false, noRepair: false, noWidening: false, noDiscovery: false, unattended: false, fixChanges: false,
 };
 
-function harness(cases: string[], steps = new FakeSteps(), checkpointer = new MemorySaver(), signal?: AbortSignal) {
+/** A run that may discover: its options are resolved as `npm start` resolves them, without repair, and diagnosis only records that it ran. */
+type Discovering = { readonly runner: FakeDiscoveryRunner; readonly root: string; readonly profile?: Profile; readonly diagnosed: string[] };
+
+function discovering(profile?: Profile): Discovering {
+  const root = mkdtempSync(join(tmpdir(), "workflow-graph-discovery-"));
+  return { runner: new FakeDiscoveryRunner(join(root, "discovery")), root, diagnosed: [], ...(profile === undefined ? {} : { profile }) };
+}
+
+function recordingDiagnosis(diagnosed: string[]): DiagnosisSteps {
+  return {
+    ...noDiagnosis,
+    prepare: async (input) => {
+      diagnosed.push(input.threadId);
+      return {};
+    },
+    finish: () => "diagnosis.json",
+  };
+}
+
+function harness(cases: string[], steps = new FakeSteps(), checkpointer = new MemorySaver(), signal?: AbortSignal, discovery?: Discovering) {
   const loop = new FakeLoop();
-  const graph = buildWorkflowGraph(steps, noDiagnosis, noRepair, noWidening, loop).compile({ checkpointer, store: new InMemoryStore() });
   const lines: string[] = [];
+  const log = (line: string) => lines.push(line);
+  const graph = buildWorkflowGraph(steps, discovery === undefined ? noDiagnosis : recordingDiagnosis(discovery.diagnosed), noRepair, noWidening, loop,
+    discovery === undefined ? noDiscovery : new RunnerDiscovery(discovery.runner, log)).compile({ checkpointer, store: new InMemoryStore() });
   const readCalls: [string, boolean][] = [];
   const dependencies: RunDependencies = {
     graph,
-    resolveOptions: (command) => ({
+    resolveOptions: (command) => (discovery === undefined ? {
       caseFile: "cases.json", cases: [], captures: [], settingsOverlay: null, threshold: null, canonicalCache: "cache",
       canonicalCacheSource: "default", noOcr: false, tessdata: null, only: command.arguments.only, recapture: false,
       diagnosis: false, agents: resolveAgentSettings(undefined), unattended: false, certificates: "certificates", repair: null, widening: false,
-    }),
+    } : { ...resolveRunOptions(command.arguments, discovery.profile ?? {}, { LOCALAPPDATA: discovery.root }, discovery.root), repair: null, widening: false }),
     planCases: () => ({ cases: cases.map(plannedCase), excluded: [] }),
     certificateProblems: () => [],
     readCase: (runFolder, compared) => {
       readCalls.push([runFolder, compared]);
       return fakeDetails(runFolder, compared);
     },
-    log: (line) => lines.push(line),
+    log,
     now: () => new Date("2026-10-01T12:00:00Z"),
     ...(signal === undefined ? {} : { signal }),
   };
-  const startRun = (only: NodeName | null = null) => runWorkflow({ kind: "start", arguments: { ...baseArguments, only } }, dependencies);
+  const startRun = (only: NodeName | null = null, overrides: Partial<Arguments> = {}) => runWorkflow({ kind: "start", arguments: { ...baseArguments, only, ...overrides } }, dependencies);
   const threadId = () => /Thread (wf-\S+):/.exec(lines.join("\n"))?.[1] ?? "";
   return { steps, lines, dependencies, startRun, threadId, checkpointer, readCalls, loop };
 }
@@ -281,12 +312,12 @@ test("an inventory setup error ends the run with 3, and the resumed thread runs 
 
 test("a thread stored before the inventory existed skips it and its report says so", async () => {
   const run = harness(["a"]);
-  const graph = buildWorkflowGraph(run.steps, noDiagnosis, noRepair, noWidening, run.loop).compile({ checkpointer: new MemorySaver(), store: new InMemoryStore() });
+  const graph = buildWorkflowGraph(run.steps, noDiagnosis, noRepair, noWidening, run.loop, noDiscovery).compile({ checkpointer: new MemorySaver(), store: new InMemoryStore() });
   const options = run.dependencies.resolveOptions({ kind: "start", arguments: baseArguments }, "wf-test");
   const { inventorySummary: _absent, ...stored }: WorkflowStateValue = {
     threadId: "wf-old", options, plan: [plannedCase("a")], pendingCaseIndexes: [], fingerprints: null, captures: {}, compares: {}, triageSummary: null, inventorySummary: null,
     clusters: {}, agentMilliseconds: 0, diagnosisCheck: null, diagnosisPath: null, repairs: {}, repairPath: null, widenings: {}, earlierWidenings: [], accepted: null,
-    wideningPath: null, startedUtc: null, outcome: null, outcomePath: null,
+    wideningPath: null, threadDiscovery: null, startedUtc: null, outcome: null, outcomePath: null,
   };
   const final = await graph.invoke(stored as WorkflowStateValue, { configurable: { thread_id: "wf-old" } });
   deepStrictEqual(run.steps.calls.filter((call) => !call.startsWith("capture") && !call.startsWith("compare")), ["triage"]);
@@ -487,6 +518,7 @@ test("the drawing with xray shows every stage with its inner nodes", async () =>
   const inner = {
     start: ["build"],
     capture: ["route_cases", "capture", "compare", "triage", "inventory"],
+    discovery: ["discover"],
     diagnose: ["prepare_diagnosis", "route_diagnosis", "hypothesize", "challenge", "wait_for_quota", "check", "finish_diagnosis"],
     repair: ["prepare_repair", "route_repair", "repair", "wait_for_repair_quota", "finish_repair", "retry_repair"],
     widen: ["prepare_widening", "route_widening", "widen", "promote", "roll_back", "finish_widening", "retry_repair"],
@@ -502,7 +534,7 @@ test("the drawing with xray shows every stage with its inner nodes", async () =>
     if (stage!.startsWith("__") || node?.startsWith("__") === true) continue;
     (drawn[stage!] ??= []).push(node ?? stage!);
   }
-  deepStrictEqual(drawn, { ...inner, start: ["start"], conclude: ["conclude"] });
+  deepStrictEqual(drawn, { ...inner, start: ["start"], discovery: ["discovery"], conclude: ["conclude"] });
 });
 
 test("during a capture the state read with subgraphs shows the pending tasks in the capture stage's namespace, with their case indexes", async () => {
@@ -564,4 +596,123 @@ test("a thread checkpointed by the flat graph is refused wherever it stopped, an
     deepStrictEqual(steps.calls, []);
     deepStrictEqual(steps.buildCandidate.length, 1);
   }
+});
+
+/** The thread's state once its graph ended or stopped between stages. */
+async function stateOf(run: ReturnType<typeof harness>): Promise<WorkflowStateValue> {
+  return (await run.dependencies.graph.getState({ configurable: { thread_id: run.threadId() } })).values as WorkflowStateValue;
+}
+
+test("a clean scope discovers in thread disc-<thread> from its own inventory, records what it found and concludes without diagnosis", async () => {
+  const setup = discovering({ discovery: { targets: 2 } });
+  setup.runner.conclusion = {
+    exitStatus: 1,
+    scenarios: [
+      { case: "build-x@s1", admission: "admitted", outcome: "finding" }, { case: "build-y@s2", admission: "admitted", outcome: "clear" },
+      { case: "build-z@s3", admission: "duplicate", outcome: "finding" }, { case: null, admission: null, outcome: null },
+    ],
+  };
+  const run = harness(["a", "b"], new FakeSteps(), new MemorySaver(), undefined, setup);
+  ok((await run.startRun()) !== 3, run.lines.join("\n"));
+  const threadId = run.threadId();
+  const discoveryThread = `disc-${threadId}`;
+  deepStrictEqual(setup.runner.calls, [`start ${discoveryThread}`]);
+  const options = setup.runner.started[0]!.options;
+  deepStrictEqual([options.from, options.caseFile, options.targets, options.unattended, options.canonicalCache, options.settingsOverlay, options.threshold],
+    [threadId, join(setup.root, "parity", "cases", "characters.json"), 2, false, join(setup.root, "ChummerGenSR4", "canonical-cache"), null, null]);
+  deepStrictEqual(run.steps.calls.slice(-2), ["triage", "inventory src a,b"]);
+  deepStrictEqual([setup.diagnosed, run.loop.concluded], [[], [threadId]]);
+  const state = await stateOf(run);
+  deepStrictEqual(state.threadDiscovery, {
+    threadId: discoveryThread, exitStatus: 1, admitted: ["build-x@s1", "build-y@s2"], differing: ["build-x@s1"],
+    documentPath: join(setup.root, "discovery", discoveryThread, "discovery.json"),
+  });
+  ok(state.outcome !== null);
+  const started = run.lines.indexOf(`Discovery thread ${discoveryThread}: baseline ${threadId}, 2 targets at most.`);
+  deepStrictEqual(run.lines.slice(started + 1, started + 3), [`Report of ${discoveryThread}`, `Discovery thread ${discoveryThread} finished: exit 1; ${state.threadDiscovery!.documentPath}`]);
+});
+
+test("a scope with a difference, a failed step or another finding is diagnosed and does not discover", async () => {
+  const differences: [string, (steps: FakeSteps) => void][] = [
+    ["a cluster", (steps) => { steps.triageFinds = { discrepancies: 1, otherFindings: 0 }; }],
+    ["another finding", (steps) => { steps.triageFinds = { discrepancies: 0, otherFindings: 1 }; }],
+    ["a compare with differences", (steps) => { steps.compareStatus = { b: 1 }; }],
+    ["a capture with execution failures", (steps) => { steps.captureStatus = { a: 2 }; }],
+  ];
+  for (const [name, difference] of differences) {
+    const setup = discovering();
+    const steps = new FakeSteps();
+    difference(steps);
+    const run = harness(["a", "b"], steps, new MemorySaver(), undefined, setup);
+    await run.startRun();
+    deepStrictEqual([setup.runner.calls, setup.diagnosed, run.loop.concluded], [[], [run.threadId()], [run.threadId()]], name);
+    equal((await stateOf(run)).threadDiscovery, null, name);
+  }
+});
+
+test("--no-discovery, --no-diagnosis, --only and the registry's case file turn discovery off; a clean scope then goes on as before", async () => {
+  const runs: [string, NodeName | null, Partial<Arguments>, boolean][] = [
+    ["--no-discovery", null, { noDiscovery: true }, true],
+    ["--no-diagnosis", null, { noDiagnosis: true }, false],
+    ["--only triage", "triage", {}, false],
+    ["--only diagnose", "diagnose", {}, true],
+    ["--case-file parity/cases/discovered.json", null, { caseFile: join("parity", "cases", "discovered.json") }, true],
+  ];
+  for (const [name, only, overrides, diagnoses] of runs) {
+    const setup = discovering();
+    const run = harness(["a"], new FakeSteps(), new MemorySaver(), undefined, setup);
+    equal(await run.startRun(only, overrides), 0, name);
+    const state = await stateOf(run);
+    deepStrictEqual([setup.runner.calls, state.options.discovery, state.threadDiscovery], [[], null, null], name);
+    deepStrictEqual([setup.diagnosed, run.loop.concluded], [diagnoses ? [run.threadId()] : [], [run.threadId()]], name);
+  }
+});
+
+test("a thread stopped during its discovery resumes the same discovery thread without capturing again or starting another", async () => {
+  const setup = discovering();
+  setup.runner.failAfterCheckpoint = new SetupError("the desktop lane is gone");
+  const run = harness(["a", "b"], new FakeSteps(), new MemorySaver(), undefined, setup);
+  equal(await run.startRun(), 3);
+  const threadId = run.threadId();
+  ok(run.lines.includes("Setup error: the desktop lane is gone"), run.lines.join("\n"));
+  ok(run.lines.includes(`Thread ${threadId} stopped; resume it with: npm start -- --resume ${threadId}`), run.lines.join("\n"));
+  equal(run.loop.concluded.length, 0);
+  equal((await setup.runner.thread(`disc-${threadId}`)).kind, "unfinished");
+
+  run.steps.calls.length = 0;
+  equal(await runWorkflow({ kind: "resume", threadId }, run.dependencies), 0);
+  deepStrictEqual(setup.runner.calls, [`start disc-${threadId}`, `resume disc-${threadId}`]);
+  ok(run.lines.includes(`Resuming discovery thread disc-${threadId}.`), run.lines.join("\n"));
+  deepStrictEqual([run.steps.calls, setup.diagnosed, run.loop.concluded], [[], [], [threadId]]);
+  equal((await stateOf(run)).threadDiscovery?.threadId, `disc-${threadId}`);
+});
+
+test("a discovery setup error ends the run with 3 before the conclusion, and the resumed thread runs its discovery again", async () => {
+  const setup = discovering();
+  setup.runner.failBeforeCheckpoint = new SetupError("The designer and code files differ from the baseline's; run npm start again.");
+  const run = harness(["a"], new FakeSteps(), new MemorySaver(), undefined, setup);
+  equal(await run.startRun(), 3);
+  const threadId = run.threadId();
+  ok(run.lines.includes("Setup error: The designer and code files differ from the baseline's; run npm start again."), run.lines.join("\n"));
+  ok(run.lines.some((line) => line.includes(`resume it with: npm start -- --resume ${threadId}`)), run.lines.join("\n"));
+  deepStrictEqual([(await setup.runner.thread(`disc-${threadId}`)).kind, run.loop.concluded, (await stateOf(run)).threadDiscovery], ["absent", [], null]);
+
+  run.steps.calls.length = 0;
+  equal(await runWorkflow({ kind: "resume", threadId }, run.dependencies), 0);
+  deepStrictEqual(setup.runner.calls, [`start disc-${threadId}`, `start disc-${threadId}`]);
+  deepStrictEqual([run.steps.calls, run.loop.concluded], [[], [threadId]]);
+});
+
+test("a thread discovers only when its options hold discovery settings and its inventory ran", () => {
+  const clean = {
+    options: { discovery: { caseFile: "cases.json", targets: 3 } }, plan: [{ name: "a" }], captures: { a: { status: 0 } }, compares: { a: { status: 0 } },
+    triageSummary: { discrepancies: 0, clusters: 0, otherFindings: 0 }, inventorySummary: { folder: "inventory" },
+  } as unknown as WorkflowStateValue;
+  equal(discovers(clean), true);
+  const { discovery: _absent, ...stored } = clean.options;
+  const { inventorySummary: _none, ...beforeInventory } = clean;
+  deepStrictEqual([
+    discovers({ ...clean, options: stored as RunOptions }), discovers({ ...clean, options: { ...clean.options, discovery: null } }),
+    discovers(beforeInventory as WorkflowStateValue), discovers({ ...clean, compares: {} }),
+  ], [false, false, false, false]);
 });

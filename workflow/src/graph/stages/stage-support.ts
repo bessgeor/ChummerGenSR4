@@ -18,6 +18,18 @@ export function widens(options: RunOptions): boolean {
   return repairs(options) && options.widening === true;
 }
 
+/**
+ * Whether a thread discovers after `capture`: discovery is on for it, its inventory ran, every planned case captured and
+ * compared with status 0, and triage found no discrepancy and no other finding.
+ */
+export function discovers(state: WorkflowStateValue): boolean {
+  // A thread stored before discovery ran in threads, or before the inventory existed, has no such field.
+  if (state.options.discovery == null || state.triageSummary === null || state.inventorySummary == null) return false;
+  const triage = state.triageSummary;
+  if (triage.discrepancies > 0 || triage.clusters > 0 || triage.otherFindings > 0) return false;
+  return state.plan.every((item) => state.captures[item.name]?.status === 0 && state.compares[item.name]?.status === 0);
+}
+
 /** Whether a node runs its steps, only reuses recorded ones (it comes before `--only`), or is skipped. */
 export function nodeMode(node: NodeName, only: NodeName | null): StepMode | "skip" {
   if (only === null || only === node) return "run";

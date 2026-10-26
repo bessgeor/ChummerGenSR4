@@ -1,6 +1,7 @@
 import { join, resolve } from "node:path";
 import { resolveAgentSettings, type AgentSettings } from "../agents/agent-settings.js";
 import { fixtureCaseFile } from "../cases/case-plan.js";
+import { isRegistryCaseFile, registryPaths } from "../discovery/registry.js";
 import type { Arguments, NodeName } from "./arguments.js";
 import { readDispatchedTuning } from "../tuning/active-configuration.js";
 import { dispatchedJobKinds, type DispatchedTuning } from "../tuning/tuning.js";
@@ -38,7 +39,21 @@ export type RunOptions = {
   readonly widening: boolean;
   /** Whether the thread works in fix changes (--fix-changes); absent in a thread stored before it existed, which works without. */
   readonly fixChanges?: boolean;
+  /**
+   * How the thread discovers when its scope shows no difference; null when it does not (--no-discovery, --only, --no-diagnosis,
+   * or the registry's case file), and absent in a thread stored before discovery ran in threads, which does not either.
+   */
+  readonly discovery?: DiscoverySettings | null;
 };
+
+export type DiscoverySettings = {
+  /** The fixture case file the discovery's scenarios start from: the thread's --case-file, else `parity/cases/characters.json`. */
+  readonly caseFile: string;
+  /** How many targets get a scenario job. */
+  readonly targets: number;
+};
+
+export const defaultDiscoveryTargets = 3;
 
 /** Whether a thread works in fix changes: priors in diagnosis, planned repair and a fix change with every promotion. */
 export function usesFixChanges(options: RunOptions): boolean {
@@ -74,8 +89,11 @@ function cacheFolder(args: Arguments, profile: Profile, env: Environment): Pick<
 export function resolveRunOptions(args: Arguments, profile: Profile, env: Environment, repositoryRoot: string): RunOptions {
   const absolute = (path: string | null): string | null => (path === null ? null : resolve(repositoryRoot, path));
   const cache = cacheFolder(args, profile, env);
+  const caseFile = args.caseFile === null ? fixtureCaseFile(repositoryRoot) : resolve(repositoryRoot, args.caseFile);
+  const discovery = args.noDiscovery || args.noDiagnosis || args.only !== null || isRegistryCaseFile(caseFile, registryPaths(repositoryRoot)) ? null
+    : { caseFile, targets: profile.discovery?.targets ?? defaultDiscoveryTargets };
   return {
-    caseFile: args.caseFile === null ? fixtureCaseFile(repositoryRoot) : resolve(repositoryRoot, args.caseFile),
+    caseFile,
     cases: args.cases,
     captures: args.captures,
     settingsOverlay: absolute(args.settingsOverlay ?? profile.settingsOverlay ?? null),
@@ -91,12 +109,13 @@ export function resolveRunOptions(args: Arguments, profile: Profile, env: Enviro
     unattended: args.unattended,
     certificates: resolve(repositoryRoot, profile.certificates ?? join("workflow", "evals", "certificates")),
     // Only the job kinds the thread dispatches: a stale configuration of another kind does not stop it.
-    tuning: readDispatchedTuning(tuningFolder(profile, repositoryRoot), dispatchedJobKinds({ diagnosis: !args.noDiagnosis, only: args.only })),
+    tuning: readDispatchedTuning(tuningFolder(profile, repositoryRoot), dispatchedJobKinds({ diagnosis: !args.noDiagnosis, only: args.only, discovery })),
     repair: args.noRepair ? null : {
       deadlineMinutes: profile.repair?.deadlineMinutes ?? defaultRepairDeadlineMinutes,
       maxAttempts: profile.repair?.maxAttempts ?? defaultRepairMaxAttempts,
     },
     widening: !args.noRepair && !args.noWidening,
     fixChanges: args.fixChanges,
+    discovery,
   };
 }

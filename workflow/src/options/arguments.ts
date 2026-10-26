@@ -21,6 +21,8 @@ export type Arguments = {
   readonly noRepair: boolean;
   /** End the run after repair: no widening of the passed attempts. */
   readonly noWidening: boolean;
+  /** No discovery when the thread's scope shows no difference. */
+  readonly noDiscovery: boolean;
   /** Dispatch model jobs only under certificates for their configuration. */
   readonly unattended: boolean;
   /** Work in fix changes: priors in diagnosis, planned repair and a fix change with every promotion. */
@@ -52,7 +54,9 @@ export const usage = `Usage: npm start -- [options]
     --no-diagnosis             end the run after triage: no model job and no check capture
     --no-repair                end the run after diagnosis: no repair attempt for the confirmed clusters
     --no-widening              end the run after repair: no widening of the passed attempts and no accepted branch
-    --unattended               start only when every job kind diagnosis dispatches has a certificate for its configuration
+    --no-discovery             no discovery when every planned case passed and triage found nothing
+                               (--only, --no-diagnosis and --case-file parity/cases/discovered.json turn it off too)
+    --unattended               start only when every job kind the thread dispatches has a certificate for its configuration
                                (repair has none, so it needs --no-repair)
     --fix-changes              work in fix changes: archived fixes as priors for diagnosis, repair planned as subtasks,
                                and every promoted fix archived as a fix change under fixes/ in its commit
@@ -114,7 +118,7 @@ export function parseArguments(args: readonly string[]): Command {
   const captures: string[] = [];
   let parsed: Omit<Arguments, "cases" | "captures"> = {
     settingsOverlay: null, threshold: null, caseFile: null, canonicalCache: null,
-    liveCanonical: false, noOcr: false, tessdata: null, only: null, recapture: false, noDiagnosis: false, noRepair: false, noWidening: false, unattended: false, fixChanges: false,
+    liveCanonical: false, noOcr: false, tessdata: null, only: null, recapture: false, noDiagnosis: false, noRepair: false, noWidening: false, noDiscovery: false, unattended: false, fixChanges: false,
   };
   for (let index = 0; index < args.length; index++) {
     const option = args[index]!;
@@ -133,6 +137,7 @@ export function parseArguments(args: readonly string[]): Command {
       case "--no-diagnosis": parsed = { ...parsed, noDiagnosis: true }; break;
       case "--no-repair": parsed = { ...parsed, noRepair: true }; break;
       case "--no-widening": parsed = { ...parsed, noWidening: true }; break;
+      case "--no-discovery": parsed = { ...parsed, noDiscovery: true }; break;
       case "--unattended": parsed = { ...parsed, unattended: true }; break;
       case "--fix-changes": parsed = { ...parsed, fixChanges: true }; break;
       default:

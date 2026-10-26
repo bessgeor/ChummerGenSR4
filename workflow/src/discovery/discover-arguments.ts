@@ -64,7 +64,7 @@ export function resolveDiscoveryOptions(args: DiscoverArguments, profile: Profil
   const workflow: Arguments = {
     cases: [], captures: [], settingsOverlay: args.settingsOverlay, threshold: args.threshold, caseFile: args.caseFile, canonicalCache: args.canonicalCache,
     liveCanonical: args.liveCanonical, noOcr: true, tessdata: null, only: null, recapture: false, noDiagnosis: true, noRepair: true, noWidening: true,
-    unattended: args.unattended, fixChanges: false,
+    noDiscovery: true, unattended: args.unattended, fixChanges: false,
   };
   const resolved = resolveRunOptions(workflow, profile, env, repositoryRoot);
   return {

@@ -1,5 +1,5 @@
 // Composition root of the parity workflow: `npm start -- <options>` runs or resumes a thread of the graph
-// build → capture → compare → triage → inventory → diagnosis → repair → widening and exits with 0, 1, 2 or 3 (see --help).
+// build → capture → compare → triage → inventory → discovery or diagnosis → repair → widening and exits with 0, 1, 2 or 3 (see --help).
 import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -13,6 +13,10 @@ import { unattendedProblems } from "./evals/certificate.js";
 import { fixesRootOf, openSpecArchiver, processOpenSpecCli } from "./fixes/fix-archiver.js";
 import { QuotaWaiter } from "./diagnosis/quota-waiter.js";
 import { processGit } from "./diagnosis/source-snapshot.js";
+import { discoveryPaths } from "./discovery/discovery-paths.js";
+import { composeDiscovery, hostDiscovery } from "./discovery/discovery-runner.js";
+import { registryPaths } from "./discovery/registry.js";
+import { RunnerDiscovery } from "./discovery/thread-discovery.js";
 import { buildWorkflowGraph } from "./graph/workflow-graph.js";
 import { runWorkflow, setupErrorStatus } from "./graph/run-workflow.js";
 import { HostSteps } from "./host-steps.js";
@@ -105,8 +109,16 @@ async function main(): Promise<number> {
 
   const checkpointer = SqliteSaver.fromConnString(paths.checkpoints);
   const store = new SqliteStore(paths.store);
+  // A thread's discovery is a discovery thread like those of npm run discover, in their checkpointer and folders.
+  const folders = discoveryPaths(repositoryRoot);
+  mkdirSync(folders.root, { recursive: true });
+  const discoveryCheckpointer = SqliteSaver.fromConnString(folders.checkpoints);
   try {
-    const graph = buildWorkflowGraph(steps, diagnosis, repair, widening, new LoopService({ threadFolder: paths.threadFolder, now })).compile({ checkpointer, store });
+    const discovery = new RunnerDiscovery(composeDiscovery({
+      repositoryRoot, paths, folders, registry: registryPaths(repositoryRoot), git: processGit(repositoryRoot), host: hostDiscovery(paths, host, steps, createScratchFolder),
+      agents, quota, createScratchFolder, checkpointer: discoveryCheckpointer, store, now, log,
+    }), log);
+    const graph = buildWorkflowGraph(steps, diagnosis, repair, widening, new LoopService({ threadFolder: paths.threadFolder, now }), discovery).compile({ checkpointer, store });
     return await runWorkflow(command, {
       graph,
       resolveOptions: (start, threadId) => startOptions(start.arguments, profile, process.env, repositoryRoot, paths.threadFolder(threadId)),
@@ -120,6 +132,7 @@ async function main(): Promise<number> {
   } finally {
     store.close();
     checkpointer.db.close();
+    discoveryCheckpointer.db.close();
   }
 }
 

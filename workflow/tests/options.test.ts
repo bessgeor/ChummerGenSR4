@@ -19,7 +19,7 @@ test("capture, compare and workflow options are parsed", () => {
     "--threshold", "0.5", "--case-file", "f.json", "--no-ocr", "--tessdata", "t", "--only", "compare"]);
   deepStrictEqual(parsed, {
     cases: ["a", "b", "c"], captures: ["common"], settingsOverlay: "o", threshold: 0.5, caseFile: "f.json",
-    canonicalCache: null, liveCanonical: false, noOcr: true, tessdata: "t", only: "compare", recapture: false, noDiagnosis: false, noRepair: false, noWidening: false, unattended: false, fixChanges: false,
+    canonicalCache: null, liveCanonical: false, noOcr: true, tessdata: "t", only: "compare", recapture: false, noDiagnosis: false, noRepair: false, noWidening: false, noDiscovery: false, unattended: false, fixChanges: false,
   });
 });
 
@@ -86,6 +86,25 @@ test("--no-widening ends the run after repair, and --no-repair turns widening of
   equal(resolveRunOptions(start(["--no-widening"]), {}, env, root).widening, false);
   deepStrictEqual(resolveRunOptions(start(["--no-widening"]), {}, env, root).repair, { deadlineMinutes: 60, maxAttempts: 2 });
   equal(resolveRunOptions(start(["--no-repair"]), {}, env, root).widening, false);
+});
+
+test("discovery is on with the fixture case file and the profile's targets, and off with --no-discovery, --no-diagnosis, --only or the registry's case file", () => {
+  const root = scratch();
+  const env = { LOCALAPPDATA: root };
+  equal(start(["--no-discovery"]).noDiscovery, true);
+  equal(start([]).noDiscovery, false);
+  deepStrictEqual(resolveRunOptions(start([]), {}, env, root).discovery, { caseFile: join(root, "parity", "cases", "characters.json"), targets: 3 });
+  deepStrictEqual(resolveRunOptions(start(["--case-file", "mine.json"]), { discovery: { targets: 5 } }, env, root).discovery, { caseFile: join(root, "mine.json"), targets: 5 });
+  for (const args of [["--no-discovery"], ["--no-diagnosis"], ["--only", "triage"], ["--only", "diagnose"], ["--case-file", "parity/cases/discovered.json"], ["--case-file", "PARITY/Cases/Discovered.json"]]) {
+    equal(resolveRunOptions(start(args), {}, env, root).discovery, null, args.join(" "));
+  }
+  const path = join(root, "profile.json");
+  writeFileSync(path, JSON.stringify({ discovery: { targets: 2 } }));
+  deepStrictEqual(loadProfile({ PARITY_WORKFLOW_PROFILE: path }), { discovery: { targets: 2 } });
+  for (const discovery of [{ targets: 0 }, { targets: 11 }, { targets: 1.5 }, { other: 1 }]) {
+    writeFileSync(path, JSON.stringify({ discovery }));
+    throws(() => loadProfile({ PARITY_WORKFLOW_PROFILE: path }), SetupError, JSON.stringify(discovery));
+  }
 });
 
 test("--resume takes a thread and nothing else", () => {
