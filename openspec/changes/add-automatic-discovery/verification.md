@@ -25,14 +25,40 @@
 
 Across 15 full runs on this code, three each failed one test, and each time a different one: run 1 (`host.test.ts`; its output was not kept and the failure was not reproduced in 35 isolated reruns), run 5 and run A (both `lane-agent.test.ts`; output recorded above). This task touches none of these files, and each of those tests passed alone or in the other full runs. The failures are recorded as failures that this task does not address; their cause was not investigated. No output exists for run 1 and none is claimed.
 
+### Task 3.1: discovery in the graph
+
+| Command | Result |
+| --- | --- |
+| `npm run workflow:typecheck` | Passed. |
+| `node --import tsx --test workflow/tests/graph.test.ts workflow/tests/thread-discovery.test.ts workflow/tests/options.test.ts workflow/tests/discovery-graph.test.ts workflow/tests/discovery-runner.test.ts` | 68 tests, 68 passed. |
+| `npm run workflow:test`, run 1 (before the review fixes) | 503 tests, 503 passed. |
+| `npm run workflow:test`, run 2 (the branch's code) | 503 tests, 503 passed. |
+| `npm run openspec:validate` | Passed: 23 passed, 0 failed. |
+
+The graph tests for this task, in `workflow/tests/graph.test.ts`, run the workflow graph with a fake discovery runner (`workflow/tests/thread-discovery-fixtures.ts`) behind the runner adapter `npm start` uses, and with options resolved as `npm start` resolves them:
+
+- a clean scope discovers: discovery thread `disc-<thread>` starts with the thread as its baseline, `parity/cases/characters.json` as its fixture case file and the profile's targets, the thread records its exit status, admitted and differing scenarios and `discovery.json`, and concludes without diagnosis;
+- a scope with a cluster, another finding, a compare with status 1 or a capture with status 2 is diagnosed and does not discover;
+- `--no-discovery`, `--no-diagnosis`, `--only triage`, `--only diagnose` and `--case-file parity/cases/discovered.json` do not discover;
+- a thread stopped inside its discovery is resumed: the same discovery thread is resumed, nothing is captured again and no second discovery thread starts;
+- a discovery setup error ends the run with 3 before the conclusion, and the resumed thread runs its discovery;
+- `discovers` is false for a thread whose options have no discovery settings or whose inventory did not run.
+
+`workflow/tests/thread-discovery.test.ts` covers the discovery thread's options, the read of a finished discovery thread without running it, and an unreadable `discovery.json` (setup error). `workflow/tests/options.test.ts` and `workflow/tests/tuning-dispatch.test.ts` cover `--no-discovery`, the profile's `discovery.targets`, the stored rank and scenario configurations and the rank and scenario certificates an unattended thread that may discover needs.
+
+The workflow state records the discovery as `threadDiscovery`: LangGraph refuses a state field with the name of a node, and the stage is `discovery`.
 ## Fixture-tested scope
 
 The runner (`composeDiscovery`, `discoveryRunner`, `hostDiscovery`) is tested with the discovery harness's fake jobs and capture runner: starting a new thread (an ID that already has a thread is refused), resuming an unfinished thread without running its finished jobs again (a finished or absent thread is refused), and reading a finished thread's conclusion by ID without running anything (an absent thread is refused). The discovery graph tests run on the same composition as the entry points.
 
 ## Live evidence
 
-None for this task: it changes no capture, compare or app behaviour, and `bin/ChummerGenSR4.exe` was not run, built or touched. Its SHA-256 at the end of this task is `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`.
+None for task 3.1: it changes no capture, compare or app behaviour, and `bin/ChummerGenSR4.exe` was not run, built or touched; its SHA-256 at the end of task 3.1 is `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`.
+
+None for task 2.1: it changes no capture, compare or app behaviour, and `bin/ChummerGenSR4.exe` was not run, built or touched. Its SHA-256 at the end of this task is `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`.
 
 ## Unverified
 
 `npm run discover` against a real thread, with real jobs and a live capture run, is not part of this task's evidence.
+
+A workflow thread that discovers through the real discovery runner, real jobs and a live capture run is not part of task 3.1's evidence. In task 3.1 the workflow's exit status and `outcome.json` do not include the discovery.

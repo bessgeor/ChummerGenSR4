@@ -12,7 +12,7 @@ Each task names the tasks it builds on as `(after: …)`, by number in this list
 
 ## 3. Discovery in the graph
 
-- [ ] 3.1 (after: 1.1, 2.1, restructure-workflow-subgraphs#1.1) Add `--no-discovery`, the profile's `discovery.targets`, the `discovery` stage of the workflow graph (a subgraph, after `capture`) and its routing, the state's `discovery`, rank and scenario tuning and certificates for discovering threads. Evidence: graph tests for a clean scope that discovers, a scope with a difference that does not, `--no-discovery`, `--only`, `--no-diagnosis`, a resumed thread that resumes its discovery, and a discovery setup error.
+- [x] 3.1 (after: 1.1, 2.1, restructure-workflow-subgraphs#1.1) Add `--no-discovery`, the profile's `discovery.targets`, the `discovery` stage of the workflow graph (a subgraph, after `capture`) and its routing, the state's `discovery`, rank and scenario tuning and certificates for discovering threads. Evidence: graph tests for a clean scope that discovers, a scope with a difference that does not, `--no-discovery`, `--only`, `--no-diagnosis`, a resumed thread that resumes its discovery, and a discovery setup error.
 
 ## 4. Status, outcome and report
 
