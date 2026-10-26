@@ -115,6 +115,16 @@ test("an unchanged worktree makes no commit and an empty patch, ignored files ar
   deepStrictEqual(patch.files.map((file) => [file.path, file.binary]), [["Chummer/res/icon.bin", true]]);
 });
 
+test("a change of only a file's mode is a patch with no content change that the guard rejects", () => {
+  const repository = sourceRepository();
+  const copy = worktreeOf(repository, "workflow/t/repair/d-1/attempt-1");
+  repository.git(["update-index", "--chmod=+x", "Chummer/frmCareer.cs"], { worktree: copy });
+  const commit = repository.worktrees.commitStaged(copy, "mode only");
+  const patch = commitPatch(repository.worktrees, repository.source, commit, scratch("workflow-repair-layout-"));
+  deepStrictEqual(patch.files.map((item) => [item.path, item.change, item.before === item.after, item.added, item.removed]), [["Chummer/frmCareer.cs", "modified", true, 0, 0]]);
+  deepStrictEqual(guardPatch(patch, ["Chummer/frmCareer.cs"]), ["Chummer/frmCareer.cs changes only its mode, not its content"]);
+});
+
 function file(path: string, overrides: Partial<PatchFile> = {}): PatchFile {
   return { path, change: "modified", before: "a", after: "b", added: 1, removed: 1, binary: false, ...overrides };
 }
@@ -138,6 +148,7 @@ test("the guard names every rule a patch breaks", () => {
     [patchOf([file("bin/data/skills.xml")]), ["bin/data/skills.xml"], /bin\/data\/skills\.xml is outside Chummer\/ and Core\//],
     [patchOf([file("Chummer/old.cs", { change: "deleted", after: null })]), ["Chummer/old.cs"], /Chummer\/old\.cs is deleted/],
     [patchOf([file("Chummer/icon.bin", { binary: true })]), ["Chummer/icon.bin"], /holds a NUL byte/],
+    [patchOf([file("Chummer/a.cs", { before: "a", after: "a", added: 0, removed: 0 })]), ["Chummer/a.cs"], /Chummer\/a\.cs changes only its mode/],
     [patchOf([file("Chummer/a.cs")], ["Chummer/link"]), ["Chummer/a.cs"], /Chummer\/link is neither a file nor a folder/],
     [patchOf(Array.from({ length: 11 }, (_, index) => file(`Chummer/f${index}.cs`))), Array.from({ length: 11 }, (_, index) => `Chummer/f${index}.cs`), /11 files changed, more than 10/],
     [patchOf([file("Chummer/a.cs", { added: maximumChangedLines, removed: 1 })]), ["Chummer/a.cs"], /301 lines changed \(300 added, 1 removed\), more than 300/],

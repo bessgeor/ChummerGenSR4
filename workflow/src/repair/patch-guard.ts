@@ -20,6 +20,7 @@ export function guardPatch(patch: Patch, declared: readonly string[]): string[] 
     if (!isCompiledPath(file.path)) violations.push(`${file.path} is outside ${compiledFoldersText}`);
     if (file.change === "deleted") violations.push(`${file.path} is deleted`);
     if (file.binary) violations.push(`${file.path} holds a NUL byte`);
+    if (file.change === "modified" && file.before === file.after) violations.push(`${file.path} changes only its mode, not its content`);
   }
   if (patch.files.length > maximumFiles) violations.push(`${patch.files.length} files changed, more than ${maximumFiles}`);
   const lines = patch.added + patch.removed;
