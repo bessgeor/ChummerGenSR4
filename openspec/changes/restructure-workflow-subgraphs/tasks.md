@@ -12,5 +12,5 @@ Each task names the tasks it builds on as `(after: …)`, by number in this list
 
 ## 3. Verification and archive
 
-- [ ] 3.1 (after: 2.1) [desktop] Run `npm start` live on a small scope through every stage it reaches; record in `verification.md` the canonical hash before and after, the stages and namespaces seen in the checkpoints, execution outcomes apart from visual results, fixture-tested scope apart from live evidence, and what remains unverified.
+- [x] 3.1 (after: 2.1) [desktop] Run `npm start` live on a small scope through every stage it reaches; record in `verification.md` the canonical hash before and after, the stages and namespaces seen in the checkpoints, execution outcomes apart from visual results, fixture-tested scope apart from live evidence, and what remains unverified.
 - [ ] 3.2 (after: 3.1) Archive the change with `openspec archive restructure-workflow-subgraphs`. Evidence: `npm run openspec:validate` passes after the archive.
