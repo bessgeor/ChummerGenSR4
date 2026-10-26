@@ -1,6 +1,6 @@
 import { deepStrictEqual, equal, notEqual, ok, throws } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createSourceSnapshot, processGit } from "../src/diagnosis/source-snapshot.js";
@@ -75,6 +75,20 @@ test("a snapshot equal to its commit is the source commit itself, and a snapshot
   throws(() => threadSource(run.branchGit, "wf-3", run.snapshot.commit, run.snapshot.folder, join(scratch(), "source.index")),
     (error) => error instanceof SetupError && /has no Core\/, which the candidate is compiled from/.test(error.message));
   equal(git(run.repo, "for-each-ref", "refs/heads/workflow/wf-3"), "");
+});
+
+test("a snapshot folder whose files were all deleted is deleted in the source commit too", async () => {
+  const repo = repository();
+  git(repo, "add", "-A");
+  git(repo, "commit", "-q", "-m", "everything");
+  rmSync(join(repo, "bin", "data"), { recursive: true });
+  const snapshot = await createSourceSnapshot(repo, join(scratch(), "source"), processGit(repo));
+  ok(!existsSync(join(snapshot.folder, "bin", "data")));
+  const branchGit = processBranchGit(repo);
+  const source = threadSource(branchGit, "wf-10", snapshot.commit, snapshot.folder, join(scratch(), "source.index"));
+  notEqual(source, snapshot.commit);
+  equal(git(repo, "diff", "--name-status", snapshot.commit, source), "D\tbin/data/skills.xml");
+  equal(git(repo, "ls-tree", "-r", "--name-only", source, "--", "bin/data"), "");
 });
 
 test("the first promotion commits the widened worktree on the source commit and moves the accepted branch, leaving the repository alone", async () => {

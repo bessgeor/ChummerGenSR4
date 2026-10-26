@@ -51,9 +51,16 @@ export function applyJoin(worktrees: Worktrees, joined: ReadonlyMap<string, Join
   }
 }
 
-/** What a subtask changed: the files its commit changes against the commit it started from; nothing without a commit. */
-export function subtaskChanges(worktrees: Worktrees, start: string, commit: string | null): SubtaskChange[] {
-  if (commit === null) return [];
-  return worktrees.changes(start, commit).filter((change) => !change.special)
-    .map((change) => ({ path: change.path, start: change.before, after: change.after, commit: change.after === null ? null : commit }));
+/**
+ * What a subtask changed against the commit it started from, nothing without a commit: its files, and apart from them
+ * the paths of symbolic links and submodules, which a join cannot carry and the attempt must account for.
+ */
+export function subtaskChanges(worktrees: Worktrees, start: string, commit: string | null): { changes: SubtaskChange[]; others: string[] } {
+  if (commit === null) return { changes: [], others: [] };
+  const all = worktrees.changes(start, commit);
+  return {
+    changes: all.filter((change) => !change.special)
+      .map((change) => ({ path: change.path, start: change.before, after: change.after, commit: change.after === null ? null : commit })),
+    others: all.filter((change) => change.special).map((change) => change.path),
+  };
 }

@@ -12,7 +12,8 @@ import { fixLevel } from "../fixes/fix-draft.js";
 import { FixRecordSchema } from "../fixes/fix-record.js";
 import { compiledFolders } from "../compiled-source.js";
 import type { BranchGit } from "../git/branch-git.js";
-import { threadBranches } from "../git/thread-source.js";
+import { snapshotFolders } from "../diagnosis/source-snapshot.js";
+import { sourceMessage, threadBranches } from "../git/thread-source.js";
 import type { Worktrees } from "../git/worktrees.js";
 import { SetupError } from "../host/setup-error.js";
 import { usesFixChanges, type RunOptions } from "../options/run-options.js";
@@ -161,11 +162,27 @@ export class WideningService {
     }
     const sourceCommit = this.dependencies.worktrees.resolve(`refs/heads/${threadBranches.source(input.threadId)}`);
     if (sourceCommit === null) throw new SetupError(`The thread's source branch ${threadBranches.source(input.threadId)} does not exist, though its repair passed; restore it or start a new thread.`);
+    this.requireThreadSource(input.threadId, sourceCommit, base!);
     const accepted: AcceptedState = {
       branch: `accepted/${input.threadId}`, base: base!, sourceCommit, commit: null, source: join(threadFolder, "diagnosis", "source"), build: null,
       baselineRuns, promoted: [],
     };
     return { widenings, accepted };
+  }
+
+  /**
+   * Fails unless the source branch still holds what the thread made of its snapshot: the snapshot's commit, or a commit on
+   * it that changes only the snapshot's folders and carries the thread's message. A branch that moved is not the source
+   * the attempts were made on.
+   */
+  private requireThreadSource(threadId: string, sourceCommit: string, base: string): void {
+    const { worktrees, git } = this.dependencies;
+    const moved = new SetupError(`The thread's source branch ${threadBranches.source(threadId)} is at ${sourceCommit}, which is neither the snapshot's commit ${base} nor the thread's commit of the snapshot's folders on it; it moved after the attempts were made. Restore it or start a new thread.`);
+    if (sourceCommit === base) return;
+    if (worktrees.parent(sourceCommit) !== base) throw moved;
+    if (git(["log", "-1", "--format=%B", sourceCommit]).trim() !== sourceMessage(threadId).trim()) throw moved;
+    const outside = worktrees.changes(base, sourceCommit).filter((change) => !snapshotFolders.some((folder) => change.path.startsWith(`${folder}/`)));
+    if (outside.length > 0) throw moved;
   }
 
   /** Fails when an input the pixels depend on is not the one the thread started with: its level runs would differ from the baselines for that reason. */
@@ -191,6 +208,10 @@ export class WideningService {
       throw new SetupError(`The passed attempt ${widening.archive} names no attempt commit, so it cannot be applied with git; start a new thread.`);
     }
     const start = acceptedCommit(accepted);
+    // The attempt was made on the thread's source commit, which the accepted state holds as it was verified.
+    if (accepted.sourceCommit !== undefined && worktrees.parent(attempt.commit) !== accepted.sourceCommit) {
+      throw new SetupError(`The attempt commit ${attempt.commit} of ${widening.archive} was not made on the thread's source commit ${accepted.sourceCommit}; start a new thread.`);
+    }
     const missing = worktrees.missingFolders(start, compiledFolders);
     if (missing.length > 0) throw new SetupError(`The accepted commit ${start} has no ${missing.map((folder) => `${folder}/`).join(" or ")}, which the candidate is compiled from.`);
     const source = join(widening.folder, "source");

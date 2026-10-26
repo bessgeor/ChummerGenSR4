@@ -162,6 +162,23 @@ test("a subtask that changed a file of another it does not wait for rejects the 
   ok(!existsSync(join(step.update.attempt!.folder, "fix")));
 });
 
+test("a subtask that also changed a link or a submodule it did not report is rejected at stage patch, not joined without it", async () => {
+  const setup = await planned({
+    plan: () => ({ answer: plan([task(1, ["Chummer/a.cs"])]) }),
+    subtask: (_id, call) => {
+      const reply = edit(call, { "Chummer/a.cs": "a" });
+      // A submodule entry beside the ordinary file: the folder is empty, as an uninitialised submodule's is.
+      mkdirSync(join(call.workspace.folder, "Chummer", "sub"));
+      execFileSync("git", ["-C", call.workspace.folder, "update-index", "--add", "--cacheinfo", `160000,${"1".repeat(40)},Chummer/sub`]);
+      return reply;
+    },
+  });
+  const step = await setup.service.repair(setup.input(setup.repairs[cluster]!), setup.store);
+  deepStrictEqual([step.update.status, step.update.attempt!.stage, step.update.attempt!.reason],
+    ["rejected", "patch", "subtask 1: Chummer/sub is neither a file nor a folder"]);
+  equal(setup.host.builds.length, 0);
+});
+
 test("a subtask whose changes differ from its answer, that declines or that fails ends the attempt, and no later wave starts", async () => {
   const unlisted = await planned({
     plan: () => ({ answer: plan([task(1, ["Chummer/a.cs"]), task(2, ["Chummer/frmCreate.cs"], [1])]) }),

@@ -28,7 +28,11 @@ export function commitFolders(git: BranchGit, indexFile: string, parent: string,
   mkdirSync(dirname(indexFile), { recursive: true });
   try {
     git(["read-tree", parent], { env });
-    git([`--work-tree=${folder}`, "add", "--all", "--", ...paths], { cwd: folder, env });
+    // A path the folder lacks is removed from the index; `add` would not match it.
+    const present = paths.filter((path) => existsSync(join(folder, path)));
+    const absent = paths.filter((path) => !present.includes(path));
+    if (absent.length > 0) git(["rm", "-r", "--cached", "--ignore-unmatch", "--quiet", "--", ...absent], { env });
+    if (present.length > 0) git([`--work-tree=${folder}`, "add", "--all", "--", ...present], { cwd: folder, env });
     const tree = git(["write-tree"], { env }).trim();
     const changed = git(["diff-tree", "-r", "--name-only", `${parent}^{tree}`, tree, "--", ...paths]).trim();
     if (changed.length === 0) return null;
@@ -54,8 +58,7 @@ export function threadSource(git: BranchGit, threadId: string, base: string, sna
   for (const folder of compiledFolders) {
     if (!existsSync(join(snapshotFolder, folder))) throw new SetupError(`The snapshot ${snapshotFolder} has no ${folder}/, which the candidate is compiled from.`);
   }
-  const paths = snapshotFolders.filter((folder) => existsSync(join(snapshotFolder, folder)));
-  const commit = commitFolders(git, indexFile, base, snapshotFolder, sourceMessage(threadId), paths) ?? base;
+  const commit = commitFolders(git, indexFile, base, snapshotFolder, sourceMessage(threadId), snapshotFolders) ?? base;
   try {
     git(["update-ref", "-m", `workflow: source of ${threadId}`, ref, commit, ""]);
   } catch (error) {

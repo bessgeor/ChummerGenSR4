@@ -206,6 +206,23 @@ test("a patch on a file an earlier promotion changed is rejected at stage apply"
   equal(run.wideningHost.builds.filter((build) => build.label === `widen ${second} build`).length, 0);
 });
 
+test("a source branch that moved after the attempts were made is a setup error before any widening", async () => {
+  // After the attempt's worktree is gone, the source branch reads as the attempt's own commit, as if someone moved it.
+  let repaired = false;
+  const moveSource = (inner: BranchGit): BranchGit => (args, options) => {
+    if (args[0] === "worktree" && args[1] === "remove") repaired = true;
+    if (repaired && args[0] === "for-each-ref" && /^refs\/heads\/workflow\/[^/]+\/source$/.test(args.at(-1) ?? "")) {
+      return inner(["for-each-ref", "--format=%(objectname)", args.at(-1)!.replace(/\/source$/, `/repair/${first}/attempt-1`)], options);
+    }
+    return inner(args, options);
+  };
+  const run = harness({ spots: [twoClusters[0]!], git: moveSource });
+  equal(await run.start(), 3);
+  ok(run.lines.some((line) => /source branch workflow\/[^ ]+\/source is at [0-9a-f]+, which is neither the snapshot's commit/.test(line)), run.lines.join("\n"));
+  equal(run.wideningHost.builds.length, 0);
+  equal(git(run.sourceRepository, "for-each-ref", "refs/heads/accepted"), "");
+});
+
 test("--no-widening ends the run after repair", async () => {
   const run = harness();
   equal(await run.start({ noWidening: true }), 1);

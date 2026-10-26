@@ -81,7 +81,7 @@ const crops = (manifest: ContextManifest, context: string) => manifest.members.f
 
 type SubtaskRun =
   | { readonly kind: "not-started" }
-  | { readonly kind: "ran"; readonly job: RecordedJob<RepairOutput>; readonly changes: readonly SubtaskChange[] };
+  | { readonly kind: "ran"; readonly job: RecordedJob<RepairOutput>; readonly changes: readonly SubtaskChange[]; readonly others: readonly string[] };
 
 /** An attempt planned as subtasks: the plan job, waves of subtask jobs in their own copies, and the join of their changes. */
 export class PlannedAttempt {
@@ -204,6 +204,9 @@ export class PlannedAttempt {
     }
     for (const { task, run } of runs) {
       const answer = (run.job.result as { output: RepairOutput }).output;
+      if (run.others.length > 0) {
+        return this.finished({ rejection: { stage: "patch", reason: `subtask ${task.id}: ${run.others.map((path) => `${path} is neither a file nor a folder`).join("; ")}` } });
+      }
       const changed = run.changes.map((change) => change.path);
       const unlisted = changed.filter((path) => !answer.files.includes(path));
       const unchanged = answer.files.filter((path) => !changed.includes(path));
@@ -253,9 +256,9 @@ export class PlannedAttempt {
       if (job === null) return { kind: "not-started" };
       // Whatever the job left is the subtask's commit; only an answer makes it the subtask's change.
       const commit = worktrees.commitAll(copy.source, `Subtask ${task.id}: ${task.title}\n`);
-      const changes = job.result.ok ? subtaskChanges(worktrees, startCommit, commit) : [];
-      input.log(`${label}: ${job.result.ok ? `${job.result.output.outcome}, ${changes.length} files changed` : `${job.result.failure.kind}: ${job.result.failure.message}`}`);
-      return { kind: "ran", job, changes };
+      const { changes, others } = job.result.ok ? subtaskChanges(worktrees, startCommit, commit) : { changes: [], others: [] };
+      input.log(`${label}: ${job.result.ok ? `${job.result.output.outcome}, ${changes.length + others.length} files changed` : `${job.result.failure.kind}: ${job.result.failure.message}`}`);
+      return { kind: "ran", job, changes, others };
     } finally {
       try {
         worktrees.remove(copy.source);
