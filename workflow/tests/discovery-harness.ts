@@ -14,11 +14,8 @@ import { recordCandidateSha256, recordCandidateSource } from "../src/diagnosis/c
 import { QuotaWaiter } from "../src/diagnosis/quota-waiter.js";
 import { compiledSourceIdentity, compiledSourcePaths, processGit } from "../src/diagnosis/source-snapshot.js";
 import type { DiscoverArguments } from "../src/discovery/discover-arguments.js";
-import { concludeDiscovery } from "../src/discovery/discovery-document.js";
-import { buildDiscoveryGraph, type DiscoverySteps } from "../src/discovery/discovery-graph.js";
-import { DiscoveryJobs } from "../src/discovery/discovery-jobs.js";
 import { discoveryPaths } from "../src/discovery/discovery-paths.js";
-import { DiscoveryService } from "../src/discovery/discovery-service.js";
+import { composeDiscovery, type DiscoveryGraph, type DiscoveryHost, type DiscoveryRunner } from "../src/discovery/discovery-runner.js";
 import type { DiscoveryOptions } from "../src/discovery/discovery-state.js";
 import { registryPaths } from "../src/discovery/registry.js";
 import { runDiscovery } from "../src/discovery/run-discovery.js";
@@ -216,7 +213,9 @@ export type Harness = {
   readonly store: InMemoryStore;
   readonly waits: number[];
   readonly scenarioRun: ScenarioRun;
-  readonly graph: ReturnType<ReturnType<typeof buildDiscoveryGraph>["compile"]>;
+  readonly graph: DiscoveryGraph;
+  readonly runner: DiscoveryRunner;
+  readonly resolveOptions: (args: DiscoverArguments) => DiscoveryOptions;
   run(args?: Partial<DiscoverArguments>): Promise<number>;
   resume(threadId: string): Promise<number>;
 };
@@ -240,28 +239,24 @@ export async function discoveryHarness(
   const folders = discoveryPaths(out);
   const registry = registryPaths(root);
   const quota = new QuotaWaiter("process-1", async (milliseconds) => { waits.push(milliseconds); }, log);
-  const jobs = new DiscoveryJobs({ agents: () => agents, quota, createScratchFolder, now, log });
-  const service = new DiscoveryService({ repositoryRoot: root, paths, folders, registry, git: processGit(root), jobs, buildTools: async () => fingerprints, now, log });
-  const scenarioRun = new ScenarioRun({
-    repositoryRoot: root, folders, registry, now, log, capture: (runOptions, cases) => capture.run(runOptions.caseFile, cases), changedInputs: async () => [],
+  const host: DiscoveryHost = {
+    buildTools: async () => fingerprints, capture: (runOptions, cases) => capture.run(runOptions.caseFile, cases), changedInputs: async () => [],
     environment: async () => options.environment ?? fingerprints.environment,
-  });
-  const steps: DiscoverySteps = {
-    prepare: (threadId, discovery, signal) => service.prepare(threadId, discovery, signal), rank: (state, store, signal) => service.rank(state, store, signal),
-    select: (state) => service.select(state), scenario: (state, targetId, store, signal) => service.scenario(state, targetId, store, signal),
-    waitForQuota: (marks, signal) => service.waitForQuota(marks, signal), validate: (state) => service.validate(state),
-    execute: (state, signal) => scenarioRun.execute(state, signal), register: (state, store) => scenarioRun.register(state, store), conclude: (state) => concludeDiscovery(state, folders, now()),
   };
+  const scenarioRun = new ScenarioRun({ repositoryRoot: root, folders, registry, now, log, capture: host.capture, changedInputs: host.changedInputs, environment: host.environment });
   const store = new InMemoryStore();
-  const graph = buildDiscoveryGraph(steps).compile({ checkpointer: new MemorySaver(), store });
+  const runner = composeDiscovery({
+    repositoryRoot: root, paths, folders, registry, git: processGit(root), host, agents: () => agents, quota, createScratchFolder, checkpointer: new MemorySaver(), store, now, log,
+  });
+  const graph = runner.graph;
   const settings = resolveAgentSettings({ runBudgetMinutes: options.budgetMinutes ?? 120 });
   const resolveOptions = (args: DiscoverArguments): DiscoveryOptions => ({
     from: args.from, caseFile: args.caseFile ?? join(root, "parity", "cases", "characters.json"), settingsOverlay: null, threshold: null, canonicalCache: null, canonicalCacheSource: "off",
     targets: args.targets, unattended: false, agents: settings, certificates: join(out, "certificates"), ...(options.tuning === undefined ? {} : { tuning: options.tuning }),
   });
-  const dependencies = { graph, resolveOptions, certificateProblems: () => [], log, now };
+  const dependencies = { runner, resolveOptions, certificateProblems: () => [], log, now };
   return {
-    root, out, agents, capture, lines, store, waits, scenarioRun, graph,
+    root, out, agents, capture, lines, store, waits, scenarioRun, graph, runner, resolveOptions,
     run: (args = {}) => runDiscovery({ kind: "start", arguments: { from: baselineThread, targets: 3, caseFile: null, settingsOverlay: null, threshold: null, canonicalCache: null, liveCanonical: true, unattended: false, ...args } }, dependencies),
     resume: (threadId) => runDiscovery({ kind: "resume", threadId }, dependencies),
   };

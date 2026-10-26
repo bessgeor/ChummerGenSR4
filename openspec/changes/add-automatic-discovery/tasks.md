@@ -8,7 +8,7 @@ Each task names the tasks it builds on as `(after: …)`, by number in this list
 
 ## 2. Shared discovery composition
 
-- [ ] 2.1 Factor the discovery's composition out of `discover-main.ts` into a runner both entry points use, with start, resume and read of a finished thread by ID. Evidence: the discovery graph tests and a runner test for each of the three cases.
+- [x] 2.1 Factor the discovery's composition out of `discover-main.ts` into a runner both entry points use, with start, resume and read of a finished thread by ID. Evidence: the discovery graph tests and a runner test for each of the three cases.
 
 ## 3. Discovery in the graph
 

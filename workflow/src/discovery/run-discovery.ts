@@ -1,13 +1,11 @@
-import { newThreadId, setupErrorStatus, threadConfig } from "../graph/run-workflow.js";
+import { newThreadId, setupErrorStatus } from "../graph/run-workflow.js";
 import { SetupError } from "../host/setup-error.js";
 import type { DiscoverCommand, DiscoverArguments } from "./discover-arguments.js";
-import type { buildDiscoveryGraph } from "./discovery-graph.js";
-import { pendingJob, type DiscoveryOptions, type DiscoveryStateValue } from "./discovery-state.js";
-
-export type DiscoveryGraph = ReturnType<ReturnType<typeof buildDiscoveryGraph>["compile"]>;
+import type { DiscoveryRunner } from "./discovery-runner.js";
+import type { Concluded, DiscoveryOptions } from "./discovery-state.js";
 
 export type DiscoveryRunDependencies = {
-  readonly graph: DiscoveryGraph;
+  readonly runner: DiscoveryRunner;
   readonly resolveOptions: (args: DiscoverArguments) => DiscoveryOptions;
   /** Why an unattended thread may not dispatch its jobs; empty when it may or is not unattended. */
   readonly certificateProblems: (options: DiscoveryOptions) => readonly string[];
@@ -23,18 +21,17 @@ function requireCertificates(options: DiscoveryOptions, dependencies: DiscoveryR
 
 /** Runs or resumes a discovery thread and returns its exit status; any failure is a setup error, and an unfinished thread stays resumable. */
 export async function runDiscovery(command: Exclude<DiscoverCommand, { kind: "help" }>, dependencies: DiscoveryRunDependencies): Promise<number> {
-  const { graph, log } = dependencies;
+  const { runner, log } = dependencies;
   let threadId: string | null = command.kind === "resume" ? command.threadId : null;
   try {
-    let final: DiscoveryStateValue;
+    let concluded: Concluded;
     if (command.kind === "resume") {
-      const snapshot = await graph.getState({ configurable: { thread_id: command.threadId } });
-      const values = snapshot.values as Partial<DiscoveryStateValue>;
-      if (snapshot.config.configurable?.["checkpoint_id"] === undefined || values.options === undefined) throw new SetupError(`There is no discovery thread ${command.threadId} to resume.`);
-      if (snapshot.next.length === 0) throw new SetupError(`Discovery thread ${command.threadId} already finished; start a new one instead.`);
-      requireCertificates(values.options, dependencies);
+      const found = await runner.thread(command.threadId);
+      if (found.kind === "absent") throw new SetupError(`There is no discovery thread ${command.threadId} to resume.`);
+      if (found.kind === "finished") throw new SetupError(`Discovery thread ${command.threadId} already finished; start a new one instead.`);
+      requireCertificates(found.options, dependencies);
       log(`Resuming discovery thread ${command.threadId}.`);
-      final = await graph.invoke(null, threadConfig(command.threadId, dependencies.signal));
+      concluded = await runner.resume(command.threadId, dependencies.signal);
     } else {
       const options = dependencies.resolveOptions(command.arguments);
       requireCertificates(options, dependencies);
@@ -42,16 +39,11 @@ export async function runDiscovery(command: Exclude<DiscoverCommand, { kind: "he
       const cache = options.canonicalCache === null ? "off (--live-canonical)" : `${options.canonicalCache} (${options.canonicalCacheSource})`;
       log(`Discovery thread ${threadId}: baseline ${options.from}, ${options.targets} targets at most, canonical cache ${cache}.`);
       log(`Resume it after an interruption with: npm run discover -- --resume ${threadId}`);
-      const input: DiscoveryStateValue = {
-        threadId, options, startedUtc: dependencies.now().toISOString(), prepared: null, rankJob: pendingJob(), selected: null, scenarios: {}, agentMilliseconds: 0,
-        execution: null, registered: null, concluded: null,
-      };
-      final = await graph.invoke(input, threadConfig(threadId, dependencies.signal));
+      concluded = await runner.start(threadId, options, dependencies.signal);
     }
-    if (final.concluded === null) throw new SetupError(`Discovery thread ${final.threadId} ended without its conclusion.`);
-    for (const line of final.concluded.lines) log(line);
-    log(`Discovery thread ${final.threadId} finished: exit ${final.concluded.exitStatus}.`);
-    return final.concluded.exitStatus;
+    for (const line of concluded.lines) log(line);
+    log(`Discovery thread ${threadId} finished: exit ${concluded.exitStatus}.`);
+    return concluded.exitStatus;
   } catch (error) {
     if (dependencies.signal?.aborted === true) log("Interrupted: the running steps were stopped.");
     else log(`Setup error: ${error instanceof SetupError ? error.message : (error as Error).stack ?? String(error)}`);

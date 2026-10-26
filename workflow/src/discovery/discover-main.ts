@@ -21,20 +21,16 @@ import { createScratchFolder } from "../host/scratch-folder.js";
 import { SetupError } from "../host/setup-error.js";
 import { loadProfile, localDataFolder } from "../options/profile.js";
 import { workflowPaths } from "../paths.js";
-import { CaptureStep, readEnvironmentFingerprint, runCaptureRunner } from "../steps/capture-step.js";
+import { CaptureStep } from "../steps/capture-step.js";
 import { CompareStep } from "../steps/compare-step.js";
-import { captureInputs, changedInputs } from "../steps/input-fingerprints.js";
+import { changedInputs } from "../steps/input-fingerprints.js";
 import { StepStore } from "../steps/step-store.js";
 import { SqliteStore } from "../store/sqlite-store.js";
 import { discoverUsage, parseDiscoverArguments, resolveDiscoveryOptions } from "./discover-arguments.js";
-import { concludeDiscovery } from "./discovery-document.js";
-import { buildDiscoveryGraph, type DiscoverySteps } from "./discovery-graph.js";
-import { DiscoveryJobs } from "./discovery-jobs.js";
 import { discoveryPaths } from "./discovery-paths.js";
-import { DiscoveryService } from "./discovery-service.js";
+import { composeDiscovery, hostDiscovery } from "./discovery-runner.js";
 import { registryPaths } from "./registry.js";
 import { runDiscovery } from "./run-discovery.js";
-import { ScenarioRun } from "./scenario-run.js";
 
 process.on("uncaughtException", (error) => {
   console.error(`npm run discover failed: ${error.stack ?? String(error)}`);
@@ -70,36 +66,15 @@ async function main(): Promise<number> {
   const hostSteps = new HostSteps(paths, host,
     new CaptureStep({ paths, host, store: stepStore, log, now, createScratchFolder, changedInputs }),
     new CompareStep({ paths, host, store: stepStore, log, now, changedInputs }), stepStore, now, createScratchFolder);
-  const jobs = new DiscoveryJobs({ agents: agentRunners(process.env), quota: new QuotaWaiter(randomBytes(8).toString("hex"), undefined, log), createScratchFolder, now, log });
-  const service = new DiscoveryService({
-    repositoryRoot, paths, folders, registry: registryPaths(repositoryRoot), git: processGit(repositoryRoot), jobs, buildTools: (options, signal) => hostSteps.build(options, false, signal), now, log,
-  });
-  const scenarioRun = new ScenarioRun({
-    repositoryRoot, folders, registry: registryPaths(repositoryRoot), now, log,
-    capture: (options, cases, signal) => runCaptureRunner({
-      paths, host, createScratchFolder, options, selection: { cases, captures: null }, subject: "discovery capture", uiTrees: true, ...(signal === undefined ? {} : { signal }),
-    }),
-    changedInputs: (options, fingerprints) => changedInputs(paths, options, fingerprints, captureInputs),
-    environment: (signal) => readEnvironmentFingerprint(paths, host, createScratchFolder, "environment discovery", signal),
-  });
-  const steps: DiscoverySteps = {
-    prepare: (threadId, options, signal) => service.prepare(threadId, options, signal),
-    rank: (state, store, signal) => service.rank(state, store, signal),
-    select: (state) => service.select(state),
-    scenario: (state, targetId, store, signal) => service.scenario(state, targetId, store, signal),
-    waitForQuota: (marks, signal) => service.waitForQuota(marks, signal),
-    validate: (state) => service.validate(state),
-    execute: (state, signal) => scenarioRun.execute(state, signal),
-    register: (state, store) => scenarioRun.register(state, store),
-    conclude: (state) => concludeDiscovery(state, folders, now()),
-  };
-
   const checkpointer = SqliteSaver.fromConnString(folders.checkpoints);
   const store = new SqliteStore(paths.store);
   try {
-    const graph = buildDiscoveryGraph(steps).compile({ checkpointer, store });
+    const runner = composeDiscovery({
+      repositoryRoot, paths, folders, registry: registryPaths(repositoryRoot), git: processGit(repositoryRoot), host: hostDiscovery(paths, host, hostSteps, createScratchFolder),
+      agents: agentRunners(process.env), quota: new QuotaWaiter(randomBytes(8).toString("hex"), undefined, log), createScratchFolder, checkpointer, store, now, log,
+    });
     return await runDiscovery(command, {
-      graph, log, now, signal: interruptSignal(log),
+      runner, log, now, signal: interruptSignal(log),
       resolveOptions: (args) => resolveDiscoveryOptions(args, profile, process.env, repositoryRoot),
       certificateProblems: (options) => (options.unattended ? certificateProblems(options.certificates, ["rank", "scenario"], options.agents, options.tuning) : []),
     });
