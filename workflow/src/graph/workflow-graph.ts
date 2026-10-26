@@ -18,12 +18,14 @@ import { buildCaptureStage } from "./stages/capture-stage.js";
 import { buildConcludeStage } from "./stages/conclude-stage.js";
 import { buildDiagnoseStage } from "./stages/diagnose-stage.js";
 import { buildRepairStage } from "./stages/repair-stage.js";
-import { nodeMode, repairs, widens } from "./stages/stage-support.js";
+import { discovers, nodeMode, repairs, widens } from "./stages/stage-support.js";
+import { buildDiscoveryStage } from "./stages/discovery-stage.js";
 import { buildStartStage } from "./stages/start-stage.js";
 import { buildWidenStage } from "./stages/widen-stage.js";
 import { ThreadState, type TriageSummary, type WorkflowStateValue } from "./workflow-state.js";
+import type { ThreadDiscoverySteps } from "../discovery/thread-discovery.js";
 
-export { nodeMode, repairs, widens } from "./stages/stage-support.js";
+export { discovers, nodeMode, repairs, widens } from "./stages/stage-support.js";
 
 export type TriageInput = {
   readonly threadId: string;
@@ -91,7 +93,7 @@ export interface LoopSteps {
 }
 
 /** The nodes of the workflow graph, one per stage, in the order a thread reaches them; they never change. */
-export const stageIds = ["start", "capture", "diagnose", "repair", "widen", "conclude"] as const;
+export const stageIds = ["start", "capture", "discovery", "diagnose", "repair", "widen", "conclude"] as const;
 
 export type StageId = (typeof stageIds)[number];
 
@@ -122,14 +124,16 @@ function nextAttemptRoute(state: WorkflowStateValue): "repair" | "conclude" {
  * start → capture → diagnose → repair → widen → conclude, each stage a subgraph of its own nodes (see the stage
  * builders) that shares the thread's state, with its fan-outs and their checkpoints in the stage's namespace. The
  * edges between the stages skip the stages a thread's options leave out: a thread that did not triage ends after
- * `capture`, one without diagnosis concludes after it, one without repair after `diagnose`. A cluster whose attempt
+ * `capture`, one without diagnosis concludes after it, one without repair after `diagnose`. A thread whose scope shows
+ * no difference goes from `capture` to `discovery` instead (see `discovers`) and concludes after it. A cluster whose attempt
  * was rejected and may have another is pending again after `widen` (or `repair`, when widening is off), and goes back
  * to `repair`; its passed next attempt is widened on the source accepted so far.
  */
-export function buildWorkflowGraph(steps: WorkflowSteps, diagnosis: DiagnosisSteps, repair: RepairSteps, widening: WideningSteps, loop: LoopSteps) {
+export function buildWorkflowGraph(steps: WorkflowSteps, diagnosis: DiagnosisSteps, repair: RepairSteps, widening: WideningSteps, loop: LoopSteps, discovery: ThreadDiscoverySteps) {
   return new StateGraph(ThreadState)
     .addNode("start", compileStage(buildStartStage(steps)))
     .addNode("capture", compileStage(buildCaptureStage(steps)))
+    .addNode("discovery", compileStage(buildDiscoveryStage(discovery)))
     .addNode("diagnose", compileStage(buildDiagnoseStage(diagnosis)))
     .addNode("repair", compileStage(buildRepairStage(repair)))
     .addNode("widen", compileStage(buildWidenStage(widening)))
@@ -141,8 +145,10 @@ export function buildWorkflowGraph(steps: WorkflowSteps, diagnosis: DiagnosisSte
     }, ["capture"])
     .addConditionalEdges("capture", (state: WorkflowStateValue) => {
       if (state.triageSummary === null) return END;
+      if (discovers(state)) return "discovery";
       return state.options.diagnosis && nodeMode("diagnose", state.options.only) !== "skip" ? "diagnose" : "conclude";
-    }, ["diagnose", "conclude", END])
+    }, ["discovery", "diagnose", "conclude", END])
+    .addEdge("discovery", "conclude")
     .addConditionalEdges("diagnose", (state: WorkflowStateValue) => (repairs(state.options) ? "repair" : "conclude"), ["repair", "conclude"])
     .addConditionalEdges("repair", (state: WorkflowStateValue) => (widens(state.options) ? "widen" : nextAttemptRoute(state)), ["widen", "repair", "conclude"])
     .addConditionalEdges("widen", nextAttemptRoute, ["repair", "conclude"])

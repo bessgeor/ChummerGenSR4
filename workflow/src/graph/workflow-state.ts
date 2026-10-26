@@ -6,6 +6,7 @@ import type { RunOptions } from "../options/run-options.js";
 import { mergeRepairs, type ClusterRepair, type RepairUpdate } from "../repair/cluster-repair.js";
 import type { OutcomeDocument } from "../loop/outcome.js";
 import type { InventorySummary } from "../inventory/inventory-service.js";
+import type { ThreadDiscovery } from "../discovery/thread-discovery.js";
 import type { InputFingerprints } from "../steps/input-fingerprints.js";
 import type { StepOutcome } from "../steps/step-outcome.js";
 import { mergeWidenings, type AcceptedState, type ClusterWidening, type WideningUpdate } from "../widening/cluster-widening.js";
@@ -75,6 +76,8 @@ export const WorkflowState = Annotation.Root({
   accepted: Annotation<AcceptedState | null>(),
   /** The thread's `widening.json`, once widening finished. */
   wideningPath: Annotation<string | null>(),
+  /** The thread's discovery, once it ran; null when the thread did not discover, absent in a thread stored before discovery ran in threads. */
+  threadDiscovery: Annotation<ThreadDiscovery | null>(),
   /** When the thread started; absent in a thread stored before it was recorded. */
   startedUtc: Annotation<string | null>(),
   /** The thread's outcome and its `outcome.json`, once it concluded. */
