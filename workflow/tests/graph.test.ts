@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { InMemoryStore, MemorySaver, type StateSnapshot } from "@langchain/langgraph";
 import { resolveAgentSettings } from "../src/agents/agent-settings.js";
 import type { PlannedCase } from "../src/cases/case-plan.js";
+import { memoryCheckpointedThread } from "./memory-checkpointed-thread.js";
 import { buildFlatGraph } from "./flat-graph.js";
 import { buildLegacyCaseGraph } from "./legacy-case-graph.js";
 import { buildWorkflowGraph, discovers, nodeMode, stageIds, type DiagnosisSteps, type InventoryInput, type LoopSteps, type RepairSteps, type WideningSteps, type WorkflowSteps } from "../src/graph/workflow-graph.js";
@@ -213,6 +214,8 @@ function harness(cases: string[], steps = new FakeSteps(), checkpointer = new Me
     planCases: () => ({ cases: cases.map(plannedCase), excluded: [] }),
     certificateProblems: () => [],
     head: () => ({ branch: "main", commit: "c0ffee" }),
+    threadTraces: () => [],
+    checkpointedThread: (threadId) => memoryCheckpointedThread(checkpointer, threadId),
     readCase: (runFolder, compared) => {
       readCalls.push([runFolder, compared]);
       return fakeDetails(runFolder, compared);
@@ -270,6 +273,89 @@ test("a finished or unknown thread cannot be resumed", async () => {
   equal(await runWorkflow({ kind: "resume", threadId: "wf-unknown" }, run.dependencies), 3);
   ok(run.lines.some((line) => line.includes("no thread wf-unknown")));
   equal(run.steps.calls.length, calls);
+});
+
+test("a start given a new thread ID runs its thread under that ID", async () => {
+  const run = harness(["a"]);
+  const given = "wf-20261001T120000Z-given";
+  equal(await runWorkflow({ kind: "start", arguments: baseArguments }, run.dependencies, { threadId: given }), 0);
+  equal(run.threadId(), given);
+  ok(run.lines.includes(`Thread ${given} finished: exit 0.`), run.lines.join("\n"));
+  const state = await run.dependencies.graph.getState({ configurable: { thread_id: given } });
+  equal((state.values as WorkflowStateValue).threadId, given);
+  deepStrictEqual(state.next, []);
+  deepStrictEqual(run.steps.calls.filter((call) => call.startsWith("capture")), ["capture a run"]);
+});
+
+test("a start given the ID of a thread that exists is refused and leaves that thread as it was", async () => {
+  const steps = new FakeSteps();
+  steps.failCapture = "b";
+  const run = harness(["a", "b"], steps);
+  equal(await run.startRun(), 3);
+  const existing = run.threadId();
+  const before = await run.dependencies.graph.getState({ configurable: { thread_id: existing } });
+  steps.failCapture = null;
+  steps.calls.length = 0;
+  run.lines.length = 0;
+
+  equal(await runWorkflow({ kind: "start", arguments: baseArguments }, run.dependencies, { threadId: existing }), 3);
+  ok(run.lines.some((line) => line.includes(`Thread ${existing} exists already`)), run.lines.join("\n"));
+  equal(steps.calls.length, 0, steps.calls.join(", "));
+  const after = await run.dependencies.graph.getState({ configurable: { thread_id: existing } });
+  equal(after.config.configurable?.["checkpoint_id"], before.config.configurable?.["checkpoint_id"]);
+
+  // The refused start changed nothing, so the thread still resumes where it stopped.
+  equal(await runWorkflow({ kind: "resume", threadId: existing }, run.dependencies), 0);
+  deepStrictEqual(steps.calls.filter((call) => call.startsWith("capture")), ["capture b run"]);
+  // A finished thread's ID is taken too.
+  equal(await runWorkflow({ kind: "start", arguments: baseArguments }, run.dependencies, { threadId: existing }), 3);
+});
+
+test("a start given an ID that is not one path segment is refused before anything runs", async () => {
+  const run = harness(["a"]);
+  // Not one path segment, not a ref component git accepts (`..`, a trailing dot or `.lock`) and Windows device names.
+  const refused = ["", "../wf-x", "wf x", "-wf", "a..b", "wf.lock", "wf.", "CON", "nul.txt", "Lpt1"];
+  for (const threadId of refused) {
+    equal(await runWorkflow({ kind: "start", arguments: baseArguments }, run.dependencies, { threadId }), 3);
+  }
+  equal(run.lines.filter((line) => line.includes("is not a thread ID")).length, refused.length, run.lines.join("\n"));
+  deepStrictEqual(run.steps.calls, []);
+});
+
+test("a start given an ID that differs from an existing thread's only in case is refused", async () => {
+  const steps = new FakeSteps();
+  steps.failCapture = "b";
+  const run = harness(["a", "b"], steps);
+  equal(await run.startRun(), 3);
+  const existing = run.threadId();
+  steps.calls.length = 0;
+  run.lines.length = 0;
+  equal(await runWorkflow({ kind: "start", arguments: baseArguments }, run.dependencies, { threadId: existing.toLowerCase() }), 3);
+  ok(run.lines.some((line) => line.includes(`Thread ${existing} exists already`)), run.lines.join("\n"));
+  equal(steps.calls.length, 0, steps.calls.join(", "));
+});
+
+test("a start given an ID that a folder or a branch uses is refused before anything runs", async () => {
+  const run = harness(["a"]);
+  const used: RunDependencies = { ...run.dependencies, threadTraces: (threadId) => (threadId === "wf-used" ? ["the branch accepted/wf-used"] : []) };
+  equal(await runWorkflow({ kind: "start", arguments: baseArguments }, used, { threadId: "wf-used" }), 3);
+  ok(run.lines.some((line) => line.includes("wf-used is in use already: the branch accepted/wf-used")), run.lines.join("\n"));
+  equal(run.steps.calls.length, 0, run.steps.calls.join(", "));
+  equal(await runWorkflow({ kind: "start", arguments: baseArguments }, used, { threadId: "wf-free" }), 0);
+});
+
+test("a resume takes the thread of its command and refuses a given thread ID", async () => {
+  const steps = new FakeSteps();
+  steps.failCapture = "b";
+  const run = harness(["a", "b"], steps);
+  equal(await run.startRun(), 3);
+  const existing = run.threadId();
+  steps.failCapture = null;
+  steps.calls.length = 0;
+  run.lines.length = 0;
+  equal(await runWorkflow({ kind: "resume", threadId: existing }, run.dependencies, { threadId: "wf-other" }), 3);
+  ok(run.lines.some((line) => line.includes("only a start takes a given thread ID")), run.lines.join("\n"));
+  equal(steps.calls.length, 0, steps.calls.join(", "));
 });
 
 test("--only runs one node, reuses the nodes before it and skips the nodes after it", async () => {
@@ -425,6 +511,7 @@ test("results that cannot be read after the graph finished are a setup error wit
     ...run.dependencies,
     certificateProblems: () => [],
     head: () => ({ branch: "main", commit: "c0ffee" }),
+    threadTraces: () => [],
     readCase: () => {
       throw new SetupError("a/coverage.json cannot be read");
     },
@@ -514,7 +601,7 @@ test("a thread stored in the older checkpoint format after triage is refused as 
   steps.calls.length = 0;
   equal(await runWorkflow({ kind: "resume", threadId: storedBefore.threadId }, run.dependencies), 3, run.lines.join("\n"));
   ok(run.lines.some((line) => line.includes("cannot be resumed")), run.lines.join("\n"));
-  deepStrictEqual(steps.calls, []);
+  equal(steps.calls.length, 0, steps.calls.join(", "));
 });
 
 test("the drawing with xray shows every stage with its inner nodes", async () => {

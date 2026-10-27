@@ -35,6 +35,7 @@ import { fixesRootOf, openSpecArchiver, processOpenSpecCli, type FixChangeArchiv
 import { plannedCase, readReport, repository, runFolders, scratch, triageDocument, type Spot } from "./diagnosis-fixtures.js";
 import type { DispatchedTuning } from "../src/tuning/tuning.js";
 import { noDiscovery } from "./thread-discovery-fixtures.js";
+import { memoryCheckpointedThread } from "./memory-checkpointed-thread.js";
 
 export const hypothesisAnswer = (claim = "The Skills tab label moved in frmCreate."): HypothesisOutput => ({
   outcome: "hypothesis", reason: "The crops show a shifted label.",
@@ -310,6 +311,8 @@ export function diagnosisHarness(options: HarnessOptions) {
     planCases: () => ({ cases: cases.filter((item) => folders[item.name] !== undefined), excluded: [] }),
     readCase: () => details,
     certificateProblems: unattendedProblems,
+    threadTraces: () => [],
+    checkpointedThread: (threadId) => memoryCheckpointedThread(checkpointer, threadId),
     head: () => headBranch(plainGit),
     log,
     now: () => new Date("2026-10-01T12:00:00Z"),

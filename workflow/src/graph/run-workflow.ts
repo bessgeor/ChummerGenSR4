@@ -35,6 +35,10 @@ export type RunDependencies = {
   readonly certificateProblems: (options: RunOptions) => readonly string[];
   /** The branch the repository's HEAD names (null when detached) and its commit. */
   readonly head: () => HeadBranch;
+  /** What a thread ID is already used by besides the checkpoint database (folders, branches), whatever the case; empty when it is free. */
+  readonly threadTraces: (threadId: string) => readonly string[];
+  /** The checkpointed thread whose ID equals the given one without regard to case, if any; it reads no checkpoint history. */
+  readonly checkpointedThread: (threadId: string) => Promise<string | null> | string | null;
   /** Aborts when the operator interrupts the run (Ctrl+C): running children are stopped and the thread stays resumable. */
   readonly signal?: AbortSignal;
 };
@@ -91,8 +95,44 @@ function report(state: WorkflowStateValue, readCase: RunDependencies["readCase"]
   if (state.outcome != null && state.outcomePath != null) for (const line of describeOutcome(state.outcome, state.outcomePath)) log(line);
 }
 
-async function start(command: Extract<Command, { kind: "start" }>, dependencies: RunDependencies): Promise<{ threadId: string; input: WorkflowStateValue }> {
-  const threadId = newThreadId(dependencies.now());
+/** How a run starts: a start may be given the ID of its new thread instead of getting a new one. */
+export type RunRequest = { readonly threadId?: string };
+
+/** A thread ID a caller chose: one path segment of letters, digits, dots, underscores and hyphens. */
+const threadIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/** The names the thread ID cannot take as a folder or as a branch component: git's forbidden forms and the Windows device names. */
+function unusableThreadId(threadId: string): string | null {
+  if (!threadIdPattern.test(threadId)) return "use letters, digits, dots, underscores and hyphens, and start with a letter or digit";
+  if (threadId.includes("..") || threadId.endsWith(".") || threadId.endsWith(".lock")) return "it must not contain '..' or end with '.' or '.lock'";
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i.test(threadId)) return "it is a Windows device name";
+  return null;
+}
+
+/** The ID a start uses: the given one, which must name no thread yet whatever the case of its letters, or a new one. */
+async function startThreadId(request: RunRequest, dependencies: RunDependencies): Promise<string> {
+  if (request.threadId === undefined) return newThreadId(dependencies.now());
+  const threadId = request.threadId;
+  const unusable = unusableThreadId(threadId);
+  if (unusable !== null) throw new SetupError(`'${threadId}' is not a thread ID: ${unusable}.`);
+  const existing = await dependencies.checkpointedThread(threadId);
+  if (existing !== null) {
+    throw new SetupError(`Thread ${existing} exists already${existing === threadId ? "" : ` (the ID is compared without regard to case)`}; `
+      + `a start needs a new thread ID (resume it with: npm start -- --resume ${existing}).`);
+  }
+  const traces = dependencies.threadTraces(threadId);
+  if (traces.length > 0) throw new SetupError(`The thread ID ${threadId} is in use already: ${traces.join("; ")}. A start needs a new thread ID.`);
+  return threadId;
+}
+
+function checkpointerOf(graph: WorkflowGraph) {
+  const { checkpointer } = graph;
+  if (checkpointer === undefined || typeof checkpointer === "boolean") throw new SetupError("The workflow graph was compiled without a checkpointer.");
+  return checkpointer;
+}
+
+async function start(command: Extract<Command, { kind: "start" }>, request: RunRequest, dependencies: RunDependencies): Promise<{ threadId: string; input: WorkflowStateValue }> {
+  const threadId = await startThreadId(request, dependencies);
   const resolved = dependencies.resolveOptions(command, threadId);
   requireCertificates(resolved, dependencies);
   const base = dependencies.head();
@@ -145,9 +185,7 @@ async function checkResumable(threadId: string, dependencies: RunDependencies): 
  * LangGraph's reserved nodes; a flat graph's name `build` from its first step on.
  */
 async function storedByFlatGraph(threadId: string, dependencies: RunDependencies): Promise<boolean> {
-  const { checkpointer } = dependencies.graph;
-  if (checkpointer === undefined || typeof checkpointer === "boolean") throw new SetupError("The workflow graph was compiled without a checkpointer.");
-  const tuple = await checkpointer.getTuple({ configurable: { thread_id: threadId, checkpoint_ns: "" } });
+  const tuple = await checkpointerOf(dependencies.graph).getTuple({ configurable: { thread_id: threadId, checkpoint_ns: "" } });
   if (tuple === undefined) return false;
   const triggered = Object.keys(tuple.checkpoint.channel_versions).flatMap((channel) => (channel.startsWith("branch:to:") ? [channel.slice("branch:to:".length)] : []));
   const nodes = [...Object.keys(tuple.checkpoint.versions_seen), ...triggered];
@@ -168,20 +206,24 @@ function finish(final: WorkflowStateValue, dependencies: RunDependencies): numbe
   return status;
 }
 
-/** Runs or resumes a thread and returns the exit status; any failure is a setup error, and an unfinished thread stays resumable. */
-export async function runWorkflow(command: Exclude<Command, { kind: "help" }>, dependencies: RunDependencies): Promise<number> {
+/**
+ * Runs or resumes a thread and returns the exit status; any failure is a setup error, and an unfinished thread stays resumable.
+ * A start given `request.threadId` runs its new thread under that ID.
+ */
+export async function runWorkflow(command: Exclude<Command, { kind: "help" }>, dependencies: RunDependencies, request: RunRequest = {}): Promise<number> {
   const { graph, log } = dependencies;
   // Set once the thread may run: a thread that is refused has nothing to resume.
   let threadId: string | null = null;
   try {
     let final: WorkflowStateValue;
     if (command.kind === "resume") {
+      if (request.threadId !== undefined) throw new SetupError("A resume takes the thread ID of its command; only a start takes a given thread ID.");
       await checkResumable(command.threadId, dependencies);
       threadId = command.threadId;
       log(`Resuming thread ${command.threadId}.`);
       final = await graph.invoke(null, threadConfig(command.threadId, dependencies.signal));
     } else {
-      const started = await start(command, dependencies);
+      const started = await start(command, request, dependencies);
       threadId = started.threadId;
       log(`Resume it after an interruption with: npm start -- --resume ${threadId}`);
       final = await graph.invoke(started.input, threadConfig(threadId, dependencies.signal));
