@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import { SetupError } from "../host/setup-error.js";
 import { GitCommandError, type BranchGit } from "./branch-git.js";
 
@@ -183,5 +183,20 @@ export class Worktrees {
 }
 
 function samePath(left: string, right: string): boolean {
-  return resolve(left).replaceAll("\\", "/").toLowerCase() === resolve(right).replaceAll("\\", "/").toLowerCase();
+  return canonicalPath(left) === canonicalPath(right);
+}
+
+/**
+ * A path in the form git lists worktrees in: absolute, with the existing part resolved (a Windows 8.3 short name such as
+ * a temporary folder's becomes its long name, a link its target), with forward slashes and without case.
+ */
+function canonicalPath(path: string): string {
+  let existing = resolve(path);
+  const rest: string[] = [];
+  while (!existsSync(existing) && dirname(existing) !== existing) {
+    rest.unshift(basename(existing));
+    existing = dirname(existing);
+  }
+  const resolved = existsSync(existing) ? realpathSync.native(existing) : existing;
+  return join(resolved, ...rest).replaceAll("\\", "/").toLowerCase();
 }

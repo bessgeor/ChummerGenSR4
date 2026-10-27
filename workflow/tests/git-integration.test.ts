@@ -1,5 +1,6 @@
 import { deepStrictEqual, equal, ok, throws } from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { processBranchGit, type BranchGit } from "../src/git/branch-git.js";
@@ -152,4 +153,16 @@ test("headBranch names the checked-out branch, or none when HEAD is detached", (
   deepStrictEqual(headBranch(repo.git), { branch: "main", commit: repo.start });
   repo.run("checkout", "-q", "--detach");
   deepStrictEqual(headBranch(repo.git), { branch: null, commit: repo.start });
+});
+
+test("a worktree is found by its folder whether the folder is named by its long or its 8.3 short name", { skip: process.platform !== "win32" ? "8.3 short names exist on Windows only" : false }, () => {
+  const repo = repositoryOnMain();
+  const folder = join(scratch("workflow-long-folder-name-"), "attempt-with-a-long-name");
+  repo.worktrees.add(folder, "workflow/wf-1/attempt", repo.start);
+  const short = execSync(`for %I in ("${folder}") do @echo %~sI`, { shell: "cmd.exe", encoding: "utf8" }).trim();
+  if (short.toLowerCase() === folder.toLowerCase()) throw new Error(`The volume gives ${folder} no 8.3 short name.`);
+  equal(repo.worktrees.state(short).branch, "workflow/wf-1/attempt");
+  repo.worktrees.remove(short);
+  equal(existsSync(folder), false);
+  equal(repo.worktrees.list().length, 1);
 });
