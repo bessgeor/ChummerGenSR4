@@ -1,6 +1,6 @@
 import { deepStrictEqual, equal, ok, rejects } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -12,7 +12,7 @@ import { SetupError } from "../src/host/setup-error.js";
 import { workflowPaths } from "../src/paths.js";
 import { readDocument } from "../src/steps/read-document.js";
 import { readActiveFile } from "../src/tuning/active-configuration.js";
-import { autoTuningPath, newHypothesisRecords, readAutoTuning, recordAutoTuning, resolveAutoTuning, startAutoTuning } from "../src/tuning/auto-tuning.js";
+import { autoTuningPath, newHypothesisRecords, readAutoTuning, reclaimLock, recordAutoTuning, resolveAutoTuning, startAutoTuning, withAutoTuningRun } from "../src/tuning/auto-tuning.js";
 import { readCycle } from "../src/tuning/cycle.js";
 import { readLedger } from "../src/tuning/holdout.js";
 import type { TuningSteps } from "../src/tuning/tuning-graph.js";
@@ -304,6 +304,61 @@ test("a tune auto after a killed one removes the locks the dead process left and
   equal(status, 0, context.lines.join("\n"));
   equal(finishedTuning(context.paths.evalsFolder).entry.tuningId, stopped.tuningId);
   deepStrictEqual(readdirSync(dirname(state)).filter((name) => name.includes(".lock") || name.endsWith(".abandoned")), []);
+});
+
+test("a lock names its owner from the moment it exists, and no file of its creation stays", async () => {
+  const folder = scratch("workflow-auto-lock-");
+  const lock = `${autoTuningPath(folder)}.run.lock`;
+  const seen = await withAutoTuningRun(folder, async () => ({ owner: JSON.parse(readFileSync(lock, "utf8")) as unknown, files: readdirSync(dirname(lock)) }));
+  deepStrictEqual(seen, { owner: { host: hostname(), processId: process.pid }, files: ["auto.json.run.lock"] });
+  deepStrictEqual(readdirSync(dirname(lock)), []);
+});
+
+test("a lock taken over from a dead owner is not removed once a live owner holds it", async () => {
+  const folder = scratch("workflow-auto-lock-");
+  const lock = `${autoTuningPath(folder)}.run.lock`;
+  const dead = { host: hostname(), processId: spawnSync(process.execPath, ["-e", ""]).pid! };
+  const live = { host: hostname(), processId: process.pid };
+  mkdirSync(dirname(lock), { recursive: true });
+  // Another process took the lock over after this one judged its owner dead: the takeover finds the new owner and leaves it.
+  writeFileSync(lock, `${JSON.stringify(live)}\n`);
+  equal(reclaimLock(lock, dead), true);
+  deepStrictEqual(JSON.parse(readFileSync(lock, "utf8")), live);
+  deepStrictEqual(readdirSync(dirname(lock)), ["auto.json.run.lock"]);
+  // The owner it judged is still there: removed.
+  writeFileSync(lock, `${JSON.stringify(dead)}\n`);
+  equal(reclaimLock(lock, dead), true);
+  deepStrictEqual(readdirSync(dirname(lock)), []);
+});
+
+test("a takeover guard left by a dead process is dropped, and one held by a running process is waited out, not broken", async () => {
+  const folder = scratch("workflow-auto-lock-");
+  const lock = `${autoTuningPath(folder)}.run.lock`;
+  const dead = { host: hostname(), processId: spawnSync(process.execPath, ["-e", ""]).pid! };
+  mkdirSync(dirname(lock), { recursive: true });
+  writeFileSync(lock, `${JSON.stringify(dead)}\n`);
+  writeFileSync(`${lock}.takeover`, `${JSON.stringify(dead)}\n`);
+  deepStrictEqual(await withAutoTuningRun(folder, async () => JSON.parse(readFileSync(lock, "utf8")) as unknown), { host: hostname(), processId: process.pid });
+  deepStrictEqual(readdirSync(dirname(lock)), []);
+
+  writeFileSync(lock, `${JSON.stringify(dead)}\n`);
+  writeFileSync(`${lock}.takeover`, `${JSON.stringify({ host: hostname(), processId: process.pid })}\n`);
+  await rejects(withAutoTuningRun(folder, async () => undefined), (error: Error) => error instanceof SetupError && error.message.includes("could not be taken over"));
+  deepStrictEqual(JSON.parse(readFileSync(lock, "utf8")), dead);
+  deepStrictEqual(readdirSync(dirname(lock)).sort(), ["auto.json.run.lock", "auto.json.run.lock.takeover"]);
+});
+
+test("an auto.json recorded before tunings kept their settings is read, and its tuning in progress continues with the profile's settings, which it then keeps", async () => {
+  const { context, records } = await dueTuning(agents([proposal("Cite the capture.")], "test", { "Cite the capture.": "all" }));
+  const tuning = recordedTuning(context, records);
+  const path = autoTuningPath(context.paths.evalsFolder);
+  const old = JSON.parse(readFileSync(path, "utf8")) as { current: Record<string, unknown> };
+  delete old.current["settings"];
+  writeFileSync(path, JSON.stringify(old));
+  equal(readAutoTuning(context.paths.evalsFolder).current?.settings, undefined);
+  equal(await runEvalCommand(["tune", "auto"], context), 0, context.lines.join("\n"));
+  const { entry } = finishedTuning(context.paths.evalsFolder);
+  deepStrictEqual([entry.tuningId, entry.settings, entry.outcome], [tuning.tuningId, context.autoTuning(), "activated"]);
 });
 
 test("a tune auto does not remove the lock of a process that still runs", async () => {

@@ -9,7 +9,7 @@ import { SetupError } from "../host/setup-error.js";
 import type { ComparisonSummary } from "./active-configuration.js";
 import { activate, entryName, rollback } from "./activation.js";
 import {
-  autoTuningDefaults, autoTuningPath, checkAutoTuning, newTuningId, readAutoTuning, withAutoTuningRun, type AutoTuningSettings, type AutoTuningTrigger,
+  autoTuningDefaults, autoTuningPath, checkAutoTuning, newTuningId, readAutoTuning, recordAutoTuning, withAutoTuningRun, type AutoTuningSettings, type AutoTuningTrigger,
 } from "./auto-tuning.js";
 import { candidatesFolder, parseTuningFile, storeCandidate } from "./candidates.js";
 import { cycleFolder, cycleOptions, ensureCycle, readCycle, type Cycle, type CycleDependencies } from "./cycle.js";
@@ -254,7 +254,9 @@ async function runAutoTuning(context: EvalContext, trigger: Exclude<AutoTuningTr
   } else {
     const { tuning } = trigger;
     context.log(`Automatic tuning ${tuning.tuningId}: in progress since ${tuning.startedUtc}; continued.`);
-    input = { tuningId: tuning.tuningId, request: { kind: "auto", records: tuning.records, forced: tuning.forced, settings: tuning.settings }, dataset: tuning.dataset, cycle: null, concluded: null };
+    // A tuning recorded before settings were kept takes the profile's now, and keeps them from here on.
+    const kept = tuning.settings ?? recordAutoTuning(evalsFolder, tuning.tuningId, { settings }).settings!;
+    input = { tuningId: tuning.tuningId, request: { kind: "auto", records: tuning.records, forced: tuning.forced, settings: kept }, dataset: tuning.dataset, cycle: null, concluded: null };
   }
   const { graph, steps } = tuningGraph(context);
   const cycle = await runTuningThread(graph, steps, input, "npm run eval -- tune auto", context.signal);

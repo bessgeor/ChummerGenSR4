@@ -1,6 +1,6 @@
 import type { BaseStore } from "@langchain/langgraph-checkpoint";
 import { randomBytes } from "node:crypto";
-import { closeSync, existsSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { z } from "zod";
@@ -38,8 +38,11 @@ const AutoTuningEntrySchema = z.strictObject({
   forced: z.boolean(),
   /** The records it counted when it started. */
   records: z.array(z.string().min(1)),
-  /** The settings it started with: a tuning continued later keeps them, whatever the profile says by then. */
-  settings: AutoTuningSettingsSchema,
+  /**
+   * The settings it started with: a tuning continued later keeps them, whatever the profile says by then. A tuning recorded
+   * before settings were kept has none, and takes the profile's when it is continued.
+   */
+  settings: AutoTuningSettingsSchema.optional(),
   /** The folder of the dataset version it freezes, recorded before the freeze. */
   dataset: z.string().min(1).nullable(),
   cycle: z.string().min(1).nullable(),
@@ -115,43 +118,69 @@ export async function checkAutoTuning(dependencies: AutoTuningDependencies, sett
 }
 
 const LockOwnerSchema = z.strictObject({ host: z.string(), processId: z.number().int() });
-type LockOwner = z.infer<typeof LockOwnerSchema>;
+export type LockOwner = z.infer<typeof LockOwnerSchema>;
 
-function readLockOwner(lock: string): LockOwner | null {
+/** The owner a lock file names; "gone" when the file does not exist, null when it holds anything else. */
+function readLockOwner(lock: string): LockOwner | "gone" | null {
+  let text: string;
   try {
-    return LockOwnerSchema.parse(JSON.parse(readFileSync(lock, "utf8")));
+    text = readFileSync(lock, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return "gone";
+    throw error;
+  }
+  try {
+    return LockOwnerSchema.parse(JSON.parse(text));
   } catch {
     return null;
   }
 }
 
 /**
- * Removes the lock of an owner that was killed: a lock of this machine whose process no longer runs. The lock is moved
- * aside first, so of two processes that judge it abandoned only one removes it, and it is removed only if it still names
- * the owner that was judged.
+ * Creates `path` holding this process as owner, or reports that it exists. The owner is written to a file of its own that
+ * is then linked to `path`, so the file never exists empty: a process killed meanwhile leaves no lock without an owner.
  */
-function removeAbandonedLock(lock: string, judged: LockOwner): boolean {
-  const aside = `${lock}.${process.pid}.${randomBytes(4).toString("hex")}.abandoned`;
+function createOwnerFile(path: string): boolean {
+  const own = `${path}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+  writeFileSync(own, `${JSON.stringify({ host: hostname(), processId: process.pid } satisfies LockOwner)}\n`, { flag: "wx" });
   try {
-    renameSync(lock, aside);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return true;
-    throw error;
-  }
-  const moved = readLockOwner(aside);
-  if (moved !== null && moved.host === judged.host && moved.processId === judged.processId) {
-    rmSync(aside, { force: true });
+    linkSync(own, path);
     return true;
-  }
-  // The lock was replaced by a live owner between the judgement and the move: put it back.
-  try {
-    linkSync(aside, lock);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+    throw error;
   } finally {
-    rmSync(aside, { force: true });
+    rmSync(own, { force: true });
   }
-  return false;
+}
+
+function abandoned(owner: LockOwner | "gone" | null): boolean {
+  return owner !== null && owner !== "gone" && owner.host === hostname() && !isProcessRunning(owner.processId);
+}
+
+function pause(milliseconds: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
+/**
+ * Removes the lock of an owner that was killed, if it still names that owner. Only the process that holds the takeover
+ * guard removes a lock it does not own, and a lock is created only where none exists, so under the guard the lock read is the
+ * lock removed: a lock another process created meanwhile is never taken. A guard left by a killed process is dropped the
+ * same way a lock is; the guard is held for a read and a removal only. Returns whether the guard was held.
+ */
+export function reclaimLock(lock: string, judged: LockOwner): boolean {
+  const guard = `${lock}.takeover`;
+  if (!createOwnerFile(guard)) {
+    if (abandoned(readLockOwner(guard))) rmSync(guard, { force: true });
+    return false;
+  }
+  try {
+    const current = readLockOwner(lock);
+    if (current !== "gone" && current !== null && current.host === judged.host && current.processId === judged.processId) rmSync(lock, { force: true });
+  } finally {
+    rmSync(guard, { force: true });
+  }
+  return true;
 }
 
 /**
@@ -160,25 +189,17 @@ function removeAbandonedLock(lock: string, judged: LockOwner): boolean {
  */
 function acquireLock(lock: string, held: string): () => void {
   mkdirSync(dirname(lock), { recursive: true });
-  for (;;) {
-    let descriptor: number;
-    try {
-      descriptor = openSync(lock, "wx");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      const owner = readLockOwner(lock);
-      if (owner !== null && owner.host === hostname() && !isProcessRunning(owner.processId) && removeAbandonedLock(lock, owner)) continue;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (createOwnerFile(lock)) return () => rmSync(lock, { force: true });
+    const owner = readLockOwner(lock);
+    if (owner === "gone") continue;
+    if (owner === null || !abandoned(owner)) {
       throw new SetupError(`${held}: its lock file ${lock} exists${owner === null ? "" : `, held by process ${owner.processId} on ${owner.host}`}. Remove the file if no tune auto runs.`);
     }
-    try {
-      writeSync(descriptor, `${JSON.stringify({ host: hostname(), processId: process.pid } satisfies LockOwner)}\n`);
-    } finally {
-      closeSync(descriptor);
-    }
-    return () => rmSync(lock, { force: true });
+    if (!reclaimLock(lock, owner)) pause(20);
   }
+  throw new SetupError(`${held}: its lock file ${lock} could not be taken over.`);
 }
-
 /** Runs `action` holding the exclusive lock file of `auto.json`. */
 function withAutoTuningLock<T>(evalsFolder: string, action: () => T): T {
   const path = autoTuningPath(evalsFolder);
@@ -240,7 +261,7 @@ export function currentTuning(evalsFolder: string, state: AutoTuningState, tunin
 }
 
 /** Records the dataset or the cycle of the tuning in progress, under the state's lock. */
-export function recordAutoTuning(evalsFolder: string, tuningId: string, fields: Partial<Pick<AutoTuningEntry, "dataset" | "cycle">>): AutoTuningEntry {
+export function recordAutoTuning(evalsFolder: string, tuningId: string, fields: Partial<Pick<AutoTuningEntry, "dataset" | "cycle" | "settings">>): AutoTuningEntry {
   return withAutoTuningLock(evalsFolder, () => {
     const state = readAutoTuning(evalsFolder);
     const tuning = { ...currentTuning(evalsFolder, state, tuningId), ...fields };
