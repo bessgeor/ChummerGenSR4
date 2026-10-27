@@ -64,7 +64,8 @@ function stageFolders<T>(git: BranchGit, indexFile: string, parent: string, fold
     const present = paths.filter((path) => existsSync(join(folder, path)));
     const absent = paths.filter((path) => !present.includes(path));
     if (absent.length > 0) git(["rm", "-r", "--cached", "--ignore-unmatch", "--quiet", "--", ...absent], { env });
-    if (present.length > 0) git([`--work-tree=${folder}`, "add", "--all", "--", ...present], { cwd: folder, env });
+    // The folder holds what the snapshot listed, among it files git tracks although an ignore rule matches them: all are staged.
+    if (present.length > 0) git([`--work-tree=${folder}`, "add", "--all", "--force", "--", ...present], { cwd: folder, env });
     return then(git(["write-tree"], { env }).trim(), env);
   } finally {
     rmSync(indexFile, { force: true });

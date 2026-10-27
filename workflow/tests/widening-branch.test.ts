@@ -149,6 +149,22 @@ test("a snapshot folder whose files were all deleted is deleted in the source co
   equal(git(repo, "ls-tree", "-r", "--name-only", source, "--", "bin/data"), "");
 });
 
+test("a file git tracks although an ignore rule matches it is in the snapshot and so in the source commit", async () => {
+  const repo = repository();
+  const exclude = join(repo, ".git", "info", "exclude");
+  mkdirSync(dirname(exclude), { recursive: true });
+  writeFileSync(exclude, "Chummer/Generated.cs\n");
+  write(repo, "Chummer/Generated.cs", "class Generated {}");
+  git(repo, "add", "--force", "Chummer/Generated.cs");
+  const snapshot = await createSourceSnapshot(repo, join(scratch(), "source"), processGit(repo));
+  ok(existsSync(join(snapshot.folder, "Chummer", "Generated.cs")));
+  const branchGit = processBranchGit(repo);
+  const source = threadSource(branchGit, "wf-17", snapshot.commit, snapshot.folder, join(scratch(), "source.index"));
+  equal(git(repo, "show", `${source}:Chummer/Generated.cs`), "class Generated {}");
+  // A resumed thread finds the same commit, which holds the snapshot's content.
+  equal(threadSource(branchGit, "wf-17", snapshot.commit, snapshot.folder, join(scratch(), "source.index")), source);
+});
+
 test("the first promotion commits the widened worktree on the source commit and moves the accepted branch, leaving the repository alone", async () => {
   const run = await thread("wf-4");
   const worktree = run.widened("d-1", run.source, { "Chummer/frmCreate.cs": "class frmCreate { int restored; }" });
