@@ -26,6 +26,11 @@ export const TuningState = Annotation.Root({
 });
 export type TuningStateValue = typeof TuningState.State;
 
+/** A new thread's input: what it was started for and, when known, its dataset. */
+export function tuningInput(tuningId: string, request: TuningRequest, dataset: string | null): TuningStateValue {
+  return { tuningId, request, dataset, cycle: null, concluded: null, workspace: null, tuningCommit: null, mergeCommit: null };
+}
+
 /** The work behind the tuning graph's nodes; each reads and writes the cycle's `cycle.json` and returns it. */
 export interface TuningSteps {
   /** Records the automatic tuning as in progress with the records it counts. */

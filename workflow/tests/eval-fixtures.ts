@@ -7,7 +7,7 @@ import { resolveAgentSettings } from "../src/agents/agent-settings.js";
 import { QuotaWaiter } from "../src/diagnosis/quota-waiter.js";
 import type { EvalContext } from "../src/evals/eval-commands.js";
 import { noLabels, type EvalRecord } from "../src/evals/eval-record.js";
-import { processBranchGit } from "../src/git/branch-git.js";
+import { processBranchGit, processCheckoutGit } from "../src/git/branch-git.js";
 import { createScratchFolder } from "../src/host/scratch-folder.js";
 import { workflowPaths } from "../src/paths.js";
 import { resolveAutoTuning } from "../src/tuning/auto-tuning.js";
@@ -85,7 +85,7 @@ export function evalContext(overrides: Partial<EvalContext> = {}): EvalContext &
   const checkpointer = new MemorySaver();
   const paths = overrides.paths ?? workflowPaths(scratch("workflow-eval-"));
   return {
-    paths, branchGit: processBranchGit(paths.repositoryRoot), store: new InMemoryStore(), git: () => "", now: () => new Date("2026-10-02T09:00:00Z"),
+    paths, branchGit: processBranchGit(paths.repositoryRoot), checkoutGit: processCheckoutGit(paths.repositoryRoot), store: new InMemoryStore(), git: () => "", now: () => new Date("2026-10-02T09:00:00Z"),
     log: (line) => lines.push(line), agentSettings: () => resolveAgentSettings(undefined), agents: () => agents, certificatesFolder: () => certificates,
     tuningFolder: () => tuning, autoTuning: () => resolveAutoTuning(undefined), tuningCheckpointer: () => checkpointer,
     quota: new QuotaWaiter("p", async () => undefined), createScratchFolder, lines,

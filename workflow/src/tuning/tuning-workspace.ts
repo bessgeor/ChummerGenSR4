@@ -1,9 +1,12 @@
 import { existsSync } from "node:fs";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { certificatePath } from "../evals/certificate.js";
+import { evaluatedJobKinds } from "../evals/evaluated-job-kinds.js";
 import { GitCommandError, type BranchGit } from "../git/branch-git.js";
 import { headBranch, integrate } from "../git/integration.js";
 import { Worktrees } from "../git/worktrees.js";
 import { SetupError } from "../host/setup-error.js";
+import { tuningFiles } from "./active-configuration.js";
 
 /** The tuning and certificates folders a cycle reads and writes. */
 export type TuningFolders = { readonly tuningFolder: string; readonly certificatesFolder: string };
@@ -26,15 +29,19 @@ export type TuningWorkspace = {
 export const tuningCommitTrailer = "Tuning-Cycle";
 export const mergedTuningTrailer = "Merged-Tuning";
 
+/** The temporary files `writeDocument` renames into place; one a stopped process left behind is never committed. */
+const temporarySuffix = ".tmp";
+
 export function tuningBranch(cycleId: string): string {
   return `tuning/${cycleId}`;
 }
 
-/** The folder's path relative to the repository's root with forward slashes, or null when it lies outside it. */
-function insidePath(repositoryRoot: string, folder: string): string | null {
-  const path = relative(resolve(repositoryRoot), resolve(folder));
-  if (path === "" || path === ".." || path.startsWith(`..${sep}`) || isAbsolute(path)) return path === "" ? "." : null;
-  return path.split(sep).join("/");
+/** A path relative to the repository's root with forward slashes, or null when it lies outside it. */
+function insidePath(repositoryRoot: string, path: string): string | null {
+  const inside = relative(resolve(repositoryRoot), resolve(path));
+  if (inside === "") return ".";
+  if (inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside)) return null;
+  return inside.split(sep).join("/");
 }
 
 /** The tuning and certificates folders that lie inside the repository, relative to its root. */
@@ -43,36 +50,55 @@ export function repositoryPaths(repositoryRoot: string, folders: TuningFolders):
   return [...new Set(paths)];
 }
 
+/** The files a cycle writes in its folders: the ledger, the active files and the certificates of every job kind. */
+function cycleFiles(folders: TuningFolders): string[] {
+  const files = tuningFiles(folders.tuningFolder);
+  return [files.holdout, ...evaluatedJobKinds.map((jobKind) => files.active(jobKind)), ...evaluatedJobKinds.map((jobKind) => certificatePath(folders.certificatesFolder, jobKind))];
+}
+
 /**
- * What a cycle in a worktree needs of the repository: the branch `HEAD` names (a detached `HEAD` is a setup error) and
- * its tip, and no uncommitted change, untracked file included, in the folders inside the repository, which the cycle
- * would not see; a folder git ignores is a setup error too, as its files could not be committed.
+ * What a cycle in a worktree needs of the repository, read with the user's git configuration as the checkout was made:
+ * the branch `HEAD` names (a detached `HEAD` is a setup error) and its tip; no file the cycle writes in the folders
+ * inside the repository that git ignores, as it could not be committed; and no uncommitted change in those folders,
+ * untracked files included, which the cycle would not see.
  */
-export function requireWorkspaceStart(git: BranchGit, repositoryRoot: string, paths: readonly string[]): { branch: string; commit: string } {
-  const head = headBranch(git);
+export function requireWorkspaceStart(checkoutGit: BranchGit, repositoryRoot: string, folders: TuningFolders): { branch: string; commit: string; paths: string[] } {
+  const paths = repositoryPaths(repositoryRoot, folders);
+  const head = headBranch(checkoutGit);
   if (head.branch === null) {
     throw new SetupError(`The tuning folders ${paths.join(" and ")} lie inside the repository, so an automatic tuning merges its files into the branch HEAD names, but HEAD is detached at ${head.commit}. Check out a branch first.`);
   }
-  for (const path of paths) {
-    try {
-      git(["check-ignore", "--quiet", "--no-index", "--", path], { worktree: repositoryRoot });
-      throw new SetupError(`The tuning folder ${path} lies inside the repository, but git ignores it, so an automatic tuning could not commit its files. Name a folder git tracks, or one outside the repository.`);
-    } catch (error) {
-      if (!(error instanceof GitCommandError) || error.status !== 1) throw error;
-    }
+  const files = cycleFiles(folders).map((file) => insidePath(repositoryRoot, file)).filter((file) => file !== null);
+  let ignored: string[] = [];
+  try {
+    ignored = checkoutGit(["check-ignore", "--no-index", "-z", "--stdin"], { worktree: repositoryRoot, input: `${files.join("\0")}\0` }).split("\0").filter((file) => file.length > 0);
+  } catch (error) {
+    // Exit status 1: none of them is ignored.
+    if (!(error instanceof GitCommandError) || error.status !== 1) throw error;
   }
-  const changed = git(["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", ...paths], { worktree: repositoryRoot }).split("\0").filter((entry) => entry.length > 0);
+  if (ignored.length > 0) {
+    throw new SetupError(`git ignores ${ignored.join(", ")}, which an automatic tuning writes inside the repository and so could not commit. Name folders git tracks, or folders outside the repository.`);
+  }
+  const changed = checkoutGit(["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", ...paths], { worktree: repositoryRoot }).split("\0").filter((entry) => entry.length > 0);
   if (changed.length > 0) {
     throw new SetupError(`${paths.join(" and ")} ${paths.length === 1 ? "has" : "have"} uncommitted changes (${changed.map((entry) => entry.slice(3)).join(", ")}), which an automatic tuning's cycle would not see: commit or discard them first.`);
   }
-  return { branch: head.branch, commit: head.commit };
+  return { branch: head.branch, commit: head.commit, paths };
 }
 
-/** The repository's worktrees and branches as an automatic tuning uses them. */
+/** A dataset version's folder as its name and version, without the machine's path: `auto-hypothesis v3`. */
+export function datasetLabel(folder: string): string {
+  return `${basename(dirname(folder))} ${basename(folder)}`;
+}
+
+/**
+ * The repository's worktrees and branches as an automatic tuning uses them: its own worktrees with the pinned git, the
+ * user's checkout with `checkoutGit`, the user's git configuration.
+ */
 export class TuningRepository {
   private readonly worktrees: Worktrees;
 
-  constructor(private readonly git: BranchGit, private readonly repositoryRoot: string) {
+  constructor(private readonly git: BranchGit, private readonly checkoutGit: BranchGit, private readonly repositoryRoot: string) {
     this.worktrees = new Worktrees(git, repositoryRoot);
   }
 
@@ -86,8 +112,8 @@ export class TuningRepository {
    * Adds the worktree at `folder` on `tuning/<cycle>` at the tip of the branch `HEAD` names. A worktree that is there
    * already (its node interrupted after it was made, before any step used it) is made again.
    */
-  open(cycleId: string, folder: string, folders: TuningFolders, paths: readonly string[]): TuningWorkspace {
-    const start = requireWorkspaceStart(this.git, this.repositoryRoot, paths);
+  open(cycleId: string, folder: string, folders: TuningFolders): TuningWorkspace {
+    const start = requireWorkspaceStart(this.checkoutGit, this.repositoryRoot, folders);
     const branch = tuningBranch(cycleId);
     this.worktrees.remove(folder);
     this.worktrees.add(folder, branch, start.commit);
@@ -96,7 +122,7 @@ export class TuningRepository {
       return inside === null ? path : join(folder, inside);
     };
     return {
-      target: start.branch, start: start.commit, branch, folder, paths: [...paths],
+      target: start.branch, start: start.commit, branch, folder, paths: start.paths,
       folders: { tuningFolder: mapped(folders.tuningFolder), certificatesFolder: mapped(folders.certificatesFolder) },
     };
   }
@@ -116,12 +142,14 @@ export class TuningRepository {
    */
   commit(workspace: TuningWorkspace, cycleId: string, message: string): string | null {
     this.requireWorktree(workspace);
+    // A folder neither the worktree nor the start has is no pathspec git accepts, and has nothing to commit.
     const present = workspace.paths.filter((path) => existsSync(join(workspace.folder, path)) || this.worktrees.missingFolders(workspace.start, [path]).length === 0);
     if (present.length > 0) {
-      const ignored = this.git(["ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--", ...present], { worktree: workspace.folder }).split("\0").filter((path) => path.length > 0);
-      if (ignored.length > 0) throw new SetupError(`The tuning wrote files that git ignores in ${workspace.folder} (${ignored.join(", ")}), so they cannot be committed on ${workspace.branch}.`);
-      this.git(["add", "--all", "--", ...present], { worktree: workspace.folder });
-      if (this.git(["diff", "--cached", "--name-only"], { worktree: workspace.folder }).trim().length > 0) this.worktrees.commitStaged(workspace.folder, message);
+      this.worktrees.stage(workspace.folder, present);
+      const staged = this.git(["diff", "--cached", "--name-only", "-z"], { worktree: workspace.folder }).split(" ").filter((path) => path.length > 0);
+      const temporary = staged.filter((path) => path.endsWith(temporarySuffix));
+      if (temporary.length > 0) this.git(["rm", "--cached", "--quiet", "--", ...temporary], { worktree: workspace.folder });
+      if (staged.length > temporary.length) this.worktrees.commitStaged(workspace.folder, message);
     }
     const tip = this.worktrees.head(workspace.folder);
     return tip !== workspace.start && this.worktrees.trailer(tip, tuningCommitTrailer) === cycleId ? tip : null;
@@ -134,17 +162,19 @@ export class TuningRepository {
 
   /**
    * Merges the cycle's commit, the tip of its branch, into the workspace's target: rebased onto the target's tip as the
-   * tuning branch and merged with a merge commit carrying `Merged-Tuning: <cycle>`, then the target is advanced. Returns
-   * the merge commit, or the one that merged the cycle before (null when the target has the changes already), and the
-   * rebased commit. A conflict is a setup error naming the branch.
+   * tuning branch and merged with a merge commit carrying `Merged-Tuning: <cycle>`, then the target is advanced, a
+   * checkout of it by a fast-forward with the user's git configuration. Returns the merge commit, or the one that merged
+   * the cycle before, and the commit the branch keeps; when the target has the changes already there is no merge
+   * commit, and the branch keeps the cycle's commit. A conflict is a setup error naming the branch.
    */
   merge(workspace: TuningWorkspace, cycleId: string, mergeFolder: string, subject: string, trailers: readonly { key: string; value: string }[]): { merge: string | null; commit: string } {
-    const commit = this.worktrees.resolve(`refs/heads/${workspace.branch}`);
+    const ref = `refs/heads/${workspace.branch}`;
+    const commit = this.worktrees.resolve(ref);
     if (commit === null || this.worktrees.trailer(commit, tuningCommitTrailer) !== cycleId) {
       throw new SetupError(`The tuning branch ${workspace.branch} does not end with the commit of cycle ${cycleId} (${tuningCommitTrailer}: ${cycleId}).`);
     }
     const result = integrate(this.git, this.worktrees, {
-      branch: workspace.target, worktree: mergeFolder, integrationBranch: `${workspace.branch}-merge`,
+      branch: workspace.target, worktree: mergeFolder, integrationBranch: `${workspace.branch}-merge`, checkoutGit: this.checkoutGit,
       items: [{ name: cycleId, commit, branch: workspace.branch, subject, trailer: { key: mergedTuningTrailer, value: cycleId }, trailers }],
     });
     const item = result.items[0]!;
@@ -152,6 +182,12 @@ export class TuningRepository {
       throw new SetupError(`The tuning branch ${workspace.branch} does not merge into ${workspace.target}: ${item.reason ?? item.status}. `
         + `Rebase ${workspace.branch} onto ${workspace.target} and resolve the conflict, keeping its commit message, then run tune auto again.`);
     }
-    return { merge: item.mergeCommit, commit: this.worktrees.resolve(`refs/heads/${workspace.branch}`)! };
+    if (item.mergeCommit === null) {
+      // The rebase dropped the commit as empty and left the branch at the target's tip: it keeps the cycle's commit instead.
+      const now = this.worktrees.resolve(ref);
+      if (now !== commit) this.git(["update-ref", "-m", `tuning: keep the commit of ${cycleId}`, ref, commit, ...(now === null ? [] : [now])]);
+      return { merge: null, commit };
+    }
+    return { merge: item.mergeCommit, commit: this.worktrees.resolve(ref)! };
   }
 }

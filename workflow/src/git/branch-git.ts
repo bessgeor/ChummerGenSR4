@@ -42,6 +42,24 @@ const pinned = [
 ];
 
 /**
+ * The repository's git with the user's configuration, unpinned: for a checkout the user made, whose files must keep the
+ * line endings and attributes the user's git gives them. Commands run in `worktree`, else in `cwd`, else in the root.
+ */
+export function processCheckoutGit(repositoryRoot: string): BranchGit {
+  return (args, options = {}) => {
+    try {
+      return execFileSync("git", ["-C", options.worktree ?? options.cwd ?? repositoryRoot, ...args], {
+        env: { ...process.env, ...options.env }, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, windowsHide: true,
+        stdio: ["pipe", "pipe", "pipe"], ...(options.input === undefined ? {} : { input: options.input }),
+      });
+    } catch (error) {
+      const failed = error as { status?: number | null; stdout?: string; stderr?: string; message: string };
+      throw new GitCommandError(`git ${args.join(" ")} failed: ${(failed.stderr ?? "").trim() || failed.message}`, failed.status ?? null, failed.stdout ?? "", failed.stderr ?? "");
+    }
+  };
+}
+
+/**
  * The repository's git: commands run with its git folder (found once) in `cwd`, or in a worktree when `worktree` is given,
  * where git finds the worktree's own git folder.
  */

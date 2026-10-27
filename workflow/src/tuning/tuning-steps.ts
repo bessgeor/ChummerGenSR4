@@ -14,7 +14,7 @@ import { currentTuning, readAutoTuning, recordAutoTuning, startAutoTuning, type 
 import { cycleActivation, cycleBaseline, cycleFolder, cycleHoldout, cycleOptions, cycleProposal, cycleTestBaseline, ensureCycle, readCycle, recoverCycle, type CycleDependencies } from "./cycle.js";
 import { defaultMaximumExposures } from "./holdout.js";
 import type { TuningRequest, TuningStateValue, TuningSteps } from "./tuning-graph.js";
-import { tuningCommitTrailer, TuningRepository, type TuningWorkspace } from "./tuning-workspace.js";
+import { datasetLabel, tuningCommitTrailer, TuningRepository, type TuningWorkspace } from "./tuning-workspace.js";
 
 /** The automatic dataset's seed and test share: fixed, so every version keeps each cluster in its partition. */
 export const autoDatasetSeed = "auto";
@@ -27,6 +27,8 @@ export type TuningStepsDependencies = {
   readonly git: Git;
   /** The repository's git, for the worktree and merge of a tuning whose folders lie inside the repository. */
   readonly branchGit: BranchGit;
+  /** The repository's git with the user's configuration, for the user's checkout. */
+  readonly checkoutGit: BranchGit;
 };
 
 /** The cycle of an automatic tuning: its ID with the cycle prefix, so a resumed node finds the same cycle. */
@@ -75,7 +77,7 @@ export function tuningSteps(dependencies: TuningStepsDependencies): TuningRun {
   const { cycle: inPlace, store, paths, git } = dependencies;
   const { evalsFolder } = inPlace;
   const { now, log } = inPlace.run;
-  const repository = new TuningRepository(dependencies.branchGit, paths.repositoryRoot);
+  const repository = new TuningRepository(dependencies.branchGit, dependencies.checkoutGit, paths.repositoryRoot);
   // The cycle's steps read and write the tuning and certificates folders in the tuning's worktree when it has one.
   const cyclesOf = (state: TuningStateValue): CycleDependencies => {
     if (state.workspace === null || state.workspace === undefined) return inPlace;
@@ -125,7 +127,7 @@ export function tuningSteps(dependencies: TuningStepsDependencies): TuningRun {
         return null;
       }
       const cycleId = cycleIdOf(state);
-      const workspace = repository.open(cycleId, join(cycleFolder(evalsFolder, cycleId), "worktree"), folders, inside);
+      const workspace = repository.open(cycleId, join(cycleFolder(evalsFolder, cycleId), "worktree"), folders);
       recordAutoTuning(evalsFolder, state.tuningId, { branch: workspace.branch });
       log(`Automatic tuning ${state.tuningId}: the cycle works on ${inside.join(" and ")} in the worktree ${workspace.folder} on ${workspace.branch}, started at ${workspace.target} ${workspace.start}.`);
       return workspace;
@@ -158,7 +160,7 @@ export function tuningSteps(dependencies: TuningStepsDependencies): TuningRun {
       const cycle = state.concluded!;
       const message = `Tune ${cycle.jobKind}: ${cycle.outcome}
 
-Cycle ${cycle.cycleId} of the automatic tuning ${state.tuningId} on ${cycle.options.dataset}.
+Cycle ${cycle.cycleId} of the automatic tuning ${state.tuningId} on the dataset ${datasetLabel(cycle.options.dataset)}.
 
 ${tuningCommitTrailer}: ${cycle.cycleId}
 `;

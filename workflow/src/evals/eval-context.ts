@@ -17,6 +17,8 @@ export type EvalContext = {
   readonly git: Git;
   /** The repository's git for worktrees, commits and merges. */
   readonly branchGit: BranchGit;
+  /** The repository's git with the user's configuration, for the user's checkout. */
+  readonly checkoutGit: BranchGit;
   readonly now: () => Date;
   readonly log: (line: string) => void;
   /** The agent settings of the local profile, read when a command needs them. */

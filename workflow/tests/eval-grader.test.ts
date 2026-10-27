@@ -8,7 +8,7 @@ import { QuotaWaiter } from "../src/diagnosis/quota-waiter.js";
 import { runEvalCommand, type EvalContext } from "../src/evals/eval-commands.js";
 import { listRecords, noLabels, putRecord, type EvalRecord } from "../src/evals/eval-record.js";
 import { reviewQueue } from "../src/evals/review-queue.js";
-import { processBranchGit } from "../src/git/branch-git.js";
+import { processBranchGit, processCheckoutGit } from "../src/git/branch-git.js";
 import { createScratchFolder } from "../src/host/scratch-folder.js";
 import { SetupError } from "../src/host/setup-error.js";
 import { workflowPaths } from "../src/paths.js";
@@ -26,7 +26,7 @@ async function gradedThread(reply: (attempt: number) => Reply) {
   const lines: string[] = [];
   const paths = { ...workflowPaths(harness.root), threadFolder: (id: string) => join(harness.root, "threads", id) };
   const context: EvalContext = {
-    paths, store: harness.store, git: () => "", branchGit: processBranchGit(harness.root), now: () => new Date("2026-10-02T09:00:00Z"), log: (line) => lines.push(line),
+    paths, store: harness.store, git: () => "", branchGit: processBranchGit(harness.root), checkoutGit: processCheckoutGit(harness.root), now: () => new Date("2026-10-02T09:00:00Z"), log: (line) => lines.push(line),
     agentSettings: () => resolveAgentSettings(undefined), agents: () => grader, certificatesFolder: () => join(harness.root, "certificates"), tuningFolder: () => join(harness.root, "tuning"),
     autoTuning: () => resolveAutoTuning(undefined), tuningCheckpointer: () => new MemorySaver(),
     quota: new QuotaWaiter("p", async (milliseconds) => {

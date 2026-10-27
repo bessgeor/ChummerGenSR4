@@ -9,7 +9,7 @@ import { agentRunners } from "../agents/agent-runners.js";
 import { resolveAgentSettings } from "../agents/agent-settings.js";
 import { QuotaWaiter } from "../diagnosis/quota-waiter.js";
 import { processGit } from "../diagnosis/source-snapshot.js";
-import { processBranchGit } from "../git/branch-git.js";
+import { processBranchGit, processCheckoutGit } from "../git/branch-git.js";
 import { createScratchFolder } from "../host/scratch-folder.js";
 import { SetupError } from "../host/setup-error.js";
 import { loadProfile } from "../options/profile.js";
@@ -38,7 +38,7 @@ async function main(): Promise<number> {
   let checkpointer: SqliteSaver | null = null;
   try {
     return await runEvalCommand(process.argv.slice(2), {
-      paths, store, git: processGit(repositoryRoot), branchGit: processBranchGit(repositoryRoot), now: () => new Date(), log,
+      paths, store, git: processGit(repositoryRoot), branchGit: processBranchGit(repositoryRoot), checkoutGit: processCheckoutGit(repositoryRoot), now: () => new Date(), log,
       agentSettings: () => resolveAgentSettings(loadProfile(process.env).agents),
       certificatesFolder: () => resolve(repositoryRoot, loadProfile(process.env).certificates ?? paths.certificates),
       tuningFolder: () => tuningFolder(loadProfile(process.env), repositoryRoot),
