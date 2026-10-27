@@ -152,7 +152,12 @@ export class TuningRepository {
       if (staged.length > temporary.length) this.worktrees.commitStaged(workspace.folder, message);
     }
     const tip = this.worktrees.head(workspace.folder);
-    return tip !== workspace.start && this.worktrees.trailer(tip, tuningCommitTrailer) === cycleId ? tip : null;
+    if (tip === workspace.start) return null;
+    const trailer = this.worktrees.trailer(tip, tuningCommitTrailer);
+    if (trailer !== cycleId) {
+      throw new SetupError(`The tip of ${workspace.branch} (${tip}) moved from the start ${workspace.start} but does not carry ${tuningCommitTrailer}: ${cycleId}${trailer === null ? "" : ` (it has ${trailer})`}; a commit hook may have changed the message. The cycle's files stay on ${workspace.branch} and are not merged.`);
+    }
+    return tip;
   }
 
   /** Removes the worktree; its branch stays. Nothing happens when it is gone already. */

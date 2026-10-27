@@ -1,6 +1,6 @@
-import { deepStrictEqual, equal, notEqual, ok, rejects } from "node:assert/strict";
+import { deepStrictEqual, equal, notEqual, ok, rejects, throws } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, utimesSync } from "node:fs";
+import { existsSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { certificatePath } from "../src/evals/certificate.js";
@@ -296,6 +296,20 @@ test("a tuning commit the branch has the changes of already is not merged, and i
     deepStrictEqual(tuning.merge(workspace, "tc-1", join(scratch(), "merge"), "Merge", []), { merge: null, commit }, `attempt ${attempt}`);
     deepStrictEqual([repo.run("rev-parse", "main"), repo.run("rev-parse", "tuning/tc-1")], [tip, commit]);
   }
+});
+
+test("a commit whose message a hook rewrote without the trailer is a setup error, and nothing is merged", () => {
+  const repo = tuningRepository();
+  const before = repo.run("rev-parse", "main");
+  const hook = join(repo.root, ".git", "hooks", "prepare-commit-msg");
+  writeFileSync(hook, "#!/bin/sh\ngrep -v '^Tuning-Cycle:' \"$1\" > \"$1.new\"\nmv \"$1.new\" \"$1\"\n", { mode: 0o755 });
+  const tuning = new TuningRepository(processBranchGit(repo.root), processCheckoutGit(repo.root), repo.root);
+  const workspace = tuning.open("tc-2", join(scratch(), "worktree"), { tuningFolder: repo.tuningFolder, certificatesFolder: repo.certificatesFolder });
+  write(workspace.folder, "workflow/evals/tuning/holdout.json", "{}\n");
+  throws(() => tuning.commit(workspace, "tc-2", "Tune hypothesis: rejected\n\nTuning-Cycle: tc-2\n"),
+    (error: Error) => error instanceof SetupError && error.message.includes("tuning/tc-2") && error.message.includes("does not carry Tuning-Cycle: tc-2") && error.message.includes("not merged"));
+  equal(repo.run("rev-parse", "main"), before);
+  notEqual(repo.run("rev-parse", "tuning/tc-2"), before);
 });
 
 test("an automatic tuning with both folders outside the repository uses them in place and commits nothing", async () => {

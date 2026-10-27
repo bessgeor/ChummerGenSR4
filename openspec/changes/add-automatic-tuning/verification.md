@@ -101,6 +101,8 @@ None for this task: the cycle's model jobs are faked.
 | `node --import tsx --test workflow/tests/tuning-worktree.test.ts` (second run) | 12 tests, 7 passed, **5 failed**: the activation, rejected, conflict, stopped-holdout and only-tuning-folder tests. For example, the rejected test failed with `fatal: ambiguous argument 'null': unknown revision`, because the recorded commit was `null`, and the conflict test with `Missing expected rejection.` In the linked worktree, `git add --all -- <folders> ':(exclude,glob)**/*.tmp'` left the tuning folder untracked (`?? workflow/evals/tuning/` after the add), so nothing was committed. Staging now adds the folders and then removes staged `.tmp` files from the index. |
 | `node --import tsx --test workflow/tests/tuning-worktree.test.ts` (third run) | 12 tests, all passed; with the merge test added, 13 tests, all passed. |
 | `npm run workflow:test`, output kept (after the review fixes) | 576 tests, all passed (0 failed, 0 cancelled, 0 skipped). |
+| `node --import tsx --test workflow/tests/tuning-worktree.test.ts` (after the commit check was tightened) | 14 tests, all passed. |
+| `npm run workflow:typecheck` and `npm run workflow:test`, output kept (after the commit check was tightened) | Typecheck passed; 577 tests, all passed (0 failed, 0 cancelled, 0 skipped). |
 | `npm run openspec:validate` | Passed: 21 passed, 0 failed. |
 | SHA-256 of `bin/ChummerGenSR4.exe` | `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`, unchanged; no run launched it. |
 
@@ -117,6 +119,7 @@ None for this task: the cycle's model jobs are faked.
 - a tuning stopped during its holdout run resumes in its worktree and merges; one whose worktree was removed meanwhile is a setup error, and the tuning stays in progress;
 - a checkout made with `core.autocrlf=true`, whose committed ledger is CRLF in the working tree and whose time is newer than the index's, is not reported as changed. After the fast-forward its ledger is CRLF, with nothing uncommitted. The test was not run against the code before the fix;
 - a tuning commit whose changes the branch already has gets no merge commit, and `tuning/<cycle>` keeps that commit, also when the merge is asked again;
+- a `prepare-commit-msg` hook that strips the `Tuning-Cycle` trailer from the commit message: `commit` ends with a setup error naming the branch and the trailer, `main` does not move and the files stay on `tuning/<cycle>`; the cycle is never reported finished without its merge;
 - external folders: with both folders outside the repository, the cycle uses them in place. No branch is made, `main` does not move and the checkout stays clean. With only the tuning folder inside, the certificate is written in place and only the tuning files are merged;
 - the graph has the nodes `worktree`, `commit` and `merge` beside the earlier ones (`tuning-graph.test.ts`), and the tests of `tuning-graph.test.ts` pass with folders outside the repository.
 
