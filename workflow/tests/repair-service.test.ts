@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { BaseStore } from "@langchain/langgraph-checkpoint";
 import { EvalRecordSchema, noLabels, putRecord, recordNamespace } from "../src/evals/eval-record.js";
-import { processBranchGit } from "../src/git/branch-git.js";
+import { GitCommandError, processBranchGit, type BranchGit } from "../src/git/branch-git.js";
 import { Worktrees } from "../src/git/worktrees.js";
 import { QuotaWaiter } from "../src/diagnosis/quota-waiter.js";
 import { createScratchFolder } from "../src/host/scratch-folder.js";
@@ -21,8 +21,12 @@ import { record } from "./eval-fixtures.js";
 const cluster = "d-0000000000000100";
 
 /** The fixture repository's git and worktrees. */
-function gitOf(repository: string) {
-  const git = processBranchGit(repository);
+function gitOf(repository: string, refuseRemoval = false) {
+  const plain = processBranchGit(repository);
+  const git: BranchGit = refuseRemoval ? (args, options) => {
+    if (args[0] === "worktree" && args[1] === "remove") throw new GitCommandError("git worktree remove failed: a process holds the folder", 128, "", "a process holds the folder");
+    return plain(args, options);
+  } : plain;
   return { git, worktrees: new Worktrees(git, repository) };
 }
 
@@ -35,6 +39,8 @@ type Setup = {
   readonly now?: () => Date;
   /** The discrepancies diagnosed; by default the first cluster's only. */
   readonly spots?: typeof twoClusters;
+  /** Git refuses to remove any worktree, as it does for one a process holds. */
+  readonly refuseWorktreeRemoval?: boolean;
 };
 
 /** A thread whose diagnosis confirmed one cluster, and a repair service over it with fake agents and a fake host. */
@@ -55,7 +61,7 @@ async function diagnosed(setup: Setup = {}) {
     threadFolder, agents: () => agents, quota: new QuotaWaiter("process-1", async (milliseconds) => {
       sleeps.push(milliseconds);
     }), build: host.build, narrowCheck: host.narrowCheck,
-    createScratchFolder, ...gitOf(harness.sourceRepository), now: setup.now ?? (() => new Date()), log: (line) => lines.push(line),
+    createScratchFolder, ...gitOf(harness.sourceRepository, setup.refuseWorktreeRemoval === true), now: setup.now ?? (() => new Date()), log: (line) => lines.push(line),
   });
   const repairs = service.prepare(threadId, state.clusters, state.diagnosisCheck);
   const input = (repair: ClusterRepair, overrides: Partial<RepairInput> = {}): RepairInput => ({
@@ -366,4 +372,30 @@ test("a thread without repair settings is refused", async () => {
   await rejects(setup.service.repair({ ...input, options: { ...input.options, repair: null } }, setup.store), /without repair settings/);
   const { repair: _removed, ...stale } = input.options;
   await rejects(setup.service.repair({ ...input, options: stale as RunOptions }, setup.store), /without repair settings/);
+});
+
+test("a worktree git cannot remove and that stays registered ends the run after the attempt is archived, and a failing attempt keeps its own error", async () => {
+  const edit = patchedReply({ "Chummer/frmCreate.cs": repairedSource });
+  const setup = await diagnosed({
+    refuseWorktreeRemoval: true,
+    reply: (call) => {
+      execFileSync("git", ["-C", call.workspace.folder, "worktree", "lock", call.workspace.folder]);
+      return edit(call);
+    },
+  });
+  await rejects(setup.service.repair(setup.input(setup.repairs[cluster]!), setup.store),
+    (error: Error) => error instanceof GitCommandError && /a process holds the folder/.test(error.message));
+  ok(existsSync(join(setup.folder, "repair", cluster, "attempt-1", "attempt.json")));
+  // A job that also tampered with its worktree keeps that error; the leftover worktree is logged beside it.
+  const failing = await diagnosed({
+    refuseWorktreeRemoval: true,
+    reply: (call) => {
+      execFileSync("git", ["-C", call.workspace.folder, "worktree", "lock", call.workspace.folder]);
+      writeFileSync(join(dirname(call.workspace.folder), "stash.cs"), "x");
+      return edit(call);
+    },
+  });
+  await rejects(failing.service.repair(failing.input(failing.repairs[cluster]!), failing.store),
+    (error: Error) => error instanceof SetupError && /scratch folder holds stash\.cs/.test(error.message));
+  ok(failing.lines.some((line) => /the worktree .* could not be removed \(git worktree remove failed: a process holds the folder\)/.test(line)));
 });

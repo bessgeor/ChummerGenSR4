@@ -10,7 +10,7 @@ import type { RepairBrief } from "./repair-prompt.js";
 import { runRecordedJob, type AttemptJobs, type RecordedJob } from "./repair-job.js";
 import { RepairOutputSchema, validateRepair, type RepairOutput } from "./repair-schemas.js";
 import { applyJoin, joinChanges, joinedPaths, subtaskChanges, type JoinedFile, type SourceBlobs, type SubtaskChange } from "./subtask-join.js";
-import { changesOutsideSource, stageWorkspace, workspaceIn, WorktreeGuard, type AttemptWorkspace } from "./workspace.js";
+import { changesOutsideSource, removeWorkspace, stageWorkspace, workspaceIn, WorktreeGuard, type AttemptWorkspace } from "./workspace.js";
 
 /** A subtask as the attempt's archive keeps it. */
 export type SubtaskOutcome = {
@@ -238,6 +238,7 @@ export class PlannedAttempt {
     // The commit the subtask starts from: the source commit with its blockers' join, once its worktree is made.
     let startCommit = input.git.source;
     const guard = new WorktreeGuard(worktrees);
+    let failing = false;
     try {
       const job = await runRecordedJob<RepairOutput>(input.jobs, {
         label, recordId: `${input.recordId}/task-${task.id}`, promptVersion: subtaskPromptVersion,
@@ -259,13 +260,11 @@ export class PlannedAttempt {
       const { changes, others } = job.result.ok ? subtaskChanges(worktrees, startCommit, commit) : { changes: [], others: [] };
       input.log(`${label}: ${job.result.ok ? `${job.result.output.outcome}, ${changes.length + others.length} files changed` : `${job.result.failure.kind}: ${job.result.failure.message}`}`);
       return { kind: "ran", job, changes, others };
+    } catch (error) {
+      failing = true;
+      throw error;
     } finally {
-      try {
-        worktrees.remove(copy.source);
-        scratch.remove();
-      } catch (error) {
-        input.log(`${label}: the scratch folder ${scratch.path} could not be removed (${(error as Error).message}); remove it by hand.`);
-      }
+      removeWorkspace(worktrees, copy, scratch, label, input.log, failing);
     }
   }
 }

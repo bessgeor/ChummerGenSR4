@@ -26,7 +26,7 @@ import { runRecordedJob, type AttemptJobs } from "./repair-job.js";
 import { repairDocument, writeRepairDocument } from "./repair-report.js";
 import { maximumSubtasks } from "./plan-schemas.js";
 import { RepairOutputSchema, repairPromptVersion, validateRepair, type RepairOutput } from "./repair-schemas.js";
-import { changesOutsideSource, stageWorkspace, workspaceIn, WorktreeGuard, type AttemptWorkspace } from "./workspace.js";
+import { changesOutsideSource, removeWorkspace, stageWorkspace, workspaceIn, WorktreeGuard, type AttemptWorkspace } from "./workspace.js";
 
 export type RepairDependencies = {
   readonly threadFolder: (threadId: string) => string;
@@ -145,6 +145,7 @@ export class RepairService {
     const branch = threadBranches.attempt(input.threadId, clusterId, attempt);
     const scratch = this.dependencies.createScratchFolder("workflow-repair-");
     const workspace = workspaceIn(scratch, clusterId);
+    let failing = false;
     try {
       const predicted = new Set([...(diagnosis.hypothesis?.output.explanation?.predictions ?? []), ...(diagnosis.challenge?.output.alternative?.predictions ?? [])]
         .map((prediction) => `${prediction.case}/${prediction.capture}`));
@@ -208,14 +209,11 @@ export class RepairService {
       const status: RepairStatus = stoppedByBudget ? "budget_exhausted" : finished.failure !== null && finished.failure.kind !== "timeout" ? "failed" : document.outcome;
       const records = [...before, ...finished.records.map((record) => record.recordId)];
       return { update: { clusterId, status, attempt: summary, records }, chargedMs: finished.records.reduce((sum, record) => sum + record.durationMs, 0) };
+    } catch (error) {
+      failing = true;
+      throw error;
     } finally {
-      // A leftover copy is not a failure of the attempt: its result is still recorded, and the copy is named for the operator.
-      try {
-        this.dependencies.worktrees.remove(workspace.source);
-        scratch.remove();
-      } catch (error) {
-        this.dependencies.log(`${label}: the scratch folder ${scratch.path} could not be removed (${(error as Error).message}); remove it by hand.`);
-      }
+      removeWorkspace(this.dependencies.worktrees, workspace, scratch, label, this.dependencies.log, failing);
     }
   }
 

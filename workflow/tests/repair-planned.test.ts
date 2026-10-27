@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { BaseStore } from "@langchain/langgraph-checkpoint";
-import { processBranchGit } from "../src/git/branch-git.js";
+import { GitCommandError, processBranchGit, type BranchGit } from "../src/git/branch-git.js";
 import { Worktrees } from "../src/git/worktrees.js";
 import { QuotaWaiter } from "../src/diagnosis/quota-waiter.js";
 import { EvalRecordSchema, putRecord, recordNamespace } from "../src/evals/eval-record.js";
@@ -57,13 +57,17 @@ function edit(call: JobCall, edits: Readonly<Record<string, string>>, files: str
 type Replies = { readonly plan: () => Reply; readonly subtask: (id: number, call: JobCall, attempt: number) => Reply };
 
 /** The fixture repository's git and worktrees. */
-function gitOf(repository: string) {
-  const git = processBranchGit(repository);
+function gitOf(repository: string, refuseRemoval = false) {
+  const plain = processBranchGit(repository);
+  const git: BranchGit = refuseRemoval ? (args, options) => {
+    if (args[0] === "worktree" && args[1] === "remove") throw new GitCommandError("git worktree remove failed: a process holds the folder", 128, "", "a process holds the folder");
+    return plain(args, options);
+  } : plain;
   return { git, worktrees: new Worktrees(git, repository) };
 }
 
 /** A thread whose diagnosis confirmed one cluster, with fix changes, and a repair service over it with fake agents and a fake host. */
-async function planned(replies: Replies, setup: { deadlineMinutes?: number; budgetMinutes?: number; durationMs?: number; pool?: number } = {}) {
+async function planned(replies: Replies, setup: { deadlineMinutes?: number; budgetMinutes?: number; durationMs?: number; pool?: number; refuseWorktreeRemoval?: boolean } = {}) {
   let current = replies;
   const agents = new FakeAgents((call, attempt) => {
     if (call.kind !== "repair") return { answer: call.kind === "hypothesis" ? hypothesisAnswer() : challengeAnswer() };
@@ -77,7 +81,7 @@ async function planned(replies: Replies, setup: { deadlineMinutes?: number; budg
   const lines: string[] = [];
   const service = new RepairService({
     threadFolder: (id) => join(harness.root, "threads", id), agents: () => agents, quota: new QuotaWaiter("process-1", async () => {}, () => {}),
-    build: host.build, narrowCheck: host.narrowCheck, createScratchFolder, ...gitOf(harness.sourceRepository), now: () => new Date(), log: (line) => lines.push(line),
+    build: host.build, narrowCheck: host.narrowCheck, createScratchFolder, ...gitOf(harness.sourceRepository, setup.refuseWorktreeRemoval === true), now: () => new Date(), log: (line) => lines.push(line),
   });
   const repairs = service.prepare(threadId, state.clusters, state.diagnosisCheck);
   const input = (repair: ClusterRepair, spentMs = state.agentMilliseconds): RepairInput => ({
@@ -312,4 +316,15 @@ test("a deadline that passed after the plan rejects the attempt at stage deadlin
   const step = await setup.service.repair(setup.input(setup.repairs[cluster]!), setup.store);
   deepStrictEqual([step.update.status, step.update.attempt!.stage, step.update.attempt!.reason], ["rejected", "deadline", "the deadline passed before subtask 1 could start"]);
   equal(repairCalls(setup.agents).length, 1);
+});
+
+test("a subtask's worktree git cannot remove and that stays registered ends the run", async () => {
+  const setup = await planned({
+    plan: () => ({ answer: plan([task(1, ["Chummer/frmCreate.cs"])]) }),
+    subtask: (_, call) => {
+      execFileSync("git", ["-C", call.workspace.folder, "worktree", "lock", call.workspace.folder]);
+      return edit(call, { "Chummer/frmCreate.cs": repairedSource });
+    },
+  }, { refuseWorktreeRemoval: true });
+  await rejects(setup.service.repair(setup.input(setup.repairs[cluster]!), setup.store), (error: Error) => error instanceof GitCommandError && /a process holds the folder/.test(error.message));
 });

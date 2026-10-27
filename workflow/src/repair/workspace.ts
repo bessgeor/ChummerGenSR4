@@ -36,6 +36,28 @@ export function stageWorkspace(workspace: AttemptWorkspace, contextFolder: strin
   checkout(workspace.source);
 }
 
+/**
+ * Removes an attempt's worktree and then its scratch folder. A worktree that stays registered fails the attempt, so the
+ * branch is not left checked out in a folder nobody owns; when `ending` is an error already failing the attempt, that error
+ * stays the one thrown and the leftover is logged beside it. A scratch folder that cannot be removed is named for the operator.
+ */
+export function removeWorkspace(worktrees: Worktrees, workspace: AttemptWorkspace, scratch: ScratchFolder, label: string, log: (line: string) => void, ending: boolean): void {
+  let leftover: unknown = null;
+  try {
+    worktrees.remove(workspace.source);
+  } catch (error) {
+    leftover = error;
+  }
+  try {
+    scratch.remove();
+  } catch (error) {
+    log(`${label}: the scratch folder ${scratch.path} could not be removed (${(error as Error).message}); remove it by hand.`);
+  }
+  if (leftover === null) return;
+  if (!ending) throw leftover;
+  log(`${label}: the worktree ${workspace.source} could not be removed (${(leftover as Error).message}).`);
+}
+
 /** The git state a job's worktree had when the job got it, so a job that changed it is caught before anything is committed. */
 export class WorktreeGuard {
   private expected: WorktreeState | null = null;
