@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { ContextManifestSchema, canonicalJson, contextHash, type ContextManifest } from "../diagnosis/context.js";
 import { ExplanationSchema, mechanisms, type Explanation } from "../diagnosis/job-schemas.js";
+import { acquireExclusiveLock } from "../host/exclusive-lock.js";
 import { SetupError } from "../host/setup-error.js";
 import { fingerprintFolder, sha256File, sha256Text } from "../steps/fingerprint.js";
 import { readDocument } from "../steps/read-document.js";
@@ -120,6 +121,8 @@ export type FreezeInput = {
   readonly snapshotBase: BaseCheck;
   readonly now: () => Date;
   readonly log: (line: string) => void;
+  /** Called with the folder of the version about to be frozen, once it is chosen and before the freeze starts, under the freeze's lock. */
+  readonly onVersion?: (folder: string) => void;
 };
 
 /** The root cause a correct review verdict on a record confirms, or null. */
@@ -169,6 +172,16 @@ export async function freezeDataset(input: FreezeInput): Promise<{ folder: strin
   if (drafts.size === 0) throw new SetupError(`No succeeded workflow ${input.jobKind} record has its context in its thread folder; there is nothing to freeze.`);
 
   const nameFolder = join(input.datasetsFolder, input.name);
+  // Two freezes of a name never choose the same version: the version is chosen, announced and put in place under one lock.
+  const release = acquireExclusiveLock(join(input.datasetsFolder, `${input.name}.freeze.lock`), `Another freeze of dataset ${input.name} is running`);
+  try {
+    return await freezeVersion(input, drafts, nameFolder);
+  } finally {
+    release();
+  }
+}
+
+async function freezeVersion(input: FreezeInput, drafts: ReadonlyMap<string, Draft>, nameFolder: string): Promise<{ folder: string; dataset: Dataset }> {
   const previous = latestDatasetVersion(input.datasetsFolder, input.name);
   const before = previous === 0 ? null : readDocument(join(nameFolder, `v${previous}`, "dataset.json"), DatasetSchema);
   // A cluster keeps its partition across versions only while the seed and the share stay: a prompt tuned on the development partition of
@@ -179,6 +192,8 @@ export async function freezeDataset(input: FreezeInput): Promise<{ folder: strin
   }
   const previousHash = before === null ? null : before.datasetHash;
   const version = previous + 1;
+  const folder = join(nameFolder, `v${version}`);
+  input.onVersion?.(folder);
   const partial = join(nameFolder, `v${version}.partial`);
   rmSync(partial, { recursive: true, force: true });
   const copies = datasetFolders(partial);
@@ -220,7 +235,6 @@ export async function freezeDataset(input: FreezeInput): Promise<{ folder: strin
   const dataset = DatasetSchema.parse({ ...content, datasetHash: datasetHash(content) });
   mkdirSync(partial, { recursive: true });
   writeFileSync(join(partial, "dataset.json"), `${JSON.stringify(dataset, null, 2)}\n`);
-  const folder = join(nameFolder, `v${version}`);
   renameWithRetry(partial, folder);
   return { folder, dataset };
 }

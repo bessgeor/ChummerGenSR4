@@ -23,6 +23,13 @@ export async function tuningThread(graph: TuningGraph, tuningId: string): Promis
   return snapshot.next.length > 0 ? "unfinished" : "finished";
 }
 
+/** The conclusion of a thread that finished, or null while it has none: a finished thread is not run again. */
+export async function concludedTuning(graph: TuningGraph, tuningId: string): Promise<Cycle | null> {
+  if ((await tuningThread(graph, tuningId)) !== "finished") return null;
+  const { values } = await graph.getState({ configurable: { thread_id: tuningId } });
+  return (values as TuningStateValue).concluded ?? null;
+}
+
 /**
  * Runs a tuning thread to its conclusion: an unfinished thread continues from its checkpoint, without repeating a finished
  * node; otherwise the thread runs from its start with `input`, whose steps find what an earlier run recorded. Its cycle

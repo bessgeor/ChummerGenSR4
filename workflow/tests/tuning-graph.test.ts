@@ -282,6 +282,26 @@ test("a tuning whose recorded version another command froze meanwhile freezes th
   checkDataset(dataset, tuning.tuningId, records, 2);
 });
 
+test("a tuning whose thread concluded before the tuning ended is ended by the next tune auto with its cycle's outcome, without running again", async () => {
+  const { context, records } = await dueTuning(agents([proposal("Overfit.")], "test", { "Overfit.": "development" }));
+  const evalsFolder = context.paths.evalsFolder;
+  equal(await runEvalCommand(["tune", "auto"], context), 1, context.lines.join("\n"));
+  const { entry } = finishedTuning(evalsFolder);
+  // As if the process had stopped after the thread's conclusion was checkpointed, before the tuning moved to `tunings`.
+  const path = autoTuningPath(evalsFolder);
+  const state = readAutoTuning(evalsFolder);
+  writeFileSync(path, JSON.stringify({ ...state, tunings: [], current: { ...entry, outcome: null, finishedUtc: null } }));
+  const runs = readdirSync(join(evalsFolder, "runs"));
+  const fake = agents([], "test", {});
+  context.lines.length = 0;
+  equal(await runEvalCommand(["tune", "auto"], { ...context, agents: () => fake }), 1, context.lines.join("\n"));
+  deepStrictEqual(fake.calls, []);
+  deepStrictEqual(readdirSync(join(evalsFolder, "runs")), runs);
+  const ended = finishedTuning(evalsFolder);
+  deepStrictEqual([ended.entry.tuningId, ended.entry.outcome, ended.state.counted], [entry.tuningId, "rejected", records]);
+  ok(context.lines.some((line) => line.includes(`Automatic tuning ${entry.tuningId}: rejected`)), context.lines.join("\n"));
+});
+
 test("a tuning continued after the profile changed keeps the settings it started with", async () => {
   const { context, records } = await dueTuning(agents([proposal("Cite the capture.")], "test", { "Cite the capture.": "all" }));
   const tuning = recordedTuning(context, records);
@@ -371,4 +391,7 @@ test("a due automatic tuning whose tuning or certificates folder lies inside the
   await rejects(runEvalCommand(["tune", "auto"], inside), (error: Error) => error instanceof SetupError && error.message.includes(join("workflow", "evals", "tuning")) && error.message.includes("outside the repository"));
   equal(existsSync(autoTuningPath(context.paths.evalsFolder)), false);
   equal(existsSync(join(context.paths.evalsFolder, "datasets")), false);
+  const certificates = join(context.paths.repositoryRoot, "workflow", "evals", "certificates");
+  await rejects(runEvalCommand(["tune", "auto"], { ...context, certificatesFolder: () => certificates }), (error: Error) => error instanceof SetupError && error.message.includes(certificates) && !error.message.includes(join("workflow", "evals", "tuning")) && error.message.includes("outside the repository"));
+  equal(existsSync(autoTuningPath(context.paths.evalsFolder)), false);
 });

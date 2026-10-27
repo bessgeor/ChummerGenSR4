@@ -1,12 +1,12 @@
 import type { BaseStore } from "@langchain/langgraph-checkpoint";
-import Database from "better-sqlite3";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { z } from "zod";
 import { readRecord, recordNamespace } from "../evals/eval-record.js";
 import { datasetNamePattern } from "../evals/dataset.js";
 import { isGradable } from "../evals/hindsight.js";
+import { acquireExclusiveLock } from "../host/exclusive-lock.js";
 import { SetupError } from "../host/setup-error.js";
 import type { Profile } from "../options/profile.js";
 import { readDocument } from "../steps/read-document.js";
@@ -116,33 +116,10 @@ export async function checkAutoTuning(dependencies: AutoTuningDependencies, sett
   return { kind: "due", records, every: settings.every, forced: force, settings };
 }
 
-/**
- * Takes an exclusive lock on a lock database and returns its release. The lock is held by the operating system on an
- * open transaction, so it ends with the process that holds it, killed or not, and no file is left to judge abandoned.
- * Another holder is a setup error, never waited for.
- */
-function acquireLock(lock: string, held: string): () => void {
-  mkdirSync(dirname(lock), { recursive: true });
-  const database = new Database(lock, { timeout: 0 });
-  try {
-    database.exec("BEGIN EXCLUSIVE");
-  } catch (error) {
-    database.close();
-    if ((error as { code?: string }).code === "SQLITE_BUSY") throw new SetupError(`${held}: another process holds ${lock}.`);
-    throw error;
-  }
-  return () => {
-    try {
-      database.exec("ROLLBACK");
-    } finally {
-      database.close();
-    }
-  };
-}
 /** Runs `action` holding the exclusive lock file of `auto.json`. */
 function withAutoTuningLock<T>(evalsFolder: string, action: () => T): T {
   const path = autoTuningPath(evalsFolder);
-  const release = acquireLock(`${path}.lock`, `Another tune auto is changing ${path}`);
+  const release = acquireExclusiveLock(`${path}.lock`, `Another tune auto is changing ${path}`);
   try {
     return action();
   } finally {
@@ -155,7 +132,7 @@ function withAutoTuningLock<T>(evalsFolder: string, action: () => T): T {
  * `tune auto` never run a tuning at the same time.
  */
 export async function withAutoTuningRun<T>(evalsFolder: string, action: () => Promise<T>): Promise<T> {
-  const release = acquireLock(`${autoTuningPath(evalsFolder)}.run.lock`, "Another tune auto runs an automatic tuning");
+  const release = acquireExclusiveLock(`${autoTuningPath(evalsFolder)}.run.lock`, "Another tune auto runs an automatic tuning");
   try {
     return await action();
   } finally {

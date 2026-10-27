@@ -33,7 +33,7 @@ export interface TuningSteps {
   holdout(state: TuningStateValue): Promise<Cycle>;
   testBaseline(state: TuningStateValue): Promise<Cycle>;
   activate(state: TuningStateValue): Cycle;
-  /** The cycle's final document; an automatic tuning ends with its outcome. */
+  /** The cycle's final document, which the caller of the thread ends the tuning with. */
   conclude(state: TuningStateValue): Cycle;
 }
 

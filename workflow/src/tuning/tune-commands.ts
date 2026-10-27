@@ -9,14 +9,14 @@ import { SetupError } from "../host/setup-error.js";
 import type { ComparisonSummary } from "./active-configuration.js";
 import { activate, entryName, rollback } from "./activation.js";
 import {
-  autoTuningDefaults, autoTuningPath, checkAutoTuning, newTuningId, readAutoTuning, recordAutoTuning, withAutoTuningRun, type AutoTuningSettings, type AutoTuningTrigger,
+  autoTuningDefaults, autoTuningPath, checkAutoTuning, finishAutoTuning, newTuningId, readAutoTuning, recordAutoTuning, withAutoTuningRun, type AutoTuningSettings, type AutoTuningTrigger,
 } from "./auto-tuning.js";
 import { candidatesFolder, parseTuningFile, storeCandidate } from "./candidates.js";
 import { cycleFolder, cycleOptions, ensureCycle, readCycle, type Cycle, type CycleDependencies } from "./cycle.js";
 import { defaultMaximumExposures, openHoldout, type HoldoutDependencies } from "./holdout.js";
 import { proposeCandidate, type TuneDependencies } from "./propose.js";
 import type { TuningStateValue } from "./tuning-graph.js";
-import { compileTuningGraph, runTuningThread, type TuningGraph } from "./tuning-runner.js";
+import { compileTuningGraph, concludedTuning, runTuningThread, type TuningGraph } from "./tuning-runner.js";
 import { tuningSteps, type TuningRun } from "./tuning-steps.js";
 import { requireCurrent } from "./tuning.js";
 
@@ -259,7 +259,10 @@ async function runAutoTuning(context: EvalContext, trigger: Exclude<AutoTuningTr
     input = { tuningId: tuning.tuningId, request: { kind: "auto", records: tuning.records, forced: tuning.forced, settings: kept }, dataset: tuning.dataset, cycle: null, concluded: null };
   }
   const { graph, steps } = tuningGraph(context);
-  const cycle = await runTuningThread(graph, steps, input, "npm run eval -- tune auto", context.signal);
+  // A thread that concluded before its tuning ended (stopped between the two) is not run again: its conclusion ends the tuning.
+  const cycle = await concludedTuning(graph, input.tuningId) ?? await runTuningThread(graph, steps, input, "npm run eval -- tune auto", context.signal);
+  if (cycle.outcome === "running") throw new SetupError(`Tuning cycle ${cycle.cycleId} concluded while it is still running.`);
+  finishAutoTuning(evalsFolder, input.tuningId, cycle.outcome, context.now());
   for (const line of cycleLines(cycle)) context.log(line);
   context.log(`Cycle folder: ${cycleFolder(evalsFolder, cycle.cycleId)}`);
   context.log(`Automatic tuning ${input.tuningId}: ${cycle.outcome}; dataset ${cycle.options.dataset}; state ${autoTuningPath(evalsFolder)}`);

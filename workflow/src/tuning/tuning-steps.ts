@@ -1,15 +1,15 @@
 import type { BaseStore } from "@langchain/langgraph-checkpoint";
 import { existsSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { basename, join } from "node:path";
 import type { Git } from "../diagnosis/source-snapshot.js";
 import { readBenchmark } from "../evals/benchmark.js";
-import { DatasetSchema, freezeDataset, latestDatasetVersion } from "../evals/dataset.js";
+import { DatasetSchema, freezeDataset } from "../evals/dataset.js";
 import { listRecords } from "../evals/eval-record.js";
 import { snapshotBaseCheck } from "../evals/snapshot-base.js";
 import { SetupError } from "../host/setup-error.js";
 import type { WorkflowPaths } from "../paths.js";
 import { readDocument } from "../steps/read-document.js";
-import { currentTuning, finishAutoTuning, readAutoTuning, recordAutoTuning, startAutoTuning, type AutoTuningEntry } from "./auto-tuning.js";
+import { currentTuning, readAutoTuning, recordAutoTuning, startAutoTuning, type AutoTuningEntry } from "./auto-tuning.js";
 import { cycleActivation, cycleBaseline, cycleFolder, cycleHoldout, cycleOptions, cycleProposal, cycleTestBaseline, ensureCycle, readCycle, recoverCycle, type CycleDependencies } from "./cycle.js";
 import { defaultMaximumExposures } from "./holdout.js";
 import type { TuningRequest, TuningStateValue, TuningSteps } from "./tuning-graph.js";
@@ -78,33 +78,27 @@ export function tuningSteps(dependencies: TuningStepsDependencies): TuningRun {
     },
     async freeze(state) {
       const request = autoRequest(state);
-      // The version's folder is recorded before the freeze, so a freeze interrupted after it renamed the version into place
-      // finds it instead of freezing the next one. A version at the recorded folder is this tuning's only when it says so: a
-      // freeze by another command that took the version meanwhile is not run on, the tuning records the next version instead.
+      // The version's folder is recorded before the freeze puts it in place, so a freeze interrupted after that finds it instead
+      // of freezing the next one. A version at the recorded folder is this tuning's only when it says so: a freeze by another
+      // command that took the version meanwhile is not run on, the tuning records the next version instead.
       const datasetsFolder = join(evalsFolder, "datasets");
       const reason = autoDatasetReason(state.tuningId, request.records.length);
-      let target = inProgress(evalsFolder, state.tuningId).dataset;
+      const target = inProgress(evalsFolder, state.tuningId).dataset;
       if (target !== null && existsSync(join(target, "dataset.json"))) {
         if (frozenBy(target, request.settings.dataset, reason)) return target;
         log(`Automatic tuning ${state.tuningId}: ${target} was frozen by another command; freezing the next version of ${request.settings.dataset}.`);
-        target = null;
       }
-      if (target === null) {
-        target = join(datasetsFolder, request.settings.dataset, `v${latestDatasetVersion(datasetsFolder, request.settings.dataset) + 1}`);
-        recordAutoTuning(evalsFolder, state.tuningId, { dataset: target });
-      }
+      // The freeze chooses the version under its lock and announces it, so no other freeze can take it in between.
       const { folder, dataset } = await freezeDataset({
         name: request.settings.dataset, jobKind: "hypothesis", seed: autoDatasetSeed, testPercent: autoDatasetTestPercent,
         reason, datasetsFolder,
         threadFolder: paths.threadFolder, records: await listRecords(store), benchmark: readBenchmark(paths.benchmark),
         snapshotBase: snapshotBaseCheck(git, paths.threadFolder), now, log,
+        onVersion: (version) => recordAutoTuning(evalsFolder, state.tuningId, { dataset: version }),
       });
-      if (resolve(folder) !== resolve(target)) {
-        throw new SetupError(`Automatic tuning ${state.tuningId} recorded its dataset as ${target}, but froze ${folder}: another freeze of ${request.settings.dataset} ran meanwhile.`);
-      }
       const count = (partition: string) => dataset.items.filter((item) => item.partition === partition).length;
       log(`Automatic tuning ${state.tuningId}: dataset ${dataset.name} v${dataset.version}, ${dataset.items.length} items, ${count("test")} test and ${count("development")} development; ${folder}`);
-      return target;
+      return folder;
     },
     async baseline(state) {
       const cycleId = cycleIdOf(state);
@@ -126,7 +120,6 @@ export function tuningSteps(dependencies: TuningStepsDependencies): TuningRun {
     conclude(state) {
       const cycle = readCycle(evalsFolder, cycleIdOf(state));
       if (cycle.outcome === "running") throw new SetupError(`Tuning cycle ${cycle.cycleId} reached its conclusion while it is still running.`);
-      if (state.request.kind === "auto") finishAutoTuning(evalsFolder, state.tuningId, cycle.outcome, now());
       return cycle;
     },
   };

@@ -57,9 +57,8 @@ test("a due tuning is recorded as in progress before its freeze; with nothing to
   const state = readAutoTuning(context.paths.evalsFolder);
   equal(state.counted.length, 13);
   deepStrictEqual(state.tunings, []);
-  // The version's folder is recorded before the freeze; nothing was frozen there.
-  const target = join(context.paths.evalsFolder, "datasets", "auto-hypothesis", "v1");
-  deepStrictEqual([state.current?.records, state.current?.forced, state.current?.dataset, state.current?.cycle, state.current?.outcome], [state.counted, false, target, null, null]);
+  // The freeze records the version it chose; with nothing to freeze it chose none.
+  deepStrictEqual([state.current?.records, state.current?.forced, state.current?.dataset, state.current?.cycle, state.current?.outcome], [state.counted, false, null, null, null]);
   equal(existsSync(join(context.paths.evalsFolder, "datasets", "auto-hypothesis")), false);
 
   // The next call continues the tuning in progress and counts nothing.
@@ -154,7 +153,7 @@ test("records added during a tuning are not counted by it, nothing is counted wh
   deepStrictEqual(readAutoTuning(context.paths.evalsFolder).counted, first.records);
   await rejects(runEvalCommand(["tune", "auto"], context), nothingToFreeze);
   deepStrictEqual(readAutoTuning(context.paths.evalsFolder).counted, first.records);
-  deepStrictEqual(readAutoTuning(context.paths.evalsFolder).current, { ...tuning, dataset: join(context.paths.evalsFolder, "datasets", "auto-hypothesis", "v1") });
+  deepStrictEqual(readAutoTuning(context.paths.evalsFolder).current, tuning);
 
   // The tuning ends: the records it did not count are the next tuning's.
   const state = readAutoTuning(context.paths.evalsFolder);
