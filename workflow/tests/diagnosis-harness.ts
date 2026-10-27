@@ -310,6 +310,7 @@ export function diagnosisHarness(options: HarnessOptions) {
     planCases: () => ({ cases: cases.filter((item) => folders[item.name] !== undefined), excluded: [] }),
     readCase: () => details,
     certificateProblems: unattendedProblems,
+    threadTraces: () => [],
     head: () => headBranch(plainGit),
     log,
     now: () => new Date("2026-10-01T12:00:00Z"),
