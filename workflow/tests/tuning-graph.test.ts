@@ -316,6 +316,7 @@ test("an auto.json lock is held by one process at a time, also against the same 
   await holder.kill();
   equal(await withAutoTuningRun(folder, async () => "after the kill"), "after the kill");
 });
+
 test("an auto.json recorded before tunings kept their settings is read, and its tuning in progress continues with the profile's settings, which it then keeps", async () => {
   const { context, records } = await dueTuning(agents([proposal("Cite the capture.")], "test", { "Cite the capture.": "all" }));
   const tuning = recordedTuning(context, records);
