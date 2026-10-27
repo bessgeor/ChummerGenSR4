@@ -22,8 +22,10 @@ export type WorkflowGraph = ReturnType<ReturnType<typeof buildWorkflowGraph>["co
 
 export type RunDependencies = {
   readonly graph: WorkflowGraph;
-  /** A new thread's options; without --case-file this writes the thread's suite. */
+  /** A new thread's options, before anything of the thread is written. */
   readonly resolveOptions: (command: Extract<Command, { kind: "start" }>, threadId: string) => RunOptions;
+  /** Writes what a new thread needs before its plan (without --case-file, its suite) and returns its options. */
+  readonly prepareThread: (command: Extract<Command, { kind: "start" }>, options: RunOptions, threadId: string) => RunOptions;
   readonly planCases: (options: RunOptions) => CasePlan;
   /** Reads a case's run folder for the report; a failure is a setup error. */
   readonly readCase: (runFolder: string, compared: boolean) => CaseDetails;
@@ -91,14 +93,15 @@ function report(state: WorkflowStateValue, readCase: RunDependencies["readCase"]
 
 async function start(command: Extract<Command, { kind: "start" }>, dependencies: RunDependencies): Promise<{ threadId: string; input: WorkflowStateValue }> {
   const threadId = newThreadId(dependencies.now());
-  const options = dependencies.resolveOptions(command, threadId);
-  requireCertificates(options, dependencies);
+  const resolved = dependencies.resolveOptions(command, threadId);
+  requireCertificates(resolved, dependencies);
   const base = dependencies.head();
   // Its fixes are merged into the branch it started on when it concludes.
-  if (base.branch === null && options.diagnosis && widens(options)) {
+  if (base.branch === null && resolved.diagnosis && widens(resolved)) {
     throw new SetupError(`HEAD is detached at ${base.commit}, and a thread that repairs and widens merges its fixes into the branch it started on. `
       + "Check out a branch, or pass --no-repair or --no-widening.");
   }
+  const options = dependencies.prepareThread(command, resolved, threadId);
   const plan = dependencies.planCases(options);
   for (const name of plan.excluded) dependencies.log(`${name} is left out: none of the requested captures belongs to it.`);
   const cache = options.canonicalCache === null ? "off (--live-canonical)" : `${options.canonicalCache} (${options.canonicalCacheSource})`;

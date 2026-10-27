@@ -204,6 +204,8 @@ export function diagnosisHarness(options: HarnessOptions) {
   const agents = options.agents ?? new FakeAgents();
   const sleeps: number[] = [];
   const lines: string[] = [];
+  /** The threads whose start got as far as writing what the thread needs. */
+  const prepared: string[] = [];
   const log = (line: string) => lines.push(line);
   const steps: WorkflowSteps = {
     captureLanes: 1,
@@ -296,6 +298,10 @@ export function diagnosisHarness(options: HarnessOptions) {
       widening: options.repair !== undefined && options.widening !== undefined && !command.arguments.noRepair && !command.arguments.noWidening,
       fixChanges: command.arguments.fixChanges, ...(options.tuning === undefined ? {} : { tuning: options.tuning }),
     }),
+    prepareThread: (_command, resolved, threadId) => {
+      prepared.push(threadId);
+      return resolved;
+    },
     planCases: () => ({ cases: cases.filter((item) => folders[item.name] !== undefined), excluded: [] }),
     readCase: () => details,
     certificateProblems: unattendedProblems,
@@ -305,7 +311,7 @@ export function diagnosisHarness(options: HarnessOptions) {
     ...(options.signal === undefined ? {} : { signal: options.signal }),
   };
   return {
-    root, agents, sleeps, checks, reportReads, lines, store, checkpointer, graph, repairHost, wideningHost, sourceRepository,
+    root, agents, sleeps, checks, reportReads, lines, prepared, store, checkpointer, graph, repairHost, wideningHost, sourceRepository,
     start: (overrides: Partial<Arguments> = {}) => runWorkflow({ kind: "start", arguments: { ...baseArguments, ...overrides } }, dependencies),
     resume: (threadId: string) => runWorkflow({ kind: "resume", threadId }, dependencies),
     threadId: () => /Thread (wf-\S+):/.exec(lines.join("\n"))?.[1] ?? "",

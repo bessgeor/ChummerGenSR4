@@ -419,9 +419,11 @@ test("a thread that repairs and widens refuses a detached HEAD before the build 
   ok(run.lines.some((line) => line.startsWith(`Setup error: HEAD is detached at ${head}, `)), run.lines.join("\n"));
   ok(!run.lines.some((line) => line.startsWith("Thread ") || line.startsWith("Resume it")));
   deepStrictEqual(Object.keys(checkpointer.storage), []);
+  deepStrictEqual(run.prepared, []);
   deepStrictEqual(run.agents.calls, []);
 
   equal(await run.start({ noWidening: true }), 1);
+  deepStrictEqual(run.prepared, [run.threadId()]);
   const state = await run.state(run.threadId());
   deepStrictEqual(state.base, { branch: null, commit: head });
   equal(outcomeOf(run.root, run.threadId()).merge, null);

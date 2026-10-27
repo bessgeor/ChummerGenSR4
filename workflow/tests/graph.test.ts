@@ -209,6 +209,7 @@ function harness(cases: string[], steps = new FakeSteps(), checkpointer = new Me
       canonicalCacheSource: "default", noOcr: false, tessdata: null, only: command.arguments.only, recapture: false,
       diagnosis: false, agents: resolveAgentSettings(undefined), unattended: false, certificates: "certificates", repair: null, widening: false,
     } : { ...resolveRunOptions(command.arguments, discovery.profile ?? {}, { LOCALAPPDATA: discovery.root }, discovery.root), repair: null, widening: false }),
+    prepareThread: (_command, options) => options,
     planCases: () => ({ cases: cases.map(plannedCase), excluded: [] }),
     certificateProblems: () => [],
     head: () => ({ branch: "main", commit: "c0ffee" }),
