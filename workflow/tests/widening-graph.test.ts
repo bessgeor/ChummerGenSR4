@@ -204,6 +204,10 @@ test("a patch on a file an earlier promotion changed is rejected at stage apply"
   deepStrictEqual(state.widenings[second]!.rejection?.stage, "apply");
   ok(state.widenings[second]!.rejection?.reason.includes("Chummer/frmCreate.cs"));
   equal(run.wideningHost.builds.filter((build) => build.label === `widen ${second} build`).length, 0);
+  // The rejected widening's branch stays, at the accepted commit it started from; its worktree is gone.
+  const threadId = run.threadId();
+  equal(git(run.sourceRepository, "rev-parse", `workflow/${threadId}/widening/${second}/attempt-1`), git(run.sourceRepository, "rev-parse", `accepted/${threadId}`));
+  ok(!git(run.sourceRepository, "worktree", "list", "--porcelain").includes(`widening/${second}`));
 });
 
 test("a source branch that moved after the attempts were made is a setup error before any widening", async () => {

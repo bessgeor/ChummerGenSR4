@@ -232,11 +232,12 @@ export class WideningService {
     // A step interrupted after its worktree was made starts again from nothing.
     worktrees.remove(source);
     rmSync(widening.folder, { recursive: true, force: true });
+    // The branch is made before the patch is looked at, so a rejected attempt keeps it; the rollback removes the worktree.
+    worktrees.add(source, threadBranches.widening(input.threadId, widening.clusterId, widening.attempt), start);
     const conflicts = staleFiles(worktrees, attempt.commit, start);
     if (conflicts.length > 0) {
       return this.failed(widening, "apply", `the patch does not apply to the accepted source: ${conflicts.join(", ")} differ in the accepted source from what the patch was made on`, false);
     }
-    worktrees.add(source, threadBranches.widening(input.threadId, widening.clusterId, widening.attempt), start);
     this.dependencies.git(["cherry-pick", "--no-commit", attempt.commit], { worktree: source });
     this.dependencies.log(`${label}: building the patch on the accepted source.`);
     const started = this.dependencies.now().getTime();
