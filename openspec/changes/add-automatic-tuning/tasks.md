@@ -8,7 +8,7 @@ Each task names the tasks it builds on as `(after: …)`, by number in this list
 
 ## 2. Freeze and cycle
 
-- [ ] 2.1 (after: 1.1) Build the tuning graph (`buildTuningGraph`, checkpointed in `out/evals/tuning/checkpoints.sqlite`), freeze the next version of the automatic dataset and run the cycle's steps as its nodes from `tune auto` and `tune cycle`, resuming a tuning in progress. Evidence: workflow tests with fake eval runs and tune jobs for activated, no improvement and rejected cycles and a tuning stopped during its cycle.
+- [x] 2.1 (after: 1.1) Build the tuning graph (`buildTuningGraph`, checkpointed in `out/evals/tuning/checkpoints.sqlite`), freeze the next version of the automatic dataset and run the cycle's steps as its nodes from `tune auto` and `tune cycle`, resuming a tuning in progress. Evidence: workflow tests with fake eval runs and tune jobs for activated, no improvement and rejected cycles and a tuning stopped during its cycle.
 
 ## 3. Worktree and merge
 
