@@ -57,12 +57,12 @@ export type DiscoverySettings = {
 
 export const defaultDiscoveryTargets = 3;
 
+export const defaultHypotheses = 1;
+
 /** How many hypotheses each cluster of a thread gets. */
 export function hypothesesOf(options: RunOptions): number {
-  return options.hypotheses ?? 1;
+  return options.hypotheses ?? defaultHypotheses;
 }
-
-export const defaultHypotheses = 1;
 
 /** Whether a thread works in fix changes: priors in diagnosis, planned repair and a fix change with every promotion. */
 export function usesFixChanges(options: RunOptions): boolean {
