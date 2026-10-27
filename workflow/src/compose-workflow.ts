@@ -27,6 +27,7 @@ import { createScratchFolder } from "./host/scratch-folder.js";
 import { processBranchGit } from "./git/branch-git.js";
 import { headBranch, integrate } from "./git/integration.js";
 import { Worktrees } from "./git/worktrees.js";
+import { threadTraces } from "./thread-traces.js";
 import { LoopService } from "./loop/loop-service.js";
 import type { Command } from "./options/arguments.js";
 import { localDataFolder, type Profile } from "./options/profile.js";
@@ -95,16 +96,17 @@ export function composeWorkflow(repositoryRoot: string, profile: Profile, log: (
   });
 
   const checkpointer = SqliteSaver.fromConnString(paths.checkpoints);
-  const store = new SqliteStore(paths.store);
   // A thread's discovery is a discovery thread like those of npm run discover, in their checkpointer and folders.
   const folders = discoveryPaths(repositoryRoot);
+  let store: SqliteStore | undefined;
   let discoveryCheckpointer: SqliteSaver | undefined;
   const close = () => {
-    store.close();
+    store?.close();
     checkpointer.db.close();
     discoveryCheckpointer?.db.close();
   };
   try {
+    store = new SqliteStore(paths.store);
     mkdirSync(folders.root, { recursive: true });
     discoveryCheckpointer = SqliteSaver.fromConnString(folders.checkpoints);
     const discovery = new RunnerDiscovery(composeDiscovery({
@@ -121,6 +123,9 @@ export function composeWorkflow(repositoryRoot: string, profile: Profile, log: (
       readCase: readCaseDetails,
       certificateProblems: unattendedProblems,
       head: () => headBranch(branchGit),
+      threadTraces: (threadId) => threadTraces({
+        threadFolder: paths.threadFolder, discoveryThreadFolder: (id) => folders.thread(id).root, git: branchGit,
+      }, threadId),
       log,
       now,
       ...(signal === undefined ? {} : { signal }),
