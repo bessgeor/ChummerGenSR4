@@ -128,6 +128,19 @@ Execution:
 
 Visual: `skills-controls` passed; `common`, `skills` and `character-info` passed; both compares had status 0 (clear, 0 discrepancies), completeness complete (1 and 3 planned and reported). `Triage: 0 discrepancies in 0 clusters (0 new), 0 other findings`. `Inventory: 69 classes (10 active), controls observed 258/1419, interactions exercised 1/873, tuples observed 4/4, unresolved 2` (the unresolved automation IDs `cmdChangeSpec` and `cmdImproveSkill` in the `skills` capture of the career scenario). With `--no-discovery` on this clean scope no discovery thread started (`out/discovery/threads/disc-wf-20261027T124938Z-4e9162ce` does not exist), the report printed no `Discovery:` line, `outcome.json` holds `discovery: null`, and the thread exited 0.
 
+### Task 6.2: archive
+
+| Command | Result |
+| --- | --- |
+| `npx openspec archive add-automatic-discovery --yes` | Archived as `2026-10-27-add-automatic-discovery`; specs updated: `interaction-discovery` + 1 requirement, `parity-workflow` + 2, `self-fixing-loop` + 1 (totals + 4, ~ 0, - 0, → 0). |
+| `npm run openspec:validate`, after the archive | Passed: 22 passed, 0 failed. |
+| `npm run workflow:typecheck`, run 1 | Failed before the dependencies were installed in the checkout: `error TS2688: Cannot find type definition file for 'node'.` |
+| `npm run workflow:test`, run 1 | Failed before the dependencies were installed in the checkout: 58 tests (one per test file), 0 passed, 58 failed, each with `Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'tsx' imported from <checkout>`, for example `not ok 1 - workflow\\tests\\agents.test.ts` with `error: 'test failed'`. |
+| `npm ci` | Installed the dependencies. |
+| `npm run workflow:typecheck`, run 2 | Passed. |
+| `npm run workflow:test`, run 2 | 517 tests, 517 passed. |
+| `(Get-FileHash bin/ChummerGenSR4.exe -Algorithm SHA256).Hash` | `9FF3009946F0212842EB5AA803C3D8E1697752040229F52B25F584E7B0AE9E56`, the canonical hash. |
+
 ## Fixture-tested scope
 
 The runner (`composeDiscovery`, `discoveryRunner`, `hostDiscovery`) is tested with the discovery harness's fake jobs and capture runner: starting a new thread (an ID that already has a thread is refused), resuming an unfinished thread without running its finished jobs again (a finished or absent thread is refused), and reading a finished thread's conclusion by ID without running anything (an absent thread is refused). The discovery graph tests run on the same composition as the entry points.
@@ -137,6 +150,8 @@ The suite's setup errors (a registry without its case file or the other way roun
 ## Live evidence
 
 Task 6.1: runs 2 and 3 above. In run 2 the canonical sides of the two planned cases came from the cache and the two canonical sides of the discovery capture ran live; in run 3 both canonical sides came from the cache entries run 2's discovery capture stored. Every candidate side ran live. Run 1 ended with an execution failure and without an outcome (recorded above).
+
+None for task 6.2: it moves this change into the archive and applies its spec deltas, and `bin/ChummerGenSR4.exe` was not run, built or touched.
 
 None for task 5.1: it changes only `AGENTS.md`, `README.md` and this change's files, and `bin/ChummerGenSR4.exe` was not run, built or touched; its SHA-256 at the end of task 5.1 is `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`.
 

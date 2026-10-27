@@ -25,4 +25,4 @@ Each task names the tasks it builds on as `(after: …)`, by number in this list
 ## 6. Verification and archive
 
 - [x] 6.1 (after: 5.1) [desktop] Run `npm start` live on a scope without differences so that discovery runs, then a default run that captures the admitted scenarios; record in `verification.md` the canonical hash before and after, execution outcomes apart from visual results, which sides came from the cache, fixture-tested scope apart from live evidence, and what remains unverified.
-- [ ] 6.2 (after: 6.1) Archive the change with `openspec archive add-automatic-discovery`. Evidence: `npm run openspec:validate` passes after the archive.
+- [x] 6.2 (after: 6.1) Archive the change with `openspec archive add-automatic-discovery`. Evidence: `npm run openspec:validate` passes after the archive.
