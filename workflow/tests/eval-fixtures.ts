@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Explanation, HypothesisOutput, ChallengeOutput } from "../src/diagnosis/job-schemas.js";
-import { InMemoryStore } from "@langchain/langgraph";
+import { InMemoryStore, MemorySaver } from "@langchain/langgraph";
 import { resolveAgentSettings } from "../src/agents/agent-settings.js";
 import { QuotaWaiter } from "../src/diagnosis/quota-waiter.js";
 import type { EvalContext } from "../src/evals/eval-commands.js";
@@ -81,10 +81,11 @@ export function evalContext(overrides: Partial<EvalContext> = {}): EvalContext &
   const agents = new FakeAgents();
   const tuning = join(scratch("workflow-tuning-"), "tuning");
   const certificates = join(scratch("workflow-certificates-"), "certificates");
+  const checkpointer = new MemorySaver();
   return {
     paths: workflowPaths(scratch("workflow-eval-")), store: new InMemoryStore(), git: () => "", now: () => new Date("2026-10-02T09:00:00Z"),
     log: (line) => lines.push(line), agentSettings: () => resolveAgentSettings(undefined), agents: () => agents, certificatesFolder: () => certificates,
-    tuningFolder: () => tuning, autoTuning: () => resolveAutoTuning(undefined),
+    tuningFolder: () => tuning, autoTuning: () => resolveAutoTuning(undefined), tuningCheckpointer: () => checkpointer,
     quota: new QuotaWaiter("p", async () => undefined), createScratchFolder, lines,
     ...overrides,
   };

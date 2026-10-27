@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
 import { agentRunners } from "../agents/agent-runners.js";
 import { resolveAgentSettings } from "../agents/agent-settings.js";
 import { QuotaWaiter } from "../diagnosis/quota-waiter.js";
@@ -15,6 +16,7 @@ import { tuningFolder } from "../options/run-options.js";
 import { workflowPaths } from "../paths.js";
 import { SqliteStore } from "../store/sqlite-store.js";
 import { resolveAutoTuning } from "../tuning/auto-tuning.js";
+import { tuningCheckpoints } from "../tuning/tuning-runner.js";
 import { runEvalCommand } from "./eval-commands.js";
 
 const setupErrorStatus = 3;
@@ -32,6 +34,7 @@ async function main(): Promise<number> {
   mkdirSync(paths.workflowFolder, { recursive: true });
   const log = (line: string) => console.log(line);
   const store = new SqliteStore(paths.store);
+  let checkpointer: SqliteSaver | null = null;
   try {
     return await runEvalCommand(process.argv.slice(2), {
       paths, store, git: processGit(repositoryRoot), now: () => new Date(), log,
@@ -39,11 +42,20 @@ async function main(): Promise<number> {
       certificatesFolder: () => resolve(repositoryRoot, loadProfile(process.env).certificates ?? paths.certificates),
       tuningFolder: () => tuningFolder(loadProfile(process.env), repositoryRoot),
       autoTuning: () => resolveAutoTuning(loadProfile(process.env).autoTuning),
+      tuningCheckpointer: () => {
+        if (checkpointer === null) {
+          const path = tuningCheckpoints(paths.evalsFolder);
+          mkdirSync(dirname(path), { recursive: true });
+          checkpointer = SqliteSaver.fromConnString(path);
+        }
+        return checkpointer;
+      },
       agents: agentRunners(process.env), quota: new QuotaWaiter(randomBytes(8).toString("hex"), undefined, log),
       createScratchFolder, signal: interruptSignal(),
     });
   } finally {
     store.close();
+    (checkpointer as SqliteSaver | null)?.db.close();
   }
 }
 

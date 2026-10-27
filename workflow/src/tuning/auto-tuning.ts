@@ -137,16 +137,52 @@ export function startAutoTuning(dependencies: AutoTuningDependencies, due: Extra
 
 function recordStart(dependencies: AutoTuningDependencies, due: Extract<AutoTuningTrigger, { kind: "due" }>): AutoTuningEntry {
   const state = readAutoTuning(dependencies.evalsFolder);
+  const now = dependencies.now();
+  const tuningId = dependencies.newTuningId(now);
+  // A start repeated under the same tuning ID (its node interrupted after it wrote the state) finds its own tuning.
+  if (state.current?.tuningId === tuningId) return state.current;
   if (state.current !== null) throw new SetupError(`The automatic tuning ${state.current.tuningId} is in progress in ${autoTuningPath(dependencies.evalsFolder)}.`);
   const counted = new Set(state.counted);
   if (due.records.some((id) => counted.has(id))) {
     throw new SetupError(`Another automatic tuning counted some of these hypothesis records in ${autoTuningPath(dependencies.evalsFolder)}; run tune auto again.`);
   }
-  const now = dependencies.now();
   const tuning: AutoTuningEntry = {
-    tuningId: dependencies.newTuningId(now), startedUtc: now.toISOString(), forced: due.forced, records: [...due.records],
+    tuningId, startedUtc: now.toISOString(), forced: due.forced, records: [...due.records],
     dataset: null, cycle: null, branch: null, commit: null, merge: null, outcome: null, finishedUtc: null,
   };
   writeDocument(autoTuningPath(dependencies.evalsFolder), AutoTuningStateSchema.parse({ ...state, counted: [...state.counted, ...due.records], current: tuning }));
   return tuning;
+}
+
+/** The tuning in progress, which must be `tuningId`. */
+function currentTuning(evalsFolder: string, state: AutoTuningState, tuningId: string): AutoTuningEntry {
+  if (state.current?.tuningId !== tuningId) {
+    throw new SetupError(`The automatic tuning ${tuningId} is not the one in progress in ${autoTuningPath(evalsFolder)} (${state.current?.tuningId ?? "none"}).`);
+  }
+  return state.current;
+}
+
+/** Records the dataset or the cycle of the tuning in progress, under the state's lock. */
+export function recordAutoTuning(evalsFolder: string, tuningId: string, fields: Partial<Pick<AutoTuningEntry, "dataset" | "cycle">>): AutoTuningEntry {
+  return withAutoTuningLock(evalsFolder, () => {
+    const state = readAutoTuning(evalsFolder);
+    const tuning = { ...currentTuning(evalsFolder, state, tuningId), ...fields };
+    writeDocument(autoTuningPath(evalsFolder), AutoTuningStateSchema.parse({ ...state, current: tuning }));
+    return tuning;
+  });
+}
+
+/**
+ * Ends the tuning in progress with its cycle's outcome: it moves to `tunings`, and nothing is in progress. A tuning that
+ * already ended (its node interrupted after it wrote the state) is returned as it is.
+ */
+export function finishAutoTuning(evalsFolder: string, tuningId: string, outcome: NonNullable<AutoTuningEntry["outcome"]>, now: Date): AutoTuningEntry {
+  return withAutoTuningLock(evalsFolder, () => {
+    const state = readAutoTuning(evalsFolder);
+    const ended = state.current === null ? state.tunings.find((tuning) => tuning.tuningId === tuningId) : undefined;
+    if (ended !== undefined) return ended;
+    const tuning: AutoTuningEntry = { ...currentTuning(evalsFolder, state, tuningId), outcome, finishedUtc: now.toISOString() };
+    writeDocument(autoTuningPath(evalsFolder), AutoTuningStateSchema.parse({ ...state, tunings: [...state.tunings, tuning], current: null }));
+    return tuning;
+  });
 }

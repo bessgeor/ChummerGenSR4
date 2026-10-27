@@ -47,18 +47,21 @@ test("only succeeded workflow hypothesis records count", async () => {
   deepStrictEqual(trigger.kind === "due" ? trigger.records : null, ["wf-1/d-000/hypothesis/1", "wf-1/d-001/hypothesis/1", "wf-1/d-002/hypothesis/1"]);
 });
 
-test("a due tuning is recorded as in progress, and tune auto is a setup error because it runs no tuning cycle", async () => {
+const nothingToFreeze = (error: Error) => error instanceof SetupError && error.message.includes("there is nothing to freeze");
+
+test("a due tuning is recorded as in progress before its freeze; with nothing to freeze it is a setup error and the tuning stays in progress", async () => {
   const context = await withRecords(13);
-  await rejects(runEvalCommand(["tune", "auto"], context), (error: Error) => error instanceof SetupError && error.message.includes("has not tuned"));
-  deepStrictEqual(context.lines, ["Automatic tuning: 13 of 12 new hypothesis records; due."]);
+  await rejects(runEvalCommand(["tune", "auto"], context), nothingToFreeze);
+  equal(context.lines[0], "Automatic tuning: 13 of 12 new hypothesis records; due.");
   const state = readAutoTuning(context.paths.evalsFolder);
   equal(state.counted.length, 13);
   deepStrictEqual(state.tunings, []);
   deepStrictEqual([state.current?.records, state.current?.forced, state.current?.dataset, state.current?.cycle, state.current?.outcome], [state.counted, false, null, null, null]);
-  equal(existsSync(join(context.paths.evalsFolder, "datasets")), false);
+  equal(existsSync(join(context.paths.evalsFolder, "datasets", "auto-hypothesis")), false);
 
-  // The next call finds the tuning in progress and counts nothing.
-  await rejects(runEvalCommand(["tune", "auto"], context), (error: Error) => error instanceof SetupError && error.message.includes(state.current?.tuningId ?? "?"));
+  // The next call continues the tuning in progress and counts nothing.
+  await rejects(runEvalCommand(["tune", "auto"], context), nothingToFreeze);
+  ok(context.lines.includes(`Automatic tuning ${state.current?.tuningId}: in progress since ${state.current?.startedUtc}; continued.`), context.lines.join("\n"));
   deepStrictEqual(readAutoTuning(context.paths.evalsFolder), state);
 });
 
@@ -88,8 +91,8 @@ test("--force makes a tuning due whatever the count; unknown options are refused
   await rejects(runEvalCommand(["tune", "auto", "--every", "3"], context), SetupError);
   equal(existsSync(autoTuningPath(context.paths.evalsFolder)), false);
 
-  await rejects(runEvalCommand(["tune", "auto", "--force"], context), (error: Error) => error instanceof SetupError && error.message.includes("has not tuned"));
-  deepStrictEqual(context.lines, ["Automatic tuning: 4 of 100 new hypothesis records, forced; due."]);
+  await rejects(runEvalCommand(["tune", "auto", "--force"], context), nothingToFreeze);
+  equal(context.lines[0], "Automatic tuning: 4 of 100 new hypothesis records, forced; due.");
   const state = readAutoTuning(context.paths.evalsFolder);
   deepStrictEqual([state.counted.length, state.current?.forced, state.current?.records], [4, true, state.counted]);
 });
@@ -145,8 +148,9 @@ test("records added during a tuning are not counted by it, nothing is counted wh
   const during = await checkAutoTuning(dependencies(context), settings, false);
   deepStrictEqual(during, { kind: "in_progress", tuning });
   deepStrictEqual(readAutoTuning(context.paths.evalsFolder).counted, first.records);
-  await rejects(runEvalCommand(["tune", "auto"], context), (error: Error) => error instanceof SetupError && error.message.includes(tuning.tuningId));
+  await rejects(runEvalCommand(["tune", "auto"], context), nothingToFreeze);
   deepStrictEqual(readAutoTuning(context.paths.evalsFolder).counted, first.records);
+  deepStrictEqual(readAutoTuning(context.paths.evalsFolder).current, tuning);
 
   // The tuning ends: the records it did not count are the next tuning's.
   const state = readAutoTuning(context.paths.evalsFolder);
