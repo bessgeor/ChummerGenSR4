@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { certificatePath } from "../src/evals/certificate.js";
 import { runEvalCommand } from "../src/evals/eval-commands.js";
-import { processBranchGit, processCheckoutGit } from "../src/git/branch-git.js";
+import { processBranchGit } from "../src/git/branch-git.js";
 import { SetupError } from "../src/host/setup-error.js";
 import { readActiveFile, tuningFiles } from "../src/tuning/active-configuration.js";
 import { autoTuningPath, readAutoTuning } from "../src/tuning/auto-tuning.js";
@@ -116,7 +116,7 @@ test("an automatic tuning on folders inside the repository activates in a worktr
   // Merged again, as a resumed merge node would: the trailer is reachable, so the branch stays where it is.
   const { values } = await compileTuningGraph(refusingSteps(), context.tuningCheckpointer()).getState({ configurable: { thread_id: entry.tuningId } });
   const workspace = (values as TuningStateValue).workspace!;
-  deepStrictEqual(new TuningRepository(context.branchGit, context.checkoutGit, repo.root).merge(workspace, cycleId, join(scratch(), "merge"), "again", []).merge, tip);
+  deepStrictEqual(new TuningRepository(context.branchGit, repo.root).merge(workspace, cycleId, join(scratch(), "merge"), "again", []).merge, tip);
   equal(repo.run("rev-parse", "main"), tip);
 });
 
@@ -284,7 +284,7 @@ test("a tuning commit the branch has the changes of already is still merged with
   const repo = tuningRepository();
   const start = repo.run("rev-parse", "main");
   const branchGit = processBranchGit(repo.root);
-  const tuning = new TuningRepository(branchGit, processCheckoutGit(repo.root), repo.root);
+  const tuning = new TuningRepository(branchGit, repo.root);
   const workspace = tuning.open("tc-1", join(scratch(), "worktree"), { tuningFolder: repo.tuningFolder, certificatesFolder: repo.certificatesFolder });
   write(workspace.folder, "workflow/evals/tuning/holdout.json", "{}\n");
   const commit = tuning.commit(workspace, "tc-1", "Tune hypothesis: rejected\n\nTuning-Cycle: tc-1\n")!;
@@ -309,7 +309,7 @@ test("a commit whose message a hook rewrote without the trailer is a setup error
   const before = repo.run("rev-parse", "main");
   const hook = join(repo.root, ".git", "hooks", "prepare-commit-msg");
   writeFileSync(hook, "#!/bin/sh\ngrep -v '^Tuning-Cycle:' \"$1\" > \"$1.new\"\nmv \"$1.new\" \"$1\"\n", { mode: 0o755 });
-  const tuning = new TuningRepository(processBranchGit(repo.root), processCheckoutGit(repo.root), repo.root);
+  const tuning = new TuningRepository(processBranchGit(repo.root), repo.root);
   const workspace = tuning.open("tc-2", join(scratch(), "worktree"), { tuningFolder: repo.tuningFolder, certificatesFolder: repo.certificatesFolder });
   write(workspace.folder, "workflow/evals/tuning/holdout.json", "{}\n");
   throws(() => tuning.commit(workspace, "tc-2", "Tune hypothesis: rejected\n\nTuning-Cycle: tc-2\n"),

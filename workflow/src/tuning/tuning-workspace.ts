@@ -62,8 +62,9 @@ function cycleFiles(folders: TuningFolders): string[] {
  * inside the repository that git ignores, as it could not be committed; and no uncommitted change in those folders,
  * untracked files included, which the cycle would not see.
  */
-export function requireWorkspaceStart(checkoutGit: BranchGit, repositoryRoot: string, folders: TuningFolders): { branch: string; commit: string; paths: string[] } {
+export function requireWorkspaceStart(git: BranchGit, repositoryRoot: string, folders: TuningFolders): { branch: string; commit: string; paths: string[] } {
   const paths = repositoryPaths(repositoryRoot, folders);
+  const checkoutGit: BranchGit = (args, options = {}) => git(args, { worktree: repositoryRoot, ...options, userSettings: true });
   const head = headBranch(checkoutGit);
   if (head.branch === null) {
     throw new SetupError(`The tuning folders ${paths.join(" and ")} lie inside the repository, so an automatic tuning merges its files into the branch HEAD names, but HEAD is detached at ${head.commit}. Check out a branch first.`);
@@ -71,7 +72,7 @@ export function requireWorkspaceStart(checkoutGit: BranchGit, repositoryRoot: st
   const files = cycleFiles(folders).map((file) => insidePath(repositoryRoot, file)).filter((file) => file !== null);
   let ignored: string[] = [];
   try {
-    ignored = checkoutGit(["check-ignore", "--no-index", "-z", "--stdin"], { worktree: repositoryRoot, input: `${files.join("\0")}\0` }).split("\0").filter((file) => file.length > 0);
+    ignored = checkoutGit(["check-ignore", "-z", "--stdin"], { input: `${files.join("\0")}\0` }).split("\0").filter((file) => file.length > 0);
   } catch (error) {
     // Exit status 1: none of them is ignored.
     if (!(error instanceof GitCommandError) || error.status !== 1) throw error;
@@ -79,7 +80,7 @@ export function requireWorkspaceStart(checkoutGit: BranchGit, repositoryRoot: st
   if (ignored.length > 0) {
     throw new SetupError(`git ignores ${ignored.join(", ")}, which an automatic tuning writes inside the repository and so could not commit. Name folders git tracks, or folders outside the repository.`);
   }
-  const changed = checkoutGit(["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", ...paths], { worktree: repositoryRoot }).split("\0").filter((entry) => entry.length > 0);
+  const changed = checkoutGit(["status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all", "--", ...paths]).split("\0").filter((entry) => entry.length > 0);
   if (changed.length > 0) {
     throw new SetupError(`${paths.join(" and ")} ${paths.length === 1 ? "has" : "have"} uncommitted changes (${changed.map((entry) => entry.slice(3)).join(", ")}), which an automatic tuning's cycle would not see: commit or discard them first.`);
   }
@@ -93,12 +94,12 @@ export function datasetLabel(folder: string): string {
 
 /**
  * The repository's worktrees and branches as an automatic tuning uses them: its own worktrees with the pinned git, the
- * user's checkout with `checkoutGit`, the user's git configuration.
+ * user's checkout with the user's git configuration.
  */
 export class TuningRepository {
   private readonly worktrees: Worktrees;
 
-  constructor(private readonly git: BranchGit, private readonly checkoutGit: BranchGit, private readonly repositoryRoot: string) {
+  constructor(private readonly git: BranchGit, private readonly repositoryRoot: string) {
     this.worktrees = new Worktrees(git, repositoryRoot);
   }
 
@@ -113,7 +114,7 @@ export class TuningRepository {
    * already (its node interrupted after it was made, before any step used it) is made again.
    */
   open(cycleId: string, folder: string, folders: TuningFolders): TuningWorkspace {
-    const start = requireWorkspaceStart(this.checkoutGit, this.repositoryRoot, folders);
+    const start = requireWorkspaceStart(this.git, this.repositoryRoot, folders);
     const branch = tuningBranch(cycleId);
     this.worktrees.remove(folder);
     this.worktrees.add(folder, branch, start.commit);
@@ -180,7 +181,7 @@ export class TuningRepository {
       throw new SetupError(`The tuning branch ${workspace.branch} does not end with the commit of cycle ${cycleId} (${tuningCommitTrailer}: ${cycleId}).`);
     }
     const result = integrate(this.git, this.worktrees, {
-      branch: workspace.target, worktree: mergeFolder, integrationBranch: `${workspace.branch}-merge`, checkoutGit: this.checkoutGit,
+      branch: workspace.target, worktree: mergeFolder, integrationBranch: `${workspace.branch}-merge`,
       items: [{ name: cycleId, commit, branch: workspace.branch, subject, trailer: { key: mergedTuningTrailer, value: cycleId }, trailers }],
     });
     const item = result.items[0]!;

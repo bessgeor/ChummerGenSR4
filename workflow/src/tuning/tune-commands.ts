@@ -144,7 +144,7 @@ function tuningGraph(context: EvalContext): { graph: TuningGraph; steps: TuningR
     run: holdoutDependencies(context), tune: tuneDependencies(context), evalsFolder: context.paths.evalsFolder, tuningFolder: context.tuningFolder(),
     certificatesFolder: context.certificatesFolder(), newRunId: () => newEvalRunId(context.now()),
   };
-  const steps = tuningSteps({ cycle, store: context.store, paths: context.paths, git: context.git, branchGit: context.branchGit, checkoutGit: context.checkoutGit });
+  const steps = tuningSteps({ cycle, store: context.store, paths: context.paths, git: context.git, branchGit: context.branchGit });
   return { graph: compileTuningGraph(steps, context.tuningCheckpointer()), steps, cycle };
 }
 
@@ -228,7 +228,7 @@ const auto: TuneCommand = async (args, context) => {
     // starts nothing without them. A tuning in progress checks them when it adds its worktree.
     if (locked.kind === "due") {
       const folders = { tuningFolder: context.tuningFolder(), certificatesFolder: context.certificatesFolder() };
-      if (repositoryPaths(context.paths.repositoryRoot, folders).length > 0) requireWorkspaceStart(context.checkoutGit, context.paths.repositoryRoot, folders);
+      if (repositoryPaths(context.paths.repositoryRoot, folders).length > 0) requireWorkspaceStart(context.branchGit, context.paths.repositoryRoot, folders);
     }
     return runAutoTuning(context, locked, settings);
   });

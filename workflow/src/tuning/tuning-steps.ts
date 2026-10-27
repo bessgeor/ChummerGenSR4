@@ -27,8 +27,6 @@ export type TuningStepsDependencies = {
   readonly git: Git;
   /** The repository's git, for the worktree and merge of a tuning whose folders lie inside the repository. */
   readonly branchGit: BranchGit;
-  /** The repository's git with the user's configuration, for the user's checkout. */
-  readonly checkoutGit: BranchGit;
 };
 
 /** The cycle of an automatic tuning: its ID with the cycle prefix, so a resumed node finds the same cycle. */
@@ -77,7 +75,7 @@ export function tuningSteps(dependencies: TuningStepsDependencies): TuningRun {
   const { cycle: inPlace, store, paths, git } = dependencies;
   const { evalsFolder } = inPlace;
   const { now, log } = inPlace.run;
-  const repository = new TuningRepository(dependencies.branchGit, dependencies.checkoutGit, paths.repositoryRoot);
+  const repository = new TuningRepository(dependencies.branchGit, paths.repositoryRoot);
   // The cycle's steps read and write the tuning and certificates folders in the tuning's worktree when it has one.
   const cyclesOf = (state: TuningStateValue): CycleDependencies => {
     if (state.workspace === null || state.workspace === undefined) return inPlace;
