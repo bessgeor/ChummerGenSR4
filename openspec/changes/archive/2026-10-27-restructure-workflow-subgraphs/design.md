@@ -31,7 +31,7 @@ A thread stored by the flat graph has channel values but no stage nodes, and som
 
 ### Names
 
-The stage IDs (`start`, `capture`, `diagnose`, `repair`, `widen`, `conclude`) are exported as a constant and are stable. Later stages are added under their own fixed IDs.
+The stage IDs (`start`, `capture`, `discovery`, `diagnose`, `repair`, `widen`, `conclude`) are exported as a constant and are stable. Later stages are added under their own fixed IDs.
 
 ## Risks / Trade-offs
 

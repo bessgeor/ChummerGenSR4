@@ -15,14 +15,14 @@ The graph tests that existed before this change keep their assertions about step
 
 New tests and behavior:
 
-- `graph.test.ts`, the drawing with `xray`: the workflow graph has the six stage IDs from the exported constant. `getSubgraphsAsync()` lists the exact inner nodes of every stage (`start`: `build`; `capture`: `route_cases`, `capture`, `compare`, `triage`, `inventory`; plus the inner nodes of `diagnose`, `repair`, `widen` and `conclude`). LangGraph renders a single-node subgraph (`start`, `conclude`) as that inner node under the stage ID in xray.
+- `graph.test.ts`, the drawing with `xray`: the workflow graph has the seven stage IDs from the exported constant. `getSubgraphsAsync()` lists the exact inner nodes of every stage (`start`: `build`; `capture`: `route_cases`, `capture`, `compare`, `triage`, `inventory`; plus the inner nodes of `discovery`, `diagnose`, `repair`, `widen` and `conclude`). LangGraph renders a single-node subgraph (`start`, `conclude`) as that inner node under the stage ID in xray.
 - `graph.test.ts`, the fan-out seen from outside: while case `c` is captured on one lane, `getState(config, { subgraphs: true })` returns the capture stage in a `capture:<task>` namespace, its pending `compare` and `capture` tasks, and `pendingCaseIndexes: [1, 2]` in that stage's state. The route node writes the indexes alongside routing, so the task args are visible through the state API without reading the checkpoint tuple.
 - `diagnosis-graph.test.ts` and `widening-graph.test.ts` cover interrupted runs resumed from inside the `diagnose` and `widen` stages. Both pass in the full run above.
 - `graph.test.ts`, the refused flat thread: flat checkpoints stopped at build, capture and inventory are rejected with status 3; the error explains that a new thread reuses the recorded steps, and no misleading resume command is printed.
 
 ## Task 2.1: docs
 
-`AGENTS.md` (Parity workflow) describes the six stages, what each holds, the exported `stageIds`, the routing as edges of the workflow graph, the fan-outs in their stage's checkpoint namespace, the drawing with `xray` and `getState` with subgraphs, and the refused resume of a thread checkpointed before the workflow graph had stages. `README.md` names the stages and what they show in a run's checkpoints, task stream and drawing.
+`AGENTS.md` (Parity workflow) describes the seven stages, what each holds, the exported `stageIds`, the routing as edges of the workflow graph, the fan-outs in their stage's checkpoint namespace, the drawing with `xray` and `getState` with subgraphs, and the refused resume of a thread checkpointed before the workflow graph had stages. `README.md` names the stages and what they show in a run's checkpoints, task stream and drawing.
 
 | Command | Result |
 | --- | --- |
@@ -167,6 +167,16 @@ After the resume the thread's checkpoints have the same shape as thread 1's, and
 | `npm run workflow:typecheck` | Passed (exit 0). |
 | `npm run workflow:test` | Passed: 503 tests, 503 passed, 0 failed, 0 cancelled, 0 skipped (exit 0). |
 | `npm run openspec:validate` | Passed strict validation (exit 0). |
+
+## Task 3.2: archive
+
+| Command | Result |
+| --- | --- |
+| `npx openspec archive restructure-workflow-subgraphs --yes` | Applied the `parity-workflow` delta (1 added requirement) and archived the change as `2026-10-27-restructure-workflow-subgraphs`. |
+| `npm run openspec:validate`, after the archive | Passed strict validation: 21 passed, 0 failed (exit 0). |
+| `npm run workflow:typecheck` | Passed (exit 0). |
+| `npm run workflow:test` | 517 tests, 517 passed, 0 failed, 0 cancelled, 0 skipped (exit 0). |
+| `(Get-FileHash bin/ChummerGenSR4.exe -Algorithm SHA256).Hash` | `9FF3009946F0212842EB5AA803C3D8E1697752040229F52B25F584E7B0AE9E56`, the canonical hash; the executable was not run, built or touched. |
 
 ## Fixture-tested scope
 
