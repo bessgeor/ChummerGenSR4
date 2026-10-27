@@ -8,7 +8,7 @@ Each task names the tasks it builds on as `(after: …)`, by number in this list
 
 ## 2. Merging at conclude
 
-- [ ] 2.1 (after: 1.1) Record the base branch at the thread's start, merge each fixed cluster at conclude by rebase and merge commit, advance the base branch and report the merges; add `merge_failed`. Evidence: loop tests on a temporary repository for two merged fixes, a conflicting fix and the one after it, a moved base branch, a refused fast-forward with a resume, a branch that is not checked out and a detached `HEAD` at start.
+- [x] 2.1 (after: 1.1) Record the base branch at the thread's start, merge each fixed cluster at conclude by rebase and merge commit, advance the base branch and report the merges; add `merge_failed`. Evidence: loop tests on a temporary repository for two merged fixes, a conflicting fix and the one after it, a moved base branch, a refused fast-forward with a resume, a branch that is not checked out and a detached `HEAD` at start.
 
 ## 3. Docs
 
