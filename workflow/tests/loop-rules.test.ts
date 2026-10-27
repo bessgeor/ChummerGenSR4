@@ -99,7 +99,7 @@ const diagnosis = (status: ClusterDiagnosis["status"], extra: Partial<ClusterDia
 const check = (outcome: "confirmed" | "refuted" | "undecided") => ({ clusters: { "d-1": { outcome } } }) as unknown as CheckResult;
 
 function end(input: Partial<DispositionInput>): Pick<ClusterEnd, "disposition" | "attempts" | "stage" | "commit"> {
-  const result = clusterEnd("d-1", { clusters: {}, check: null, repairs: {}, widenings: {}, budgetBlocked: [], ...input });
+  const result = clusterEnd("d-1", { clusters: {}, check: null, repairs: {}, widenings: {}, budgetBlocked: [], merges: null, ...input });
   return { disposition: result.disposition, attempts: result.attempts, stage: result.stage, commit: result.commit };
 }
 
@@ -119,27 +119,35 @@ test("each cluster ends at the stage where its route stopped", () => {
   deepStrictEqual(end({ ...confirmed, repairs: { "d-1": repair("rejected", attempt(2, "check", execution(1)), 1) } }), { disposition: "repair_rejected", attempts: 2, stage: "check", commit: null });
   deepStrictEqual(end({ ...confirmed, repairs: { "d-1": repair("rejected", attempt(2, "check", execution(1)), 1) }, budgetBlocked: ["d-1"] }), { disposition: "budget_exhausted", attempts: 2, stage: "check", commit: null });
   // A next attempt that was refused at the budget keeps the rejection it followed.
-  const refused = clusterEnd("d-1", { clusters: challenged, check: check("confirmed"), repairs: { "d-1": repair("budget_exhausted", null, 1) }, widenings: {}, budgetBlocked: [] });
+  const refused = clusterEnd("d-1", { clusters: challenged, check: check("confirmed"), repairs: { "d-1": repair("budget_exhausted", null, 1) }, widenings: {}, budgetBlocked: [], merges: null });
   deepStrictEqual([refused.disposition, refused.attempts, refused.stage, refused.reason], ["budget_exhausted", 1, "check", "the run budget was spent before a next attempt; r"]);
   // An attempt the budget stopped after some of its jobs finished keeps its own reason and the rejection it followed.
-  const stopped = clusterEnd("d-1", { clusters: challenged, check: check("confirmed"), repairs: { "d-1": repair("budget_exhausted", { ...attempt(2, "model"), reason: "spent after 1 job" }, 1) }, widenings: {}, budgetBlocked: [] });
+  const stopped = clusterEnd("d-1", { clusters: challenged, check: check("confirmed"), repairs: { "d-1": repair("budget_exhausted", { ...attempt(2, "model"), reason: "spent after 1 job" }, 1) }, widenings: {}, budgetBlocked: [], merges: null });
   deepStrictEqual([stopped.disposition, stopped.attempts, stopped.stage, stopped.reason], ["budget_exhausted", 2, "model", "spent after 1 job; the attempt it followed was rejected by repair at check: r"]);
   deepStrictEqual(end({ ...confirmed, repairs: { "d-1": repair("passed", attempt(1, null)) } }).disposition, "not_widened");
   deepStrictEqual(end({ ...confirmed, repairs: { "d-1": repair("passed", attempt(1, null)) }, widenings: { "d-1": widening("rejected", "suite") } }), { disposition: "widening_rejected", attempts: 1, stage: "suite", commit: null });
   deepStrictEqual(end({ ...confirmed, repairs: { "d-1": repair("passed", attempt(2, null), 1) }, widenings: { "d-1": widening("promoted", null, false, 2) } }), { disposition: "fixed", attempts: 2, stage: null, commit: "c0ffee" });
+  // A promoted fix is fixed only when it merged; a thread stored before merging existed takes the promotion as fixed.
+  const promoted = { ...confirmed, repairs: { "d-1": repair("passed", attempt(1, null)) }, widenings: { "d-1": widening("promoted") } };
+  const merged = clusterEnd("d-1", { ...promoted, budgetBlocked: [], merges: { "d-1": { merged: true, mergeCommit: "m1", reason: null } } });
+  deepStrictEqual([merged.disposition, merged.stage, merged.reason, merged.commit, merged.mergeCommit], ["fixed", null, null, "c0ffee", "m1"]);
+  const failed = clusterEnd("d-1", { ...promoted, budgetBlocked: [], merges: { "d-1": { merged: false, mergeCommit: null, reason: "the rebase onto master conflicts in Chummer/frmCreate.cs" } } });
+  deepStrictEqual([failed.disposition, failed.attempts, failed.stage, failed.reason, failed.commit, failed.mergeCommit], ["merge_failed", 1, "merge", "the rebase onto master conflicts in Chummer/frmCreate.cs", "c0ffee", null]);
+  throws(() => clusterEnd("d-1", { ...promoted, budgetBlocked: [], merges: {} }), /promoted but not merged/);
   throws(() => end({ clusters: { "d-1": diagnosis("pending") } }), /is pending when the thread concludes/);
   throws(() => end({ ...confirmed, repairs: { "d-1": repair("pending", null) } }), /is pending when the thread concludes/);
   throws(() => end({ ...confirmed, repairs: { "d-1": repair("passed", attempt(1, null)) }, widenings: { "d-1": widening("verified") } }), /is verified when the thread concludes/);
 });
 
 test("a thread is verified for its scope only when every cluster is fixed and the scope had no problem", () => {
-  const fixed = { clusterId: "d-1", disposition: "fixed", attempts: 1, stage: null, reason: null, commit: "c" } as const;
+  const fixed = { clusterId: "d-1", disposition: "fixed", attempts: 1, stage: null, reason: null, commit: "c", mergeCommit: "m" } as const;
   const clean = { cases: [], otherFindings: 0 };
   equal(threadOutcome([], clean), "verified_for_scope");
   equal(threadOutcome([fixed], clean), "verified_for_scope");
   equal(threadOutcome([], { cases: [{ case: "build-alpha", capture: 2, compare: 0 }], otherFindings: 0 }), "findings_remaining");
   equal(threadOutcome([fixed], { cases: [], otherFindings: 1 }), "findings_remaining");
   equal(threadOutcome([fixed, { ...fixed, clusterId: "d-2", disposition: "refuted" }], clean), "findings_remaining");
+  equal(threadOutcome([fixed, { ...fixed, clusterId: "d-2", disposition: "merge_failed", mergeCommit: null }], clean), "findings_remaining");
   equal(threadOutcome([{ ...fixed, disposition: "budget_exhausted" }, { ...fixed, clusterId: "d-2", disposition: "refuted" }], clean), "budget_exhausted");
   equal(threadOutcome([{ ...fixed, disposition: "budget_exhausted" }], { cases: [], otherFindings: 2 }), "budget_exhausted");
 });

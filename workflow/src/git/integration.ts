@@ -147,8 +147,11 @@ export function integrate(git: BranchGit, worktrees: Worktrees, request: Integra
   return { branch: request.branch, before, after: tip, integrationBranch: request.integrationBranch, items };
 }
 
+/** The branch `HEAD` names (null when `HEAD` is detached) and its commit. */
+export type HeadBranch = { readonly branch: string | null; readonly commit: string };
+
 /** The branch `HEAD` names and its commit; the branch is null when `HEAD` is detached. */
-export function headBranch(git: BranchGit): { branch: string | null; commit: string } {
+export function headBranch(git: BranchGit): HeadBranch {
   const commit = git(["rev-parse", "HEAD"]).trim();
   try {
     return { branch: git(["symbolic-ref", "--quiet", "--short", "HEAD"]).trim(), commit };

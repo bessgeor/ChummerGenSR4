@@ -7,6 +7,7 @@ import { mergeRepairs, type ClusterRepair, type RepairUpdate } from "../repair/c
 import type { OutcomeDocument } from "../loop/outcome.js";
 import type { InventorySummary } from "../inventory/inventory-service.js";
 import type { ThreadDiscovery } from "../discovery/thread-discovery.js";
+import type { HeadBranch } from "../git/integration.js";
 import type { InputFingerprints } from "../steps/input-fingerprints.js";
 import type { StepOutcome } from "../steps/step-outcome.js";
 import { mergeWidenings, type AcceptedState, type ClusterWidening, type WideningUpdate } from "../widening/cluster-widening.js";
@@ -80,6 +81,8 @@ export const WorkflowState = Annotation.Root({
   threadDiscovery: Annotation<ThreadDiscovery | null>(),
   /** When the thread started; absent in a thread stored before it was recorded. */
   startedUtc: Annotation<string | null>(),
+  /** The branch the repository's HEAD named when the thread started (null when detached) and its commit; absent in a thread stored before it was recorded. */
+  base: Annotation<HeadBranch>(),
   /** The thread's outcome and its `outcome.json`, once it concluded. */
   outcome: Annotation<OutcomeDocument | null>(),
   outcomePath: Annotation<string | null>(),

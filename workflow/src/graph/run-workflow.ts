@@ -11,7 +11,8 @@ import { describeWidening, wideningStatus } from "../widening/widening-report.js
 import type { CaseDetails } from "../steps/case-details.js";
 import { describeCase } from "./case-report.js";
 import { describeDiagnosis, diagnosisStatus } from "./diagnosis-report.js";
-import { stageIds, type buildWorkflowGraph } from "./workflow-graph.js";
+import type { HeadBranch } from "../git/integration.js";
+import { stageIds, widens, type buildWorkflowGraph } from "./workflow-graph.js";
 import type { WorkflowStateValue } from "./workflow-state.js";
 
 export const setupErrorStatus = 3;
@@ -30,6 +31,8 @@ export type RunDependencies = {
   readonly now: () => Date;
   /** Why an unattended run may not dispatch its model jobs; empty when it may (or is not unattended). */
   readonly certificateProblems: (options: RunOptions) => readonly string[];
+  /** The branch the repository's HEAD names (null when detached) and its commit. */
+  readonly head: () => HeadBranch;
   /** Aborts when the operator interrupts the run (Ctrl+C): running children are stopped and the thread stays resumable. */
   readonly signal?: AbortSignal;
 };
@@ -90,6 +93,12 @@ async function start(command: Extract<Command, { kind: "start" }>, dependencies:
   const threadId = newThreadId(dependencies.now());
   const options = dependencies.resolveOptions(command, threadId);
   requireCertificates(options, dependencies);
+  const base = dependencies.head();
+  // Its fixes are merged into the branch it started on when it concludes.
+  if (base.branch === null && options.diagnosis && widens(options)) {
+    throw new SetupError(`HEAD is detached at ${base.commit}, and a thread that repairs and widens merges its fixes into the branch it started on. `
+      + "Check out a branch, or pass --no-repair or --no-widening.");
+  }
   const plan = dependencies.planCases(options);
   for (const name of plan.excluded) dependencies.log(`${name} is left out: none of the requested captures belongs to it.`);
   const cache = options.canonicalCache === null ? "off (--live-canonical)" : `${options.canonicalCache} (${options.canonicalCacheSource})`;
@@ -97,7 +106,7 @@ async function start(command: Extract<Command, { kind: "start" }>, dependencies:
   const input: WorkflowStateValue = {
     threadId, options, plan: [...plan.cases], pendingCaseIndexes: [], fingerprints: null, captures: {}, compares: {}, triageSummary: null, inventorySummary: null,
     clusters: {}, agentMilliseconds: 0, diagnosisCheck: null, diagnosisPath: null, repairs: {}, repairPath: null, widenings: {}, earlierWidenings: [], accepted: null, wideningPath: null,
-    threadDiscovery: null, startedUtc: dependencies.now().toISOString(), outcome: null, outcomePath: null,
+    threadDiscovery: null, startedUtc: dependencies.now().toISOString(), base, outcome: null, outcomePath: null,
   };
   return { threadId, input };
 }

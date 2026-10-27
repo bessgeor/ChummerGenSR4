@@ -1,5 +1,6 @@
 import { deepStrictEqual, equal, ok } from "node:assert/strict";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { InMemoryStore, MemorySaver } from "@langchain/langgraph";
@@ -9,6 +10,8 @@ import type { WideningDocument } from "../src/widening/widening-report.js";
 import { challengeAnswer, diagnosisHarness, FakeAgents, hypothesisAnswer, twoClusters, type JobCall, type Reply } from "./diagnosis-harness.js";
 import { FakeRepairHost, patchedReply, repairedSource, type CheckBehaviour } from "./repair-fixtures.js";
 import { FakeWideningHost, type WideningScript } from "./widening-fixtures.js";
+import { repository } from "./diagnosis-fixtures.js";
+import type { BranchGit } from "../src/git/branch-git.js";
 
 const first = "d-0000000000000100";
 const second = "d-0000000000000400";
@@ -24,10 +27,28 @@ type Options = {
   /** How many model jobs run at a time; unlimited by default. */
   readonly poolSize?: number;
   readonly widening?: boolean;
+  /** A wrapper around the repository's git. */
+  readonly git?: (git: BranchGit) => BranchGit;
   readonly extra?: Partial<Parameters<typeof diagnosisHarness>[0]>;
 };
 
-/** Every cluster confirmed; repairs edit frmCreate.cs (first cluster) or untracked.cs (second) unless told otherwise. */
+const gitIn = (root: string) => (...args: string[]) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trim();
+
+/** The fixture repository with its working tree committed on `master`, so a thread's fixes merge into it; `edit` changes the tree before the commit. */
+function committedRepository(edit: (root: string) => void = () => {}): string {
+  const root = repository();
+  const git = gitIn(root);
+  edit(root);
+  git("add", "-A");
+  git("commit", "-q", "-m", "working tree");
+  git("branch", "-M", "master");
+  return root;
+}
+
+/**
+ * Every cluster confirmed; repairs edit frmCreate.cs (first cluster) or untracked.cs (second) unless told otherwise.
+ * The repository is a committed one on `master` unless the options name another.
+ */
 function harness(options: Options = {}) {
   let repairHost: FakeRepairHost | null = null;
   const repair = options.repair ?? ((call: JobCall) => patchedReply(call.cluster === first ? { "Chummer/frmCreate.cs": repairedSource } : { "Chummer/untracked.cs": "fixed" })(call));
@@ -40,8 +61,9 @@ function harness(options: Options = {}) {
   return diagnosisHarness({
     spots: options.spots ?? [twoClusters[0]!], agents,
     repair: { deadlineMinutes: 60, maxAttempts: options.maxAttempts ?? 2, host: (root) => (repairHost = new FakeRepairHost(root)) },
-    ...(options.widening === false ? {} : { widening: { host: (root, names) => new FakeWideningHost(root, names, options.script ?? {}) } }),
+    ...(options.widening === false ? {} : { widening: { host: (root, names) => new FakeWideningHost(root, names, options.script ?? {}), ...(options.git === undefined ? {} : { git: options.git }) } }),
     ...options.extra,
+    repository: options.extra?.repository ?? committedRepository(),
   });
 }
 
@@ -82,7 +104,8 @@ test("a cluster rejected at its narrow check gets a second attempt that sees the
   const repairDocument = readJson<RepairDocument>(join(run.root, "threads", threadId, "repair.json"));
   equal(repairDocument.clusters[0]!.earlier.length, 1);
   ok(run.lines.some((line) => line.startsWith(`Repair ${first}: attempt 1 rejected by repair at check: `)));
-  ok(run.lines.includes(`Loop ${first}: fixed after 2 attempts; ${state.accepted?.commit}`));
+  ok(run.lines.includes(`Loop ${first}: fixed after 2 attempts; ${state.accepted?.commit} merged as ${outcome.clusters[0]!.mergeCommit}`));
+  ok(run.lines.includes(`Merge: master ${outcome.merge?.before} -> ${outcome.merge?.after}; 1 of 1 fixes merged, kept on workflow/${threadId}/integration`));
   const last = run.lines.findIndex((line) => line.startsWith("Outcome: "));
   ok(last > run.lines.findIndex((line) => line.startsWith("Widening: ")));
   equal(run.lines[last], `Outcome: verified_for_scope; 1 of 1 clusters fixed, 2 attempts, model time 0.1 min, elapsed 120.0 min; ${join(run.root, "threads", threadId, "outcome.json")}`);
@@ -245,4 +268,161 @@ test("a thread stored without the attempt limit and its start concludes with one
   const outcome = outcomeOf(resumed.root, threadId);
   deepStrictEqual([outcome.clusters[0]!.disposition, outcome.clusters[0]!.attempts, outcome.measures.elapsedMilliseconds], ["repair_rejected", 1, null]);
   ok(resumed.lines.some((line) => line.startsWith("Outcome: findings_remaining; ") && line.includes("elapsed unknown")));
+});
+/** The values of a trailer on the commits `master` reaches, newest first. */
+const trailersOn = (root: string, key: string) => gitIn(root)("log", `--format=%(trailers:key=${key},valueonly)`, "master").split(/\r?\n/).filter((line) => line.length > 0);
+
+test("two promoted fixes are merged into the branch the thread started on, one merge commit each, in the order of the promotions", async () => {
+  const run = harness({ spots: twoClusters });
+  const git = gitIn(run.sourceRepository);
+  const start = git("rev-parse", "master");
+  equal(await run.start(), 1);
+  const threadId = run.threadId();
+  const state = await run.state(threadId);
+  deepStrictEqual(state.base, { branch: "master", commit: start });
+  const outcome = outcomeOf(run.root, threadId);
+  const after = git("rev-parse", "master");
+  deepStrictEqual(outcome.clusters.map((item) => [item.clusterId, item.disposition, item.commit]), [[first, "fixed", state.widenings[first]!.commit], [second, "fixed", state.widenings[second]!.commit]]);
+  deepStrictEqual([outcome.merge?.branch, outcome.merge?.before, outcome.merge?.after, outcome.merge?.integrationBranch], ["master", start, after, `workflow/${threadId}/integration`]);
+  deepStrictEqual(outcome.merge?.fixes.map((fix) => [fix.clusterId, fix.status, fix.fixBranch, fix.mergeCommit]),
+    [[first, "merged", `workflow/${threadId}/fix/${first}`, outcome.clusters[0]!.mergeCommit], [second, "merged", `workflow/${threadId}/fix/${second}`, after]]);
+  // master gains a merge commit of the first fix's branch, then one of the second's, each with its trailers.
+  deepStrictEqual(git("log", "--first-parent", "--format=%s", `${start}..master`).split(/\r?\n/), [`Merge fix for discrepancy ${second}`, `Merge fix for discrepancy ${first}`]);
+  equal(git("rev-parse", `${outcome.clusters[0]!.mergeCommit}^1`), start);
+  equal(git("rev-parse", `${outcome.clusters[0]!.mergeCommit}^2`), git("rev-parse", `workflow/${threadId}/fix/${first}`));
+  equal(git("rev-parse", `${after}^2`), git("rev-parse", `workflow/${threadId}/fix/${second}`));
+  equal(git("log", "-1", "--format=%(trailers:only,unfold)", after), `Workflow-Thread: ${threadId}\nMerged-Fix: ${threadId}/${second}`);
+  // The checked-out working tree holds both fixes, with nothing left uncommitted, and the merge worktree is gone.
+  deepStrictEqual([readFileSync(join(run.sourceRepository, "Chummer", "frmCreate.cs"), "utf8"), readFileSync(join(run.sourceRepository, "Chummer", "untracked.cs"), "utf8")], [repairedSource, "fixed"]);
+  equal(git("status", "--porcelain=v1"), "");
+  equal(existsSync(join(run.root, "threads", threadId, "merge")), false);
+  ok(!git("worktree", "list", "--porcelain").includes(join(run.root, "threads", threadId, "merge").replace(/\\/g, "/")));
+  ok(run.lines.includes(`Merge: master ${start} -> ${after}; 2 of 2 fixes merged, kept on workflow/${threadId}/integration`));
+  equal(outcome.outcome, "verified_for_scope");
+});
+
+test("a fix that does not rebase onto the moved branch is not merged, nor the fix promoted after it", async () => {
+  let moved = "";
+  const run = harness({
+    spots: twoClusters,
+    extra: {
+      beforeMerge: (root) => {
+        writeFileSync(join(root, "Chummer", "frmCreate.cs"), "class frmCreate { int elsewhere; }");
+        gitIn(root)("commit", "-q", "-am", "frmCreate changed on master");
+        moved = gitIn(root)("rev-parse", "master");
+      },
+    },
+  });
+  equal(await run.start(), 1);
+  const threadId = run.threadId();
+  const git = gitIn(run.sourceRepository);
+  equal(git("rev-parse", "master"), moved);
+  equal(git("status", "--porcelain=v1"), "");
+  const state = await run.state(threadId);
+  const outcome = outcomeOf(run.root, threadId);
+  deepStrictEqual(outcome.clusters.map((item) => [item.disposition, item.stage, item.commit, item.mergeCommit]),
+    [["merge_failed", "merge", state.widenings[first]!.commit, null], ["merge_failed", "merge", state.widenings[second]!.commit, null]]);
+  equal(outcome.clusters[0]!.reason, "the rebase onto master conflicts in Chummer/frmCreate.cs");
+  ok(outcome.clusters[1]!.reason!.startsWith(`${first} did not merge`));
+  deepStrictEqual(outcome.merge?.fixes.map((fix) => [fix.status, fix.files]), [["conflict", ["Chummer/frmCreate.cs"]], ["blocked", []]]);
+  deepStrictEqual([outcome.merge?.before, outcome.merge?.after, outcome.merge?.integrationBranch], [moved, moved, null]);
+  deepStrictEqual([outcome.outcome, outcome.measures.fixed], ["findings_remaining", 0]);
+  ok(run.lines.includes(`Loop ${first}: merge_failed after 1 attempt; merge: the rebase onto master conflicts in Chummer/frmCreate.cs; ${state.widenings[first]!.commit}`));
+  ok(run.lines.includes(`Merge: master ${moved} -> ${moved}; 0 of 2 fixes merged`));
+});
+
+test("a branch that moves while the fixes are merged is a setup error naming the integration branch, and the resumed thread merges onto its new tip", async () => {
+  const checkpointer = new MemorySaver();
+  const store = new InMemoryStore();
+  let moved = "";
+  const root = committedRepository();
+  const run = harness({
+    spots: twoClusters,
+    git: (git) => (args, options) => {
+      const output = git(args, options);
+      if (moved === "" && args[0] === "update-ref" && args.some((arg) => arg.endsWith("/integration"))) {
+        writeFileSync(join(root, "README.md"), "moved meanwhile");
+        gitIn(root)("commit", "-q", "-am", "master moved meanwhile");
+        moved = gitIn(root)("rev-parse", "master");
+      }
+      return output;
+    },
+    extra: { checkpointer, store, repository: root },
+  });
+  equal(await run.start(), 3);
+  const threadId = run.threadId();
+  ok(run.lines.some((line) => line.startsWith("Setup error: master moved to ") && line.includes(`workflow/${threadId}/integration`)), run.lines.join("\n"));
+  equal(gitIn(root)("rev-parse", "master"), moved);
+  deepStrictEqual(trailersOn(root, "Merged-Fix"), []);
+
+  const resumed = harness({ spots: twoClusters, extra: { checkpointer, store, root: run.root, repository: root } });
+  equal(await resumed.resume(threadId), 1);
+  deepStrictEqual(resumed.agents.calls, []);
+  const outcome = outcomeOf(run.root, threadId);
+  deepStrictEqual(outcome.clusters.map((item) => item.disposition), ["fixed", "fixed"]);
+  deepStrictEqual([outcome.merge?.before, outcome.merge?.after], [moved, gitIn(root)("rev-parse", "master")]);
+  deepStrictEqual(trailersOn(root, "Merged-Fix"), [`${threadId}/${second}`, `${threadId}/${first}`]);
+  equal(gitIn(root)("rev-parse", `${outcome.clusters[0]!.mergeCommit}^1`), moved);
+  equal(readFileSync(join(root, "README.md"), "utf8"), "moved meanwhile");
+});
+
+test("a fast-forward refused for a local edit of a merged file is a setup error, and once the edit is committed the resumed thread merges each fix once", async () => {
+  const checkpointer = new MemorySaver();
+  const store = new InMemoryStore();
+  const lines = (middle: string, last: string) => `class frmCreate {\n  int ${middle};\n}\n// one\n// two\n// ${last}\n`;
+  const root = committedRepository((folder) => writeFileSync(join(folder, "Chummer", "frmCreate.cs"), lines("moved", "local")));
+  const git = gitIn(root);
+  const start = git("rev-parse", "master");
+  const run = harness({
+    repair: patchedReply({ "Chummer/frmCreate.cs": lines("restored", "local") }),
+    extra: { checkpointer, store, repository: root, beforeMerge: (folder) => writeFileSync(join(folder, "Chummer", "frmCreate.cs"), lines("moved", "local edit")) },
+  });
+  equal(await run.start(), 3);
+  const threadId = run.threadId();
+  ok(run.lines.some((line) => line.startsWith("Setup error: master could not be advanced to the merges kept on ") && line.includes(`workflow/${threadId}/integration`)), run.lines.join("\n"));
+  equal(git("rev-parse", "master"), start);
+  equal(git("diff", "--name-only"), "Chummer/frmCreate.cs");
+  equal(git("log", "-1", "--format=%(trailers:key=Merged-Fix,valueonly)", `workflow/${threadId}/integration`), `${threadId}/${first}`);
+
+  git("commit", "-q", "-am", "local edit");
+  const edited = git("rev-parse", "master");
+  const resumed = harness({ extra: { checkpointer, store, root: run.root, repository: root } });
+  equal(await resumed.resume(threadId), 1);
+  const outcome = outcomeOf(run.root, threadId);
+  deepStrictEqual([outcome.clusters[0]!.disposition, outcome.merge?.before, outcome.merge?.after], ["fixed", edited, git("rev-parse", "master")]);
+  deepStrictEqual(trailersOn(root, "Merged-Fix"), [`${threadId}/${first}`]);
+  equal(readFileSync(join(root, "Chummer", "frmCreate.cs"), "utf8"), lines("restored", "local edit"));
+  equal(git("status", "--porcelain=v1"), "");
+});
+
+test("a branch no worktree has checked out when the thread concludes is advanced by a ref update, and the checkout stays as it is", async () => {
+  const run = harness({ extra: { beforeMerge: (root) => gitIn(root)("checkout", "-q", "-b", "elsewhere") } });
+  const git = gitIn(run.sourceRepository);
+  const start = git("rev-parse", "master");
+  equal(await run.start(), 1);
+  const outcome = outcomeOf(run.root, run.threadId());
+  equal(outcome.clusters[0]!.disposition, "fixed");
+  deepStrictEqual([git("rev-parse", "master"), git("rev-parse", "master^1")], [outcome.clusters[0]!.mergeCommit, start]);
+  deepStrictEqual([git("symbolic-ref", "--short", "HEAD"), git("rev-parse", "HEAD")], ["elsewhere", start]);
+  equal(readFileSync(join(run.sourceRepository, "Chummer", "frmCreate.cs"), "utf8"), "class frmCreate { int moved; }");
+  equal(git("show", "master:Chummer/frmCreate.cs"), repairedSource);
+  equal(git("status", "--porcelain=v1"), "");
+});
+
+test("a thread that repairs and widens refuses a detached HEAD before the build and stores nothing; one without widening records it", async () => {
+  const checkpointer = new MemorySaver();
+  const run = harness({ extra: { checkpointer } });
+  const git = gitIn(run.sourceRepository);
+  git("checkout", "-q", "--detach");
+  const head = git("rev-parse", "HEAD");
+  equal(await run.start(), 3);
+  ok(run.lines.some((line) => line.startsWith(`Setup error: HEAD is detached at ${head}, `)), run.lines.join("\n"));
+  ok(!run.lines.some((line) => line.startsWith("Thread ") || line.startsWith("Resume it")));
+  deepStrictEqual(Object.keys(checkpointer.storage), []);
+  deepStrictEqual(run.agents.calls, []);
+
+  equal(await run.start({ noWidening: true }), 1);
+  const state = await run.state(run.threadId());
+  deepStrictEqual(state.base, { branch: null, commit: head });
+  equal(outcomeOf(run.root, run.threadId()).merge, null);
 });

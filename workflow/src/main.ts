@@ -29,6 +29,7 @@ import { interruptSignal } from "./host/interrupt-signal.js";
 import { createScratchFolder } from "./host/scratch-folder.js";
 import { SetupError } from "./host/setup-error.js";
 import { processBranchGit } from "./git/branch-git.js";
+import { headBranch, integrate } from "./git/integration.js";
 import { Worktrees } from "./git/worktrees.js";
 import { LoopService } from "./loop/loop-service.js";
 import { parseArguments, usage } from "./options/arguments.js";
@@ -121,13 +122,15 @@ async function main(): Promise<number> {
       repositoryRoot, paths, folders, registry: registryPaths(repositoryRoot), git: processGit(repositoryRoot), host: hostDiscovery(paths, host, steps, createScratchFolder),
       agents, quota, createScratchFolder, checkpointer: discoveryCheckpointer, store, now, log,
     }), log);
-    const graph = buildWorkflowGraph(steps, diagnosis, repair, widening, new LoopService({ threadFolder: paths.threadFolder, now }), discovery).compile({ checkpointer, store });
+    const loop = new LoopService({ threadFolder: paths.threadFolder, integrate: (request) => integrate(branchGit, worktrees, request), now });
+    const graph = buildWorkflowGraph(steps, diagnosis, repair, widening, loop, discovery).compile({ checkpointer, store });
     return await runWorkflow(command, {
       graph,
       resolveOptions: (start, threadId) => startOptions(start.arguments, profile, process.env, repositoryRoot, paths.threadFolder(threadId)),
       planCases: (options) => planCases(options.caseFile, options.cases, options.captures),
       readCase: readCaseDetails,
       certificateProblems: unattendedProblems,
+      head: () => headBranch(branchGit),
       log,
       now,
       signal: interruptSignal(log),
