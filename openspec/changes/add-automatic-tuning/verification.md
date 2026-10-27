@@ -45,6 +45,8 @@ None needed for this task: no model job runs.
 | `node --import tsx --test workflow/tests/tuning-graph.test.ts workflow/tests/tuning-auto.test.ts workflow/tests/tuning-cycle.test.ts` | 30 tests, passed. |
 | `npm run workflow:test`, output kept (first run, before the review fixes) | 526 tests, all passed (0 failed, 0 cancelled, 0 skipped). |
 | `npm run workflow:test`, output kept (after the review fixes) | 529 tests, all passed (0 failed, 0 cancelled, 0 skipped). |
+| `npm run workflow:test`, output kept (after the second review round, first run) | 534 tests, 533 passed, **1 failed**: `a run whose samples are all written but whose summary is not is finished when its tuning continues` (the new test): `Expected values to be strictly equal: true !== false` at `tuning-graph.test.ts:330`. The test copied one of the two development samples, so the run still had one sample to run and a tuned job ran on the development cluster. The test was corrected to copy both samples. |
+| `npm run workflow:test`, output kept (after the second review round, second run) | 534 tests, all passed (0 failed, 0 cancelled, 0 skipped). |
 | `npm run eval -- tune auto` on this checkout's empty store | Printed `Automatic tuning: 0 of 12 new hypothesis records; not due.`, exit status 0. |
 | `npm run openspec:validate` | Passed: 23 passed, 0 failed. |
 | SHA-256 of `bin/ChummerGenSR4.exe` | `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`, unchanged; no run launched it. |
@@ -53,11 +55,15 @@ None needed for this task: no model job runs.
 
 `workflow/tests/tuning-graph.test.ts` runs `tune auto` over the records of two diagnosed fixture threads, with fake eval runs and tune jobs, and tuning and certificates folders outside the repository. It proves:
 
-- activated: a due tuning records itself, freezes `auto-hypothesis` v1 (seed `auto`, 50 % test, reason `automatic tuning after <n> new hypothesis records`, one cluster in each partition), runs a cycle with the first metric, `minPass` and `candidates` of the profile, activates the candidate, ends with status 0, moves to `tunings` with outcome `activated` and leaves its thread finished; the next `tune auto` is not due, and a forced one freezes v2;
+- activated: a due tuning records itself, freezes `auto-hypothesis` v1 (seed `auto`, 50 % test, reason `automatic tuning <tuning ID> after <n> new hypothesis records`, one cluster in each partition), runs a cycle with the first metric, `minPass` and `candidates` of the profile, activates the candidate, ends with status 0, moves to `tunings` with outcome `activated` and leaves its thread finished; the next `tune auto` is not due, and a forced one freezes v2;
 - no improvement (status 0, nothing activated, no exposure), rejected (status 1, the ledger keeps the exposure) and a failed tune job (status 2);
 - stopped while its candidate's development run runs: the thread waits at `propose` in its SQLite checkpoints, and a new `tune auto` with a fresh checkpointer continues it without a tune job, without the baseline's development samples, without another dataset version and without counting a record added meanwhile;
 - killed during its holdout run: the thread waits at `holdout`; the resumed run makes no tune job and no development sample, resumes the holdout run under its ID and adds only the test baseline run;
-- a freeze stopped after it put its version in place continues on that version; a second `tune auto` while one runs a tuning is a setup error; `tune cycle --resume` refuses an automatic tuning's cycle;
+- a freeze stopped after it put its version in place continues on that version, while a version at the recorded folder that another command froze (its reason does not name the tuning) is not run on: the tuning freezes the next version;
+- a tuning continued after the profile's `autoTuning` changed keeps the settings it recorded when it started (dataset name, `minPass`, `candidates`, `every`);
+- a `tune auto` after a killed one removes the run and state lock files whose owner (host and process ID) is a process of this machine that no longer runs and continues the tuning; the lock of a running process stays and is a setup error naming it;
+- a run whose samples are all written but whose summary is not is resumed, which writes the summary, without running a sample again;
+- a second `tune auto` while one runs a tuning is a setup error; `tune cycle --resume` refuses an automatic tuning's cycle;
 - `tune cycle` runs as a thread under its cycle ID that neither counts nor freezes, and the cycle tests of `tuning-cycle.test.ts` pass on the graph unchanged;
 - the graph compiles from steps that refuse to run, with the nodes `count`, `freeze`, `baseline`, `propose`, `holdout`, `test_baseline`, `activate` and `conclude`;
 - a due tuning whose tuning or certificates folder lies inside the repository is a setup error that counts nothing: `tune auto` runs its cycle on the folders in place, outside the repository only.
