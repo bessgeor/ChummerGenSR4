@@ -37,6 +37,8 @@ export type RunDependencies = {
   readonly head: () => HeadBranch;
   /** What a thread ID is already used by besides the checkpoint database (folders, branches), whatever the case; empty when it is free. */
   readonly threadTraces: (threadId: string) => readonly string[];
+  /** The checkpointed thread whose ID equals the given one without regard to case, if any; it reads no checkpoint history. */
+  readonly checkpointedThread: (threadId: string) => Promise<string | null> | string | null;
   /** Aborts when the operator interrupts the run (Ctrl+C): running children are stopped and the thread stays resumable. */
   readonly signal?: AbortSignal;
 };
@@ -113,7 +115,7 @@ async function startThreadId(request: RunRequest, dependencies: RunDependencies)
   const threadId = request.threadId;
   const unusable = unusableThreadId(threadId);
   if (unusable !== null) throw new SetupError(`'${threadId}' is not a thread ID: ${unusable}.`);
-  const existing = await checkpointedThread(threadId, dependencies);
+  const existing = await dependencies.checkpointedThread(threadId);
   if (existing !== null) {
     throw new SetupError(`Thread ${existing} exists already${existing === threadId ? "" : ` (the ID is compared without regard to case)`}; `
       + `a start needs a new thread ID (resume it with: npm start -- --resume ${existing}).`);
@@ -121,17 +123,6 @@ async function startThreadId(request: RunRequest, dependencies: RunDependencies)
   const traces = dependencies.threadTraces(threadId);
   if (traces.length > 0) throw new SetupError(`The thread ID ${threadId} is in use already: ${traces.join("; ")}. A start needs a new thread ID.`);
   return threadId;
-}
-
-/** The checkpointed thread whose ID equals `threadId` without regard to case, if any. */
-async function checkpointedThread(threadId: string, dependencies: RunDependencies): Promise<string | null> {
-  const checkpointer = checkpointerOf(dependencies.graph);
-  if (await checkpointer.getTuple({ configurable: { thread_id: threadId, checkpoint_ns: "" } }) !== undefined) return threadId;
-  for await (const tuple of checkpointer.list({})) {
-    const other = tuple.config.configurable?.["thread_id"];
-    if (typeof other === "string" && other.toLowerCase() === threadId.toLowerCase()) return other;
-  }
-  return null;
 }
 
 function checkpointerOf(graph: WorkflowGraph) {

@@ -28,6 +28,7 @@ import { processBranchGit } from "./git/branch-git.js";
 import { headBranch, integrate } from "./git/integration.js";
 import { Worktrees } from "./git/worktrees.js";
 import { threadTraces } from "./thread-traces.js";
+import { sqliteCheckpointedThread } from "./graph/checkpointed-thread.js";
 import { LoopService } from "./loop/loop-service.js";
 import type { Command } from "./options/arguments.js";
 import { localDataFolder, type Profile } from "./options/profile.js";
@@ -126,6 +127,7 @@ export function composeWorkflow(repositoryRoot: string, profile: Profile, log: (
       threadTraces: (threadId) => threadTraces({
         threadFolder: paths.threadFolder, discoveryThreadFolder: (id) => folders.thread(id).root, git: branchGit,
       }, threadId),
+      checkpointedThread: (threadId) => sqliteCheckpointedThread(checkpointer, threadId),
       log,
       now,
       ...(signal === undefined ? {} : { signal }),

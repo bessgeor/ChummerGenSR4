@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { InMemoryStore, MemorySaver, type StateSnapshot } from "@langchain/langgraph";
 import { resolveAgentSettings } from "../src/agents/agent-settings.js";
 import type { PlannedCase } from "../src/cases/case-plan.js";
+import { memoryCheckpointedThread } from "./memory-checkpointed-thread.js";
 import { buildFlatGraph } from "./flat-graph.js";
 import { buildLegacyCaseGraph } from "./legacy-case-graph.js";
 import { buildWorkflowGraph, discovers, nodeMode, stageIds, type DiagnosisSteps, type InventoryInput, type LoopSteps, type RepairSteps, type WideningSteps, type WorkflowSteps } from "../src/graph/workflow-graph.js";
@@ -214,6 +215,7 @@ function harness(cases: string[], steps = new FakeSteps(), checkpointer = new Me
     certificateProblems: () => [],
     head: () => ({ branch: "main", commit: "c0ffee" }),
     threadTraces: () => [],
+    checkpointedThread: (threadId) => memoryCheckpointedThread(checkpointer, threadId),
     readCase: (runFolder, compared) => {
       readCalls.push([runFolder, compared]);
       return fakeDetails(runFolder, compared);
