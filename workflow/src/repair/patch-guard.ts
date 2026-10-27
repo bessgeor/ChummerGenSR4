@@ -9,7 +9,7 @@ export const maximumChangedLines = 300;
 /** Every rule a patch breaks, given the files the repair job said it changed; empty when it may be built. */
 export function guardPatch(patch: Patch, declared: readonly string[]): string[] {
   const violations: string[] = [];
-  if (patch.files.length === 0) violations.push("the patch is empty: no file of the source copy differs from the snapshot");
+  if (patch.files.length === 0) violations.push("the patch is empty: the attempt changed no file that git does not ignore");
   const changed = patch.files.map((file) => file.path);
   const undeclared = changed.filter((path) => !declared.includes(path));
   const unchanged = declared.filter((path) => !changed.includes(path));
@@ -20,6 +20,7 @@ export function guardPatch(patch: Patch, declared: readonly string[]): string[] 
     if (!isCompiledPath(file.path)) violations.push(`${file.path} is outside ${compiledFoldersText}`);
     if (file.change === "deleted") violations.push(`${file.path} is deleted`);
     if (file.binary) violations.push(`${file.path} holds a NUL byte`);
+    if (file.change === "modified" && file.before === file.after) violations.push(`${file.path} changes only its mode, not its content`);
   }
   if (patch.files.length > maximumFiles) violations.push(`${patch.files.length} files changed, more than ${maximumFiles}`);
   const lines = patch.added + patch.removed;

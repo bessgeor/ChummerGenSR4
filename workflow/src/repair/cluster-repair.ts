@@ -22,6 +22,9 @@ export type AttemptSummary = {
   readonly stage: RepairStage | null;
   readonly reason: string | null;
   readonly check: CheckExecution | null;
+  /** The attempt's branch and commit; absent in a thread stored before attempts had them. */
+  readonly branch?: string;
+  readonly commit?: string | null;
 };
 
 export type RepairStatus =

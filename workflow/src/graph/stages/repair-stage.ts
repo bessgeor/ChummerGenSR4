@@ -23,7 +23,7 @@ function repairInput(state: ClusterTask, config: LangGraphRunnableConfig): Repai
  */
 export function buildRepairStage(repair: RepairSteps) {
   return new StateGraph(WorkflowState)
-    .addNode("prepare_repair", (state: WorkflowStateValue) => ({ repairs: repair.prepare(state.clusters, state.diagnosisCheck) }))
+    .addNode("prepare_repair", (state: WorkflowStateValue) => ({ repairs: repair.prepare(state.threadId, state.clusters, state.diagnosisCheck) }))
     .addNode("route_repair", () => ({}))
     .addNode("repair", async (state: ClusterTask, config: LangGraphRunnableConfig) => {
       const step = await repair.repair(repairInput(state, config), requireStore(config));

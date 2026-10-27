@@ -67,8 +67,8 @@ export interface DiagnosisSteps {
 
 /** The repair work behind the graph's repair nodes. */
 export interface RepairSteps {
-  /** A pending repair for each cluster the check confirmed. */
-  prepare(clusters: Readonly<Record<string, ClusterDiagnosis>>, check: CheckResult | null): Record<string, ClusterRepair>;
+  /** A pending repair for each cluster the check confirmed, after the thread's source commit is made. */
+  prepare(threadId: string, clusters: Readonly<Record<string, ClusterDiagnosis>>, check: CheckResult | null): Record<string, ClusterRepair>;
   repair(input: RepairInput, store: BaseStore): Promise<RepairStep>;
   waitForQuota(marks: readonly QuotaWaitMark[], signal?: AbortSignal): Promise<void>;
   /** Writes the thread's `repair.json` and returns its path. */

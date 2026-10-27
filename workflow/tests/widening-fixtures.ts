@@ -1,10 +1,8 @@
-import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { crc32, deflateSync } from "node:zlib";
 import type { AttemptBuild, AttemptBuildRequest } from "../src/repair/attempt-host.js";
-import type { PatchFile } from "../src/repair/patch.js";
 import type { LevelCapture, LevelCaptureRequest } from "../src/widening/level-capture.js";
 
 const examples = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "contracts", "examples");
@@ -70,27 +68,6 @@ export class FakeWideningHost {
   labels(): string[] {
     return this.captures.map((item) => item.request.label);
   }
-}
-
-export function sha256Of(text: string): string {
-  return createHash("sha256").update(text).digest("hex");
-}
-
-/** A repair archive folder with the after side of each edit under `files/after/`, and the patch's files. */
-export function archiveWithPatch(folder: string, edits: Readonly<Record<string, { readonly before: string | null; readonly after: string }>>): { archive: string; files: PatchFile[] } {
-  const files = Object.entries(edits).map(([path, edit]): PatchFile => {
-    mkdirSync(dirname(join(folder, "files", "after", path)), { recursive: true });
-    writeFileSync(join(folder, "files", "after", path), edit.after);
-    if (edit.before !== null) {
-      mkdirSync(dirname(join(folder, "files", "before", path)), { recursive: true });
-      writeFileSync(join(folder, "files", "before", path), edit.before);
-    }
-    return {
-      path, change: edit.before === null ? "added" : "modified", before: edit.before === null ? null : sha256Of(edit.before), after: sha256Of(edit.after),
-      added: 1, removed: edit.before === null ? 0 : 1, binary: false,
-    };
-  });
-  return { archive: folder, files };
 }
 
 function chunk(type: string, body: Buffer): Buffer {

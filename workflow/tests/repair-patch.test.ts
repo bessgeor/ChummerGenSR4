@@ -1,10 +1,13 @@
 import { deepStrictEqual, equal, ok } from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { parsePatch } from "../src/evals/benchmark.js";
+import { processBranchGit } from "../src/git/branch-git.js";
+import { Worktrees } from "../src/git/worktrees.js";
 import { createScratchFolder } from "../src/host/scratch-folder.js";
-import { computePatch, type Patch, type PatchFile } from "../src/repair/patch.js";
+import { commitPatch, type Patch, type PatchFile } from "../src/repair/patch.js";
 import { guardPatch, maximumChangedLines } from "../src/repair/patch-guard.js";
 import { maximumPatchCharacters, repairPrompt } from "../src/repair/repair-prompt.js";
 import { repairPromptVersion, validateRepair, type RepairOutput } from "../src/repair/repair-schemas.js";
@@ -13,56 +16,70 @@ import { hypothesisAnswer } from "./diagnosis-harness.js";
 import { scratch, write } from "./diagnosis-fixtures.js";
 import type { ContextManifest } from "../src/diagnosis/context.js";
 
-/** A snapshot folder like the thread's: source, data and translations, no history. */
-function snapshot(): string {
-  const root = scratch("workflow-repair-snapshot-");
+/** A repository whose commit holds source, data and translations like a thread's source commit, with its git and worktrees. */
+function sourceRepository() {
+  const root = scratch("workflow-repair-repository-");
+  const run = (...args: string[]) => execFileSync("git", ["-C", root, ...args], { stdio: "ignore" });
+  run("init", "-q");
+  run("config", "user.email", "test@example.com");
+  run("config", "user.name", "Test");
+  // Bytes go through unchanged, whatever the machine's line-ending settings.
+  run("config", "core.autocrlf", "false");
   write(root, "Chummer/frmCreate.cs", "class frmCreate\r\n{\r\n    int x = 628;\r\n}\r\n");
   write(root, "Chummer/frmCareer.cs", "class frmCareer {}\n");
   write(root, "Chummer/old.cs", "class Old {}\n");
   write(root, "bin/data/skills.xml", "<skills/>\n");
-  return root;
+  run("add", "-A");
+  run("commit", "-q", "-m", "source");
+  const git = processBranchGit(root);
+  return { root, git, worktrees: new Worktrees(git, root), source: git(["rev-parse", "HEAD"]).trim() };
 }
 
-function copyOf(folder: string): string {
-  const copy = scratch("workflow-repair-copy-");
-  for (const entry of readdirSync(folder, { recursive: true, withFileTypes: true })) {
-    if (!entry.isFile()) continue;
-    const path = join(entry.parentPath, entry.name).slice(folder.length + 1);
-    write(copy, path, readFileSync(join(folder, path), "utf8"));
-  }
-  return copy;
+/** A worktree of the repository at its source commit on a branch of its own. */
+function worktreeOf(repository: ReturnType<typeof sourceRepository>, branch: string): string {
+  const folder = join(scratch("workflow-repair-worktree-"), "source");
+  repository.worktrees.add(folder, branch, repository.source);
+  return folder;
 }
 
-test("the workspace is a copy of the context and the snapshot in a scratch folder, without history", () => {
-  const base = snapshot();
+test("the workspace is a copy of the context and a worktree on the attempt's branch in a scratch folder", () => {
+  const repository = sourceRepository();
   const context = scratch("workflow-repair-context-");
   write(context, "context.json", "{}");
   write(context, "evidence/1-canonical.png", "png");
   const folder = createScratchFolder("workflow-repair-");
   const workspace = workspaceIn(folder, "d-1");
   ok(!existsSync(workspace.source) && !existsSync(workspace.context));
-  stageWorkspace(workspace, context, base);
+  stageWorkspace(workspace, context, (target) => repository.worktrees.add(target, "workflow/t/repair/d-1/attempt-1", repository.source));
   deepStrictEqual(readdirSync(folder.path).sort(), ["d-1", "source"]);
-  equal(readFileSync(join(workspace.source, "Chummer", "frmCreate.cs"), "utf8"), readFileSync(join(base, "Chummer", "frmCreate.cs"), "utf8"));
+  equal(readFileSync(join(workspace.source, "Chummer", "frmCreate.cs"), "utf8"), readFileSync(join(repository.root, "Chummer", "frmCreate.cs"), "utf8"));
   ok(existsSync(join(workspace.context, "evidence", "1-canonical.png")));
-  ok(!existsSync(join(workspace.source, ".git")));
-  // An edit of one copy leaves the snapshot and every other copy as they were.
-  const other = workspaceIn(createScratchFolder("workflow-repair-"), "d-1");
-  stageWorkspace(other, context, base);
+  ok(!existsSync(join(workspace.context, ".git")));
+  equal(repository.git(["rev-parse", "--abbrev-ref", "HEAD"], { worktree: workspace.source }).trim(), "workflow/t/repair/d-1/attempt-1");
+  // An edit of one worktree leaves the repository and every other worktree as they were.
+  const other = worktreeOf(repository, "workflow/t/repair/d-1/attempt-2");
   writeFileSync(join(workspace.source, "Chummer", "frmCreate.cs"), "edited");
-  ok(readFileSync(join(other.source, "Chummer", "frmCreate.cs"), "utf8").includes("628"));
-  ok(readFileSync(join(base, "Chummer", "frmCreate.cs"), "utf8").includes("628"));
+  ok(readFileSync(join(other, "Chummer", "frmCreate.cs"), "utf8").includes("628"));
+  ok(readFileSync(join(repository.root, "Chummer", "frmCreate.cs"), "utf8").includes("628"));
+  const commit = repository.worktrees.commitAll(workspace.source, "attempt 1");
+  ok(commit !== null);
+  // Removing the worktree keeps its branch and commit.
+  repository.worktrees.remove(workspace.source);
   folder.remove();
+  ok(!existsSync(workspace.source));
+  equal(repository.worktrees.resolve("refs/heads/workflow/t/repair/d-1/attempt-1"), commit);
+  equal(repository.worktrees.list().length, 2);
 });
 
 test("the patch lists added, modified and deleted files with a diff that parses like a benchmark patch", () => {
-  const base = snapshot();
-  const copy = copyOf(base);
+  const repository = sourceRepository();
+  const copy = worktreeOf(repository, "workflow/t/repair/d-1/attempt-1");
   write(copy, "Chummer/frmCreate.cs", "class frmCreate\r\n{\r\n    int x = 640;\r\n}\r\n");
   write(copy, "Chummer/Added.cs", "class Added {}\nclass More {}\n");
   rmSync(join(copy, "Chummer", "old.cs"));
+  const commit = repository.worktrees.commitAll(copy, "attempt 1");
   const layout = scratch("workflow-repair-layout-");
-  const patch = computePatch(base, copy, layout);
+  const patch = commitPatch(repository.worktrees, repository.source, commit, layout);
   deepStrictEqual(patch.files.map((file) => [file.path, file.change, file.added, file.removed, file.binary]), [
     ["Chummer/Added.cs", "added", 2, 0, false],
     ["Chummer/frmCreate.cs", "modified", 1, 1, false],
@@ -83,14 +100,29 @@ test("the patch lists added, modified and deleted files with a diff that parses 
   ok(!existsSync(join(layout, "before", "Chummer", "frmCareer.cs")));
 });
 
-test("an unchanged copy has an empty patch, and a NUL byte marks a file as binary", () => {
-  const base = snapshot();
-  const copy = copyOf(base);
-  deepStrictEqual(computePatch(base, copy, scratch("workflow-repair-layout-")).files, []);
+test("an unchanged worktree makes no commit and an empty patch, ignored files are no change, and a NUL byte marks a file as binary", () => {
+  const repository = sourceRepository();
+  const copy = worktreeOf(repository, "workflow/t/repair/d-1/attempt-1");
+  const none = repository.worktrees.commitAll(copy, "nothing");
+  equal(none, null);
+  deepStrictEqual(commitPatch(repository.worktrees, repository.source, none, scratch("workflow-repair-layout-")).files, []);
+  writeFileSync(join(repository.root, ".git", "info", "exclude"), "*.log\n");
+  write(copy, "Chummer/build.log", "ignored");
+  equal(repository.worktrees.commitAll(copy, "only ignored"), null);
   mkdirSync(join(copy, "Chummer", "res"), { recursive: true });
   writeFileSync(join(copy, "Chummer", "res", "icon.bin"), Buffer.from([1, 0, 2]));
-  const patch = computePatch(base, copy, scratch("workflow-repair-layout-"));
+  const patch = commitPatch(repository.worktrees, repository.source, repository.worktrees.commitAll(copy, "binary"), scratch("workflow-repair-layout-"));
   deepStrictEqual(patch.files.map((file) => [file.path, file.binary]), [["Chummer/res/icon.bin", true]]);
+});
+
+test("a change of only a file's mode is a patch with no content change that the guard rejects", () => {
+  const repository = sourceRepository();
+  const copy = worktreeOf(repository, "workflow/t/repair/d-1/attempt-1");
+  repository.git(["update-index", "--chmod=+x", "Chummer/frmCareer.cs"], { worktree: copy });
+  const commit = repository.worktrees.commitStaged(copy, "mode only");
+  const patch = commitPatch(repository.worktrees, repository.source, commit, scratch("workflow-repair-layout-"));
+  deepStrictEqual(patch.files.map((item) => [item.path, item.change, item.before === item.after, item.added, item.removed]), [["Chummer/frmCareer.cs", "modified", true, 0, 0]]);
+  deepStrictEqual(guardPatch(patch, ["Chummer/frmCareer.cs"]), ["Chummer/frmCareer.cs changes only its mode, not its content"]);
 });
 
 function file(path: string, overrides: Partial<PatchFile> = {}): PatchFile {
@@ -116,6 +148,7 @@ test("the guard names every rule a patch breaks", () => {
     [patchOf([file("bin/data/skills.xml")]), ["bin/data/skills.xml"], /bin\/data\/skills\.xml is outside Chummer\/ and Core\//],
     [patchOf([file("Chummer/old.cs", { change: "deleted", after: null })]), ["Chummer/old.cs"], /Chummer\/old\.cs is deleted/],
     [patchOf([file("Chummer/icon.bin", { binary: true })]), ["Chummer/icon.bin"], /holds a NUL byte/],
+    [patchOf([file("Chummer/a.cs", { before: "a", after: "a", added: 0, removed: 0 })]), ["Chummer/a.cs"], /Chummer\/a\.cs changes only its mode/],
     [patchOf([file("Chummer/a.cs")], ["Chummer/link"]), ["Chummer/a.cs"], /Chummer\/link is neither a file nor a folder/],
     [patchOf(Array.from({ length: 11 }, (_, index) => file(`Chummer/f${index}.cs`))), Array.from({ length: 11 }, (_, index) => `Chummer/f${index}.cs`), /11 files changed, more than 10/],
     [patchOf([file("Chummer/a.cs", { added: maximumChangedLines, removed: 1 })]), ["Chummer/a.cs"], /301 lines changed \(300 added, 1 removed\), more than 300/],

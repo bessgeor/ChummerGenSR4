@@ -60,6 +60,8 @@ export type AcceptedState = {
   readonly branch: string;
   /** The commit the thread's snapshot was taken on. */
   readonly base: string;
+  /** The thread's source commit, where the first widening starts; absent in a thread stored before widening worked in worktrees. */
+  readonly sourceCommit?: string;
   /** The branch's commit, or null until the first promotion. */
   readonly commit: string | null;
   /** The folder whose `Chummer/` and `Core/` are the accepted source; the build needs both. */

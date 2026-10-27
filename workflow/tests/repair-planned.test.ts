@@ -1,18 +1,24 @@
-import { deepStrictEqual, equal, ok } from "node:assert/strict";
+import { deepStrictEqual, equal, ok, rejects } from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { BaseStore } from "@langchain/langgraph-checkpoint";
+import { GitCommandError, processBranchGit, type BranchGit } from "../src/git/branch-git.js";
+import { Worktrees } from "../src/git/worktrees.js";
 import { QuotaWaiter } from "../src/diagnosis/quota-waiter.js";
 import { EvalRecordSchema, putRecord, recordNamespace } from "../src/evals/eval-record.js";
 import { FixRecordSchema } from "../src/fixes/fix-record.js";
 import { createScratchFolder } from "../src/host/scratch-folder.js";
+import { SetupError } from "../src/host/setup-error.js";
 import type { AttemptDocument } from "../src/repair/attempt-archive.js";
 import type { ClusterRepair } from "../src/repair/cluster-repair.js";
 import { blockerClosure, validatePlan, type PlanOutput, type Subtask } from "../src/repair/plan-schemas.js";
 import { RepairService, type RepairInput } from "../src/repair/repair-service.js";
+import { applyJoin, joinChanges } from "../src/repair/subtask-join.js";
 import { challengeAnswer, diagnosisHarness, FakeAgents, hypothesisAnswer, twoClusters, type JobCall, type Reply } from "./diagnosis-harness.js";
 import { record } from "./eval-fixtures.js";
+import { scratch, write } from "./diagnosis-fixtures.js";
 import { FakeRepairHost, repairedSource } from "./repair-fixtures.js";
 
 const cluster = "d-0000000000000100";
@@ -52,8 +58,18 @@ function edit(call: JobCall, edits: Readonly<Record<string, string>>, files: str
 
 type Replies = { readonly plan: () => Reply; readonly subtask: (id: number, call: JobCall, attempt: number) => Reply };
 
+/** The fixture repository's git and worktrees. */
+function gitOf(repository: string, refuseRemoval = false) {
+  const plain = processBranchGit(repository);
+  const git: BranchGit = refuseRemoval ? (args, options) => {
+    if (args[0] === "worktree" && args[1] === "remove") throw new GitCommandError("git worktree remove failed: a process holds the folder", 128, "", "a process holds the folder");
+    return plain(args, options);
+  } : plain;
+  return { git, worktrees: new Worktrees(git, repository) };
+}
+
 /** A thread whose diagnosis confirmed one cluster, with fix changes, and a repair service over it with fake agents and a fake host. */
-async function planned(replies: Replies, setup: { deadlineMinutes?: number; budgetMinutes?: number; durationMs?: number; pool?: number } = {}) {
+async function planned(replies: Replies, setup: { deadlineMinutes?: number; budgetMinutes?: number; durationMs?: number; pool?: number; refuseWorktreeRemoval?: boolean } = {}) {
   let current = replies;
   const agents = new FakeAgents((call, attempt) => {
     if (call.kind !== "repair") return { answer: call.kind === "hypothesis" ? hypothesisAnswer() : challengeAnswer() };
@@ -67,15 +83,15 @@ async function planned(replies: Replies, setup: { deadlineMinutes?: number; budg
   const lines: string[] = [];
   const service = new RepairService({
     threadFolder: (id) => join(harness.root, "threads", id), agents: () => agents, quota: new QuotaWaiter("process-1", async () => {}, () => {}),
-    build: host.build, narrowCheck: host.narrowCheck, createScratchFolder, now: () => new Date(), log: (line) => lines.push(line),
+    build: host.build, narrowCheck: host.narrowCheck, createScratchFolder, ...gitOf(harness.sourceRepository, setup.refuseWorktreeRemoval === true), now: () => new Date(), log: (line) => lines.push(line),
   });
-  const repairs = service.prepare(state.clusters, state.diagnosisCheck);
+  const repairs = service.prepare(threadId, state.clusters, state.diagnosisCheck);
   const input = (repair: ClusterRepair, spentMs = state.agentMilliseconds): RepairInput => ({
     threadId, options: { ...state.options, fixChanges: true, repair: { deadlineMinutes: setup.deadlineMinutes ?? 60 }, agents: { ...state.options.agents, runBudgetMinutes: setup.budgetMinutes ?? 120 } },
     repair, diagnosis: state.clusters[cluster]!, check: state.diagnosisCheck!, spentMs,
   });
   return {
-    agents, host, service, lines, repairs, input, threadId, store: harness.store as BaseStore, root: harness.root, prefix: `${threadId}/${cluster}/repair`,
+    agents, host, service, lines, repairs, input, threadId, store: harness.store as BaseStore, root: harness.root, prefix: `${threadId}/${cluster}/repair`, repository: harness.sourceRepository,
     replace: (next: Replies) => {
       current = next;
     },
@@ -107,6 +123,21 @@ test("independent subtasks run together, a blocked one starts on their changes, 
   ok(calls[0]!.prompt.includes("Your folders, both read only"));
   for (const call of calls) ok(!existsSync(call.workspace.folder), call.workspace.folder);
   deepStrictEqual(setup.host.builtSources, [repairedSource]);
+  // Each subtask committed on its own branch; subtask 3 started at a commit holding the changes of 1 and 2, and the
+  // attempt commit on the source commit holds all three.
+  const { git } = gitOf(setup.repository);
+  const branch = `workflow/${setup.threadId}/repair/${cluster}/attempt-1`;
+  const source = git(["rev-parse", `workflow/${setup.threadId}/source`]).trim();
+  const changed = (from: string, to: string) => git(["diff", "--name-only", from, to]).trim().split("\n").filter((path) => path.length > 0);
+  for (const id of [1, 2]) equal(git(["rev-parse", `${branch}-task-${id}~1`]).trim(), source);
+  deepStrictEqual(changed(source, `${branch}-task-1`), ["Chummer/a.cs"]);
+  deepStrictEqual(changed(source, `${branch}-task-2`), ["Chummer/b.cs"]);
+  equal(git(["rev-parse", `${branch}-task-3~2`]).trim(), source);
+  deepStrictEqual(changed(source, `${branch}-task-3~1`), ["Chummer/a.cs", "Chummer/b.cs"]);
+  deepStrictEqual(changed(`${branch}-task-3~1`, `${branch}-task-3`), ["Chummer/frmCreate.cs"]);
+  equal(git(["rev-parse", `${branch}~1`]).trim(), source);
+  deepStrictEqual(changed(source, branch), ["Chummer/a.cs", "Chummer/b.cs", "Chummer/frmCreate.cs"]);
+  deepStrictEqual([step.update.attempt!.branch, step.update.attempt!.commit], [branch, git(["rev-parse", branch]).trim()]);
   const attempt = document(step.update.attempt!.folder);
   deepStrictEqual(attempt.patch!.files.map((file) => [file.path, file.change]), [["Chummer/a.cs", "added"], ["Chummer/b.cs", "added"], ["Chummer/frmCreate.cs", "modified"]]);
   deepStrictEqual(attempt.answer, { outcome: "patched", reason: "Three parts.", summary: "Restore the label and its helpers.", files: ["Chummer/a.cs", "Chummer/b.cs", "Chummer/frmCreate.cs"] });
@@ -137,6 +168,87 @@ test("a subtask that changed a file of another it does not wait for rejects the 
   ok(!existsSync(join(step.update.attempt!.folder, "fix")));
 });
 
+test("independent subtasks that add a file and a file inside the same path reject the attempt at stage patch before a build", async () => {
+  const setup = await planned({
+    plan: () => ({ answer: plan([task(1, ["Chummer/New.cs"]), task(2, ["Chummer/New.cs/Nested.cs"])]) }),
+    subtask: (id, call) => edit(call, id === 1 ? { "Chummer/New.cs": "file" } : { "Chummer/New.cs/Nested.cs": "nested" }),
+  });
+  const step = await setup.service.repair(setup.input(setup.repairs[cluster]!), setup.store);
+  deepStrictEqual([step.update.status, step.update.attempt!.stage, step.update.attempt!.reason],
+    ["rejected", "patch", "subtasks 1 and 2 left Chummer/New.cs/Nested.cs and Chummer/New.cs where one is a file and the other lies inside it, which cannot both exist"]);
+  equal(setup.host.builds.length, 0);
+});
+
+test("a join refuses a file where the join has a folder or inside a file, and lets a subtask replace a file by a folder of the same name", () => {
+  const source = new Map([["Chummer/a.cs", "a0"], ["Chummer/dir/x.cs", "x0"]]);
+  const add = (path: string, after: string | null = "n", start: string | null = null) => ({ path, start, after, commit: after === null ? null : "c" });
+  const joined = (...subtasks: { id: number; changes: ReturnType<typeof add>[] }[]) => joinChanges(source, subtasks);
+  // A file added where the source has a folder, and inside a file the source has.
+  deepStrictEqual(joined({ id: 1, changes: [add("Chummer/dir")] }), { conflict: { path: "Chummer/dir", first: 1, second: 1, other: "Chummer/dir/x.cs" } });
+  deepStrictEqual(joined({ id: 1, changes: [add("Chummer/a.cs/b.cs")] }), { conflict: { path: "Chummer/a.cs/b.cs", first: 1, second: 1, other: "Chummer/a.cs" } });
+  // Between two subtasks, in either order of their IDs.
+  deepStrictEqual(joined({ id: 1, changes: [add("Chummer/New.cs/Nested.cs")] }, { id: 2, changes: [add("Chummer/New.cs")] }),
+    { conflict: { path: "Chummer/New.cs", first: 1, second: 2, other: "Chummer/New.cs/Nested.cs" } });
+  deepStrictEqual(joined({ id: 1, changes: [add("Chummer/New.cs")] }, { id: 2, changes: [add("Chummer/New.cs/Nested.cs")] }),
+    { conflict: { path: "Chummer/New.cs/Nested.cs", first: 1, second: 2, other: "Chummer/New.cs" } });
+  // Replacing a file by a folder, or a folder's only file by a file, is a valid state of one subtask.
+  const replaced = joined({ id: 1, changes: [add("Chummer/a.cs/b.cs"), add("Chummer/a.cs", null, "a0")] }, { id: 2, changes: [add("Chummer/dir/x.cs", null, "x0"), add("Chummer/dir")] });
+  ok("joined" in replaced);
+  deepStrictEqual([...replaced.joined.keys()].sort(), ["Chummer/a.cs", "Chummer/a.cs/b.cs", "Chummer/dir", "Chummer/dir/x.cs"]);
+});
+
+test("a join is written into a worktree with a folder replaced by a file and a file by a folder", () => {
+  const root = scratch("workflow-join-");
+  const run = (...args: string[]) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trim();
+  run("init", "-q", "-b", "main");
+  run("config", "user.email", "test@example.com");
+  run("config", "user.name", "Test");
+  run("config", "core.autocrlf", "false");
+  write(root, "Chummer/dir/x.cs", "x\n");
+  write(root, "Chummer/file.cs", "file\n");
+  run("add", "-A");
+  run("commit", "-q", "-m", "initial");
+  const { worktrees } = gitOf(root);
+  const start = run("rev-parse", "HEAD");
+  const changed = join(scratch(), "changed");
+  worktrees.addDetached(changed, start);
+  rmSync(join(changed, "Chummer", "dir"), { recursive: true });
+  rmSync(join(changed, "Chummer", "file.cs"));
+  write(changed, "Chummer/dir", "now a file\n");
+  write(changed, "Chummer/file.cs/inner.cs", "inner\n");
+  const commit = worktrees.commitAll(changed, "Replace\n")!;
+  worktrees.remove(changed);
+  const blobs = new Map([["Chummer/dir/x.cs", run("rev-parse", `${start}:Chummer/dir/x.cs`)], ["Chummer/file.cs", run("rev-parse", `${start}:Chummer/file.cs`)]]);
+  const changes = worktrees.changes(start, commit).filter((change) => !change.special)
+    .map((change) => ({ path: change.path, start: change.before, after: change.after, commit: change.after === null ? null : commit }));
+  const joined = joinChanges(blobs, [{ id: 1, changes }]);
+  ok("joined" in joined);
+  const target = join(scratch(), "target");
+  worktrees.addDetached(target, start);
+  applyJoin(worktrees, joined.joined, target);
+  equal(readFileSync(join(target, "Chummer", "dir"), "utf8").replace(/\r\n/g, "\n"), "now a file\n");
+  equal(readFileSync(join(target, "Chummer", "file.cs", "inner.cs"), "utf8").replace(/\r\n/g, "\n"), "inner\n");
+  const joinedCommit = worktrees.commitAll(target, "Joined\n")!;
+  equal(run("rev-parse", `${joinedCommit}^{tree}`), run("rev-parse", `${commit}^{tree}`));
+});
+
+test("a subtask that also changed a link or a submodule it did not report is rejected at stage patch, not joined without it", async () => {
+  const setup = await planned({
+    plan: () => ({ answer: plan([task(1, ["Chummer/a.cs"])]) }),
+    subtask: (_id, call) => {
+      const reply = edit(call, { "Chummer/a.cs": "a" });
+      // A submodule entry beside the ordinary file: the folder is empty, as an uninitialised submodule's is.
+      mkdirSync(join(call.workspace.folder, "Chummer", "sub"));
+      execFileSync("git", ["-C", call.workspace.folder, "update-index", "--add", "--cacheinfo", `160000,${"1".repeat(40)},Chummer/sub`]);
+      return reply;
+    },
+  });
+  const step = await setup.service.repair(setup.input(setup.repairs[cluster]!), setup.store);
+  deepStrictEqual([step.update.status, step.update.attempt!.stage, step.update.attempt!.reason],
+    ["rejected", "patch", "subtask 1: Chummer/sub is neither a file nor a folder"]);
+  equal(setup.host.builds.length, 0);
+});
+
 test("a subtask whose changes differ from its answer, that declines or that fails ends the attempt, and no later wave starts", async () => {
   const unlisted = await planned({
     plan: () => ({ answer: plan([task(1, ["Chummer/a.cs"]), task(2, ["Chummer/frmCreate.cs"], [1])]) }),
@@ -161,6 +273,23 @@ test("a subtask whose changes differ from its answer, that declines or that fail
   equal(third.update.attempt!.stage, "model");
   ok(third.update.attempt!.reason!.startsWith("invalid_output: subtask 1:"), third.update.attempt!.reason!);
   equal(third.update.attempt!.attempt, 3);
+});
+
+test("a subtask that commits in its worktree itself ends the run as infra, and nothing is joined or built", async () => {
+  const setup = await planned({
+    plan: () => ({ answer: plan([task(1, ["Chummer/a.cs"])]) }),
+    subtask: (_id, call) => {
+      const reply = edit(call, { "Chummer/a.cs": "a" });
+      execFileSync("git", ["-C", call.workspace.folder, "add", "--all"]);
+      execFileSync("git", ["-C", call.workspace.folder, "commit", "-q", "-m", "by the job"]);
+      return reply;
+    },
+  });
+  await rejects(setup.service.repair(setup.input(setup.repairs[cluster]!), setup.store),
+    (error: Error) => error instanceof SetupError && /the worktree is on workflow\/.+\/attempt-1-task-1 at [0-9a-f]{40}, not on/.test(error.message));
+  equal(setup.host.builds.length, 0);
+  const git = processBranchGit(setup.repository);
+  equal(git(["rev-parse", `workflow/${setup.threadId}/repair/${cluster}/attempt-1`]).trim(), git(["rev-parse", `workflow/${setup.threadId}/source`]).trim());
 });
 
 test("a plan that declines or breaks the rules rejects the attempt at stage model without a subtask", async () => {
@@ -253,4 +382,15 @@ test("a deadline that passed after the plan rejects the attempt at stage deadlin
   const step = await setup.service.repair(setup.input(setup.repairs[cluster]!), setup.store);
   deepStrictEqual([step.update.status, step.update.attempt!.stage, step.update.attempt!.reason], ["rejected", "deadline", "the deadline passed before subtask 1 could start"]);
   equal(repairCalls(setup.agents).length, 1);
+});
+
+test("a subtask's worktree git cannot remove and that stays registered ends the run", async () => {
+  const setup = await planned({
+    plan: () => ({ answer: plan([task(1, ["Chummer/frmCreate.cs"])]) }),
+    subtask: (_, call) => {
+      execFileSync("git", ["-C", call.workspace.folder, "worktree", "lock", call.workspace.folder]);
+      return edit(call, { "Chummer/frmCreate.cs": repairedSource });
+    },
+  }, { refuseWorktreeRemoval: true });
+  await rejects(setup.service.repair(setup.input(setup.repairs[cluster]!), setup.store), (error: Error) => error instanceof GitCommandError && /a process holds the folder/.test(error.message));
 });

@@ -19,6 +19,10 @@ export type AttemptDocument = {
   readonly attempt: number;
   readonly recordId: string;
   readonly contextHash: string;
+  /** The attempt's branch, `workflow/<thread>/repair/<cluster>/attempt-<n>`. */
+  readonly branch: string;
+  /** The attempt commit on that branch, or null when the jobs changed nothing. */
+  readonly commit: string | null;
   readonly snapshotIdentity: string;
   readonly hypothesisRecord: string;
   readonly agent: { readonly provider: Provider; readonly model: string | null; readonly effort: Effort };

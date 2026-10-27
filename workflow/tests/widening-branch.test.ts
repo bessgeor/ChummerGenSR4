@@ -1,196 +1,295 @@
 import { deepStrictEqual, equal, notEqual, ok, throws } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { createSourceSnapshot, processGit } from "../src/diagnosis/source-snapshot.js";
+import { processBranchGit } from "../src/git/branch-git.js";
+import { threadBranches, threadSource } from "../src/git/thread-source.js";
+import { Worktrees } from "../src/git/worktrees.js";
 import { SetupError } from "../src/host/setup-error.js";
-import { AcceptedBranch, processBranchGit, promote } from "../src/widening/accepted-branch.js";
-import { prepareWidenedSource } from "../src/widening/widened-source.js";
+import { AcceptedBranch, promote, type Promotion } from "../src/widening/accepted-branch.js";
+import { staleFiles } from "../src/widening/widening-service.js";
 import { repository, scratch, write } from "./diagnosis-fixtures.js";
-import { archiveWithPatch } from "./widening-fixtures.js";
 
 const git = (root: string, ...args: string[]) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trim();
 
 /** What a promotion must leave alone: the checked-out commit, the index and the working tree's status. */
+function untouched(root: string) {
+  return { head: git(root, "rev-parse", "HEAD"), index: git(root, "write-tree"), status: git(root, "status", "--porcelain=v1", "--untracked-files=all") };
+}
+
 /** A promotion that is expected to make a commit. */
-function committed(promotion: Parameters<typeof promote>[0]): string {
+function committed(promotion: Promotion): string {
   const commit = promote(promotion);
   if (commit === null) throw new Error("The promotion had nothing to commit.");
   return commit;
 }
 
-function untouched(root: string) {
-  return { head: git(root, "rev-parse", "HEAD"), index: git(root, "write-tree"), status: git(root, "status", "--porcelain=v1", "--untracked-files=all") };
+/** The fixture repository (with uncommitted edits unless `clean`), its snapshot, the thread's source commit and its worktrees. */
+async function thread(threadId: string, clean = false) {
+  const repo = repository();
+  if (clean) {
+    git(repo, "add", "-A");
+    git(repo, "commit", "-q", "-m", "everything");
+  }
+  const snapshot = await createSourceSnapshot(repo, join(scratch(), "source"), processGit(repo));
+  const branchGit = processBranchGit(repo);
+  const worktrees = new Worktrees(branchGit, repo);
+  const before = untouched(repo);
+  const source = threadSource(branchGit, threadId, snapshot.commit, snapshot.folder, join(scratch(), "source.index"));
+  const branch = new AcceptedBranch(branchGit, threadId);
+  /** A widened worktree at `start` on the cluster's widening branch, with `edits` written into it. */
+  const widened = (clusterId: string, start: string, edits: Readonly<Record<string, string>> = {}) => {
+    const folder = join(scratch(), "source");
+    worktrees.add(folder, threadBranches.widening(threadId, clusterId, 1), start);
+    for (const [path, text] of Object.entries(edits)) write(folder, path, text);
+    return folder;
+  };
+  const promotion = (clusterId: string, worktree: string, accepted: string | null, start = accepted ?? source): Promotion => ({
+    branch, worktrees, accepted, start, worktree, trailers: { thread: threadId, cluster: clusterId, record: `${threadId}/${clusterId}/repair/1` }, summary: `Fixed ${clusterId}.`,
+  });
+  return { repo, snapshot, branchGit, worktrees, before, source, branch, widened, promotion };
 }
 
-test("the widened source is the accepted Chummer/ with the patch's after sides", () => {
-  const root = scratch("workflow-widened-");
-  write(root, "accepted/Chummer/frmCreate.cs", "class frmCreate { int moved; }");
-  write(root, "accepted/Chummer/other.cs", "other");
-  write(root, "accepted/Core/XmlManager.cs", "class XmlManager {}");
-  write(root, "accepted/bin/data/skills.xml", "<skills/>");
-  const { archive, files } = archiveWithPatch(join(root, "attempt-1"), {
-    "Chummer/frmCreate.cs": { before: "class frmCreate { int moved; }", after: "class frmCreate { int restored; }" },
-    "Chummer/added.cs": { before: null, after: "added" },
-  });
-  const target = join(root, "widened", "source");
-  write(root, "widened/source/Chummer/stale.cs", "left by a killed step");
-  deepStrictEqual(prepareWidenedSource(join(root, "accepted"), archive, files, target), []);
-  equal(readFileSync(join(target, "Chummer/frmCreate.cs"), "utf8"), "class frmCreate { int restored; }");
-  equal(readFileSync(join(target, "Chummer/added.cs"), "utf8"), "added");
-  equal(readFileSync(join(target, "Chummer/other.cs"), "utf8"), "other");
-  equal(readFileSync(join(target, "Core/XmlManager.cs"), "utf8"), "class XmlManager {}");
-  ok(!existsSync(join(target, "Chummer/stale.cs")));
-  ok(!existsSync(join(target, "bin")));
-  equal(readFileSync(join(root, "accepted/Chummer/frmCreate.cs"), "utf8"), "class frmCreate { int moved; }");
+test("the thread's source commit holds the snapshot's uncommitted edits on the snapshot's commit, without touching the repository", async () => {
+  const run = await thread("wf-1");
+  deepStrictEqual(untouched(run.repo), run.before);
+  equal(git(run.repo, "rev-parse", "workflow/wf-1/source"), run.source);
+  equal(git(run.repo, "rev-parse", `${run.source}~1`), run.snapshot.commit);
+  equal(git(run.repo, "log", "-1", "--format=%s", run.source), "Source captured by thread wf-1");
+  // The edit, the untracked file and the deletion are in it; the ignored file is not.
+  equal(git(run.repo, "show", `${run.source}:Chummer/frmCreate.cs`), "class frmCreate { int moved; }");
+  equal(git(run.repo, "ls-tree", "-r", "--name-only", run.source),
+    [".gitignore", "Chummer/frmCreate.cs", "Chummer/untracked.cs", "Core/XmlManager.cs", "README.md", "bin/ChummerGenSR4.exe", "bin/data/skills.xml", "bin/lang/en-us.xml"].join("\n"));
+  // Asked again with the same snapshot, the existing branch is the source.
+  equal(threadSource(run.branchGit, "wf-1", run.snapshot.commit, run.snapshot.folder, join(scratch(), "source.index")), run.source);
 });
 
-test("a patch does not apply when an accepted file differs from its before side or an added file exists", () => {
-  const root = scratch("workflow-widened-");
-  write(root, "accepted/Chummer/frmCreate.cs", "class frmCreate { int changedByAnEarlierFix; }");
-  write(root, "accepted/Chummer/added.cs", "already here");
-  write(root, "accepted/Core/XmlManager.cs", "class XmlManager {}");
-  const { archive, files } = archiveWithPatch(join(root, "attempt-1"), {
-    "Chummer/frmCreate.cs": { before: "class frmCreate { int moved; }", after: "class frmCreate { int restored; }" },
-    "Chummer/added.cs": { before: null, after: "added" },
-    "Chummer/missing.cs": { before: "was there", after: "changed" },
-  });
-  const target = join(root, "widened", "source");
-  deepStrictEqual(prepareWidenedSource(join(root, "accepted"), archive, files, target), ["Chummer/frmCreate.cs", "Chummer/added.cs", "Chummer/missing.cs"]);
-  equal(readFileSync(join(target, "Chummer/frmCreate.cs"), "utf8"), "class frmCreate { int changedByAnEarlierFix; }");
+test("an existing source branch whose content is not the snapshot's is a setup error, also a sibling commit with the same parent and message", async () => {
+  const run = await thread("wf-11");
+  const sibling = (content: string) => {
+    const index = join(scratch(), "sibling.index");
+    const env = { ...process.env, GIT_INDEX_FILE: index };
+    execFileSync("git", ["-C", run.repo, "read-tree", run.source], { env });
+    const blob = execFileSync("git", ["-C", run.repo, "hash-object", "-w", "--stdin"], { input: content, encoding: "utf8" }).trim();
+    execFileSync("git", ["-C", run.repo, "update-index", "--cacheinfo", `100644,${blob},Chummer/frmCreate.cs`], { env });
+    const tree = execFileSync("git", ["-C", run.repo, "write-tree"], { env, encoding: "utf8" }).trim();
+    return execFileSync("git", ["-C", run.repo, "commit-tree", tree, "-p", run.snapshot.commit, "-m", "Source captured by thread wf-11\n\nThe compiled source as the thread's candidate was built from it.\n"], { encoding: "utf8" }).trim();
+  };
+  git(run.repo, "update-ref", "refs/heads/workflow/wf-11/source", sibling("class frmCreate { int other; }"));
+  throws(() => threadSource(run.branchGit, "wf-11", run.snapshot.commit, run.snapshot.folder, join(scratch(), "source.index")),
+    (error) => error instanceof SetupError && /does not hold the sealed snapshot: Chummer\/frmCreate\.cs differs/.test(error.message));
+  // A snapshot without Core/ is refused before an existing branch is looked at.
+  const bare = await thread("wf-13");
+  rmSync(join(bare.snapshot.folder, "Core"), { recursive: true });
+  throws(() => threadSource(bare.branchGit, "wf-13", bare.snapshot.commit, bare.snapshot.folder, join(scratch(), "source.index")),
+    (error) => error instanceof SetupError && /has no Core\/, which the candidate is compiled from/.test(error.message));
+  // The snapshot itself changing is the same mismatch.
+  const other = await thread("wf-12");
+  write(other.snapshot.folder, "Chummer/frmCreate.cs", "class frmCreate { int later; }");
+  throws(() => threadSource(other.branchGit, "wf-12", other.snapshot.commit, other.snapshot.folder, join(scratch(), "source.index")), SetupError);
 });
 
-test("an accepted source without Core/ cannot be widened, because the candidate cannot be built from it", () => {
-  const root = scratch("workflow-widened-");
-  write(root, "accepted/Chummer/frmCreate.cs", "a");
-  const { archive, files } = archiveWithPatch(join(root, "attempt-1"), { "Chummer/frmCreate.cs": { before: "a", after: "b" } });
-  throws(() => prepareWidenedSource(join(root, "accepted"), archive, files, join(root, "w")), (error) => error instanceof SetupError && /has no Core\/, which the candidate is compiled from/.test(error.message));
-});
-
-test("an archive whose after side is missing or a patch outside Chummer/ is a setup error", () => {
-  const root = scratch("workflow-widened-");
-  write(root, "accepted/Chummer/frmCreate.cs", "a");
-  write(root, "accepted/Core/XmlManager.cs", "class XmlManager {}");
-  const { archive, files } = archiveWithPatch(join(root, "attempt-1"), { "Chummer/frmCreate.cs": { before: "a", after: "b" } });
-  writeFileSync(join(archive, "files", "after", "Chummer", "frmCreate.cs"), "tampered");
-  throws(() => prepareWidenedSource(join(root, "accepted"), archive, files, join(root, "w")), SetupError);
-  throws(() => prepareWidenedSource(join(root, "accepted"), archive, [{ ...files[0]!, path: "bin/data/skills.xml" }], join(root, "w")), SetupError);
-});
-
-test("the first promotion commits the snapshot's source, then the fix, and leaves the working tree, index and HEAD alone", async () => {
+test("line-ending settings and attributes of the machine and the repository do not change the bytes of the source commit or of a worktree", async () => {
   const repo = repository();
+  git(repo, "config", "core.autocrlf", "true");
+  write(repo, ".gitattributes", "* text eol=crlf\n");
+  git(repo, "add", "-A");
+  git(repo, "commit", "-q", "-m", "everything");
+  // An edit with LF endings only, as the candidate is built from it.
+  write(repo, "Chummer/frmCreate.cs", "class frmCreate\n{\n    int lf;\n}\n");
   const snapshot = await createSourceSnapshot(repo, join(scratch(), "source"), processGit(repo));
-  const widened = join(scratch(), "widened");
-  write(widened, "Chummer/frmCreate.cs", "class frmCreate { int restored; }");
-  write(widened, "Chummer/untracked.cs", "new");
-  write(widened, "Core/XmlManager.cs", "class XmlManager {}");
-  const before = untouched(repo);
-  const branch = new AcceptedBranch(processBranchGit(repo), "wf-1", join(scratch(), "promote.index"));
-  const trailers = { thread: "wf-1", cluster: "d-1", record: "wf-1/d-1/repair/1" };
-  const fix = committed({ branch, base: snapshot.commit, accepted: null, snapshotFolder: snapshot.folder, widenedSource: widened, trailers, summary: "Restored the field." });
-  deepStrictEqual(untouched(repo), before);
-  equal(branch.tip(), fix);
-  equal(git(repo, "log", "--format=%s", "accepted/wf-1"), "Fix discrepancy d-1\nSource captured by thread wf-1\ninitial");
-  equal(git(repo, "show", `${fix}:Chummer/frmCreate.cs`), "class frmCreate { int restored; }");
-  equal(git(repo, "show", `${fix}~1:Chummer/frmCreate.cs`), "class frmCreate { int moved; }");
-  // The snapshot did not have the deleted file, and has the untracked one; the data folders keep the commit's content.
-  equal(git(repo, "ls-tree", "-r", "--name-only", fix), [".gitignore", "Chummer/frmCreate.cs", "Chummer/untracked.cs", "Core/XmlManager.cs", "README.md", "bin/ChummerGenSR4.exe", "bin/data/skills.xml", "bin/lang/en-us.xml"].join("\n"));
-  equal(branch.repairRecord(fix), "wf-1/d-1/repair/1");
-  ok(git(repo, "log", "-1", "--format=%B", fix).includes("Restored the field.\n\nWorkflow-Thread: wf-1\nDiscrepancy: d-1\nRepair-Record: wf-1/d-1/repair/1"));
-
-  // Resumed after the branch moved: the same commit, nothing new.
-  equal(promote({ branch, base: snapshot.commit, accepted: null, snapshotFolder: snapshot.folder, widenedSource: widened, trailers, summary: "Restored the field." }), fix);
-  equal(git(repo, "rev-list", "--count", "accepted/wf-1"), "3");
-
-  // A second promotion stacks on the first.
-  const second = join(scratch(), "widened");
-  write(second, "Chummer/frmCreate.cs", "class frmCreate { int restored; }");
-  write(second, "Chummer/untracked.cs", "fixed too");
-  write(second, "Core/XmlManager.cs", "class XmlManager {}");
-  const next = committed({ branch, base: snapshot.commit, accepted: fix, snapshotFolder: snapshot.folder, widenedSource: second, trailers: { ...trailers, cluster: "d-2", record: "wf-1/d-2/repair/1" }, summary: "Second." });
-  equal(git(repo, "rev-parse", `${next}~1`), fix);
-  deepStrictEqual(untouched(repo), before);
+  const branchGit = processBranchGit(repo);
+  const source = threadSource(branchGit, "wf-14", snapshot.commit, snapshot.folder, join(scratch(), "source.index"));
+  const bytes = readFileSync(join(snapshot.folder, "Chummer", "frmCreate.cs"));
+  ok(!bytes.includes("\r"));
+  const worktree = join(scratch(), "source");
+  new Worktrees(branchGit, repo).add(worktree, threadBranches.widening("wf-14", "d-1", 1), source);
+  ok(readFileSync(join(worktree, "Chummer", "frmCreate.cs")).equals(bytes));
 });
 
-test("a snapshot equal to its commit gets no source commit, and a branch moved by something else is a setup error", async () => {
+test("attributes in the repository's info/attributes that convert bytes are a setup error, also for files added later, and ones that convert nothing are no obstacle", async () => {
+  const repo = repository();
+  const attributes = join(repo, ".git", "info", "attributes");
+  mkdirSync(dirname(attributes), { recursive: true });
+  const snapshot = await createSourceSnapshot(repo, join(scratch(), "source"), processGit(repo));
+  const branchGit = processBranchGit(repo);
+  const source = () => threadSource(branchGit, "wf-16", snapshot.commit, snapshot.folder, join(scratch(), "source.index"));
+  for (const converting of ["*.cs text eol=crlf\n", "Chummer/NewFeature.cs text eol=crlf\n", "*.cs crlf\n", "*.cs filter=lfs\n", "\"Chummer/New Feature.cs\" ident\n", "[attr]mine text\n", "*.cs diff=csharp working-tree-encoding=utf-16\n"]) {
+    writeFileSync(attributes, converting);
+    throws(() => source(), (error) => error instanceof SetupError && /info\/attributes sets attributes that convert bytes/.test(error.message), converting);
+    equal(git(repo, "for-each-ref", "refs/heads/workflow/wf-16"), "");
+  }
+  // Attributes that unset, reset or do not convert stay harmless.
+  writeFileSync(attributes, "# comment\n\n*.cs diff=csharp -filter -ident -working-tree-encoding -text -eol\n*.md !text !eol binary\n*.png -crlf\n");
+  ok(source().length > 0);
+});
+test("a snapshot equal to its commit is the source commit itself, and a snapshot without Core/ is a setup error", async () => {
+  const run = await thread("wf-2", true);
+  equal(run.source, run.snapshot.commit);
+  equal(git(run.repo, "rev-parse", "workflow/wf-2/source"), run.snapshot.commit);
+  rmSync(join(run.snapshot.folder, "Core"), { recursive: true });
+  throws(() => threadSource(run.branchGit, "wf-3", run.snapshot.commit, run.snapshot.folder, join(scratch(), "source.index")),
+    (error) => error instanceof SetupError && /has no Core\/, which the candidate is compiled from/.test(error.message));
+  equal(git(run.repo, "for-each-ref", "refs/heads/workflow/wf-3"), "");
+});
+
+test("a snapshot folder whose files were all deleted is deleted in the source commit too", async () => {
   const repo = repository();
   git(repo, "add", "-A");
   git(repo, "commit", "-q", "-m", "everything");
+  rmSync(join(repo, "bin", "data"), { recursive: true });
   const snapshot = await createSourceSnapshot(repo, join(scratch(), "source"), processGit(repo));
-  const widened = join(scratch(), "widened");
-  write(widened, "Chummer/frmCreate.cs", "class frmCreate { int restored; }");
-  write(widened, "Chummer/untracked.cs", "new");
-  write(widened, "Core/XmlManager.cs", "class XmlManager {}");
-  const branch = new AcceptedBranch(processBranchGit(repo), "wf-2", join(scratch(), "promote.index"));
-  const trailers = { thread: "wf-2", cluster: "d-1", record: "wf-2/d-1/repair/1" };
-  const fix = committed({ branch, base: snapshot.commit, accepted: null, snapshotFolder: snapshot.folder, widenedSource: widened, trailers, summary: "s" });
-  equal(git(repo, "rev-parse", `${fix}~1`), snapshot.commit);
-  git(repo, "update-ref", branch.ref, snapshot.commit);
-  throws(() => promote({ branch, base: snapshot.commit, accepted: fix, snapshotFolder: snapshot.folder, widenedSource: widened, trailers: { ...trailers, record: "wf-2/d-2/repair/1" }, summary: "s" }),
-    (error) => error instanceof SetupError && /something else moved it/.test(error.message));
-  notEqual(branch.tip(), fix);
+  ok(!existsSync(join(snapshot.folder, "bin", "data")));
+  const branchGit = processBranchGit(repo);
+  const source = threadSource(branchGit, "wf-10", snapshot.commit, snapshot.folder, join(scratch(), "source.index"));
+  notEqual(source, snapshot.commit);
+  equal(git(repo, "diff", "--name-status", snapshot.commit, source), "D\tbin/data/skills.xml");
+  equal(git(repo, "ls-tree", "-r", "--name-only", source, "--", "bin/data"), "");
 });
 
-test("a widened source that stages the accepted tree has nothing to commit", async () => {
+test("a file git tracks although an ignore rule matches it is in the snapshot and so in the source commit", async () => {
   const repo = repository();
+  const exclude = join(repo, ".git", "info", "exclude");
+  mkdirSync(dirname(exclude), { recursive: true });
+  writeFileSync(exclude, "Chummer/Generated.cs\n");
+  write(repo, "Chummer/Generated.cs", "class Generated {}");
+  git(repo, "add", "--force", "Chummer/Generated.cs");
   const snapshot = await createSourceSnapshot(repo, join(scratch(), "source"), processGit(repo));
-  const branch = new AcceptedBranch(processBranchGit(repo), "wf-3", join(scratch(), "promote.index"));
-  equal(promote({ branch, base: snapshot.commit, accepted: null, snapshotFolder: snapshot.folder, widenedSource: snapshot.folder, trailers: { thread: "wf-3", cluster: "d-1", record: "r" }, summary: "s" }), null);
-  equal(branch.tip(), null);
+  ok(existsSync(join(snapshot.folder, "Chummer", "Generated.cs")));
+  const branchGit = processBranchGit(repo);
+  const source = threadSource(branchGit, "wf-17", snapshot.commit, snapshot.folder, join(scratch(), "source.index"));
+  equal(git(repo, "show", `${source}:Chummer/Generated.cs`), "class Generated {}");
+  // A resumed thread finds the same commit, which holds the snapshot's content.
+  equal(threadSource(branchGit, "wf-17", snapshot.commit, snapshot.folder, join(scratch(), "source.index")), source);
 });
 
-test("a widened source without Core/ is a setup error, and so is a folder to commit that it lacks", async () => {
-  const repo = repository();
-  const snapshot = await createSourceSnapshot(repo, join(scratch(), "source"), processGit(repo));
-  const branch = new AcceptedBranch(processBranchGit(repo), "wf-6", join(scratch(), "promote.index"));
-  const promotion = { branch, base: snapshot.commit, accepted: null, snapshotFolder: snapshot.folder, trailers: { thread: "wf-6", cluster: "d-1", record: "r" }, summary: "s" };
-  const withoutCore = join(scratch(), "widened");
-  cpSync(join(snapshot.folder, "Chummer"), join(withoutCore, "Chummer"), { recursive: true });
-  throws(() => promote({ ...promotion, widenedSource: withoutCore }), (error) => error instanceof SetupError && /has no Core\/, which the candidate is compiled from/.test(error.message));
-  const complete = join(scratch(), "widened");
-  cpSync(snapshot.folder, complete, { recursive: true });
-  write(complete, "Chummer/frmCreate.cs", "class frmCreate { int restored; }");
-  throws(() => promote({ ...promotion, widenedSource: complete, alsoCommitted: ["fixes"] }), SetupError);
-  equal(branch.tip(), null);
+test("the first promotion commits the widened worktree on the source commit and moves the accepted branch, leaving the repository alone", async () => {
+  const run = await thread("wf-4");
+  const worktree = run.widened("d-1", run.source, { "Chummer/frmCreate.cs": "class frmCreate { int restored; }" });
+  const fix = committed(run.promotion("d-1", worktree, null));
+  deepStrictEqual(untouched(run.repo), run.before);
+  equal(run.branch.tip(), fix);
+  equal(git(run.repo, "rev-parse", threadBranches.widening("wf-4", "d-1", 1)), fix);
+  equal(git(run.repo, "log", "--format=%s", "accepted/wf-4"), "Fix discrepancy d-1\nSource captured by thread wf-4\ninitial");
+  equal(git(run.repo, "diff", "--name-only", run.source, fix), "Chummer/frmCreate.cs");
+  equal(run.branch.repairRecord(fix), "wf-4/d-1/repair/1");
+  ok(git(run.repo, "log", "-1", "--format=%B", fix).includes("Fixed d-1.\n\nWorkflow-Thread: wf-4\nDiscrepancy: d-1\nRepair-Record: wf-4/d-1/repair/1"));
+
+  // Resumed after the branch moved: the same commit, nothing new.
+  equal(promote(run.promotion("d-1", worktree, null)), fix);
+  equal(git(run.repo, "rev-list", "--count", "accepted/wf-4"), "3");
+
+  // A second promotion stacks on the first, in a worktree started at the accepted commit.
+  const second = run.widened("d-2", fix, { "Core/XmlManager.cs": "class XmlManager { int restored; }" });
+  const next = committed(run.promotion("d-2", second, fix));
+  equal(git(run.repo, "rev-parse", `${next}~1`), fix);
+  equal(git(run.repo, "diff", "--name-only", fix, next), "Core/XmlManager.cs");
+  deepStrictEqual(untouched(run.repo), run.before);
+
+  // A branch moved by something else is a setup error, and nothing is committed.
+  git(run.repo, "update-ref", run.branch.ref, run.source);
+  const third = run.widened("d-3", next, { "Chummer/untracked.cs": "fixed" });
+  throws(() => promote(run.promotion("d-3", third, next)), (error) => error instanceof SetupError && /something else moved it/.test(error.message));
+  equal(run.branch.tip(), run.source);
+  equal(run.worktrees.head(third), next);
 });
 
-test("a folder committed beside Chummer/ does not make an unchanged Chummer/ a change", async () => {
-  const repo = repository();
-  const snapshot = await createSourceSnapshot(repo, join(scratch(), "source"), processGit(repo));
-  const branch = new AcceptedBranch(processBranchGit(repo), "wf-4", join(scratch(), "promote.index"));
-  const widened = join(scratch(), "widened");
-  cpSync(snapshot.folder, widened, { recursive: true });
-  write(widened, "fixes/openspec/changes/archive/2026-10-02-fix-d-1/fix.json", "{}");
-  const promotion = { branch, base: snapshot.commit, accepted: null, snapshotFolder: snapshot.folder, widenedSource: widened, trailers: { thread: "wf-4", cluster: "d-1", record: "r" }, summary: "s" };
-  equal(promote({ ...promotion, alsoCommitted: ["fixes"] }), null);
-  equal(branch.tip(), null);
-  // With a change in Chummer/ the folder goes into the fix commit.
-  write(widened, "Chummer/frmCreate.cs", "class frmCreate { int restored; }");
-  const commit = committed({ ...promotion, alsoCommitted: ["fixes"] });
-  deepStrictEqual(git(repo, "diff", "--name-only", `${commit}~1`, commit).split("\n").sort(), ["Chummer/frmCreate.cs", "fixes/openspec/changes/archive/2026-10-02-fix-d-1/fix.json"]);
+test("a promotion killed after its commit and before the branch moved takes the worktree's commit", async () => {
+  const run = await thread("wf-5");
+  const worktree = run.widened("d-1", run.source, { "Chummer/frmCreate.cs": "class frmCreate { int restored; }" });
+  run.worktrees.stage(worktree);
+  const made = run.worktrees.commitStaged(worktree, `Fix discrepancy d-1\n\nWorkflow-Thread: wf-5\nDiscrepancy: d-1\nRepair-Record: wf-5/d-1/repair/1\n`);
+  equal(run.branch.tip(), null);
+  equal(promote(run.promotion("d-1", worktree, null)), made);
+  equal(run.branch.tip(), made);
+  equal(git(run.repo, "rev-list", "--count", "accepted/wf-5"), "3");
 });
 
-test("the widened source and the accepted branch hold Core/ beside Chummer/, and a patch of Core/ applies and is committed", async () => {
-  const root = scratch("workflow-widened-");
-  write(root, "accepted/Chummer/frmCreate.cs", "class frmCreate {}");
-  write(root, "accepted/Core/XmlManager.cs", "class XmlManager { int moved; }");
-  const { archive, files } = archiveWithPatch(join(root, "attempt-1"), { "Core/XmlManager.cs": { before: "class XmlManager { int moved; }", after: "class XmlManager { int restored; }" } });
-  const target = join(root, "widened", "source");
-  deepStrictEqual(prepareWidenedSource(join(root, "accepted"), archive, files, target), []);
-  equal(readFileSync(join(target, "Core/XmlManager.cs"), "utf8"), "class XmlManager { int restored; }");
-  equal(readFileSync(join(target, "Chummer/frmCreate.cs"), "utf8"), "class frmCreate {}");
+test("a widened worktree that stages the accepted tree has nothing to commit", async () => {
+  const run = await thread("wf-6");
+  // The file written again with the content it had: the worktree stages the tree it started at.
+  const worktree = run.widened("d-1", run.source, { "Chummer/frmCreate.cs": "class frmCreate { int moved; }" });
+  equal(promote(run.promotion("d-1", worktree, null)), null);
+  equal(run.branch.tip(), null);
+  equal(run.worktrees.head(worktree), run.source);
+});
 
-  const repo = repository();
-  write(repo, "Core/XmlManager.cs", "class XmlManager { int moved; }");
-  const snapshot = await createSourceSnapshot(repo, join(scratch(), "source"), processGit(repo));
-  ok(existsSync(join(snapshot.folder, "Core/XmlManager.cs")));
-  const widened = join(scratch(), "widened");
-  cpSync(join(snapshot.folder, "Chummer"), join(widened, "Chummer"), { recursive: true });
-  write(widened, "Core/XmlManager.cs", "class XmlManager { int restored; }");
-  const branch = new AcceptedBranch(processBranchGit(repo), "wf-5", join(scratch(), "promote.index"));
-  const fix = committed({ branch, base: snapshot.commit, accepted: null, snapshotFolder: snapshot.folder, widenedSource: widened, trailers: { thread: "wf-5", cluster: "d-1", record: "r" }, summary: "s" });
-  // The snapshot's untracked library is in the source commit, the fix changes only it.
-  equal(git(repo, "show", `${fix}~1:Core/XmlManager.cs`), "class XmlManager { int moved; }");
-  equal(git(repo, "diff", "--name-only", `${fix}~1`, fix), "Core/XmlManager.cs");
+test("a widened worktree whose branch has a commit that is not the promotion's is a setup error and moves nothing", async () => {
+  const run = await thread("wf-15");
+  const worktree = run.widened("d-1", run.source, { "Chummer/untracked.cs": "stray" });
+  run.worktrees.stage(worktree);
+  const stray = run.worktrees.commitStaged(worktree, "Something else\n");
+  write(worktree, "Chummer/frmCreate.cs", "class frmCreate { int restored; }");
+  run.worktrees.stage(worktree);
+  throws(() => promote(run.promotion("d-1", worktree, null)), (error) => error instanceof SetupError && /not at its start/.test(error.message));
+  equal(run.branch.tip(), null);
+  equal(run.worktrees.head(worktree), stray);
+  // The promotion's own commit with another parent than the start is refused the same way.
+  const made = run.worktrees.commitStaged(worktree, `Fix discrepancy d-1\n\nRepair-Record: wf-15/d-1/repair/1\n`);
+  throws(() => promote(run.promotion("d-1", worktree, null)), (error) => error instanceof SetupError && /not at its start/.test(error.message));
+  equal(run.branch.tip(), null);
+  notEqual(run.worktrees.parent(made), run.source);
+});
+
+test("a widened worktree without Core/ is a setup error and makes no commit", async () => {
+  const run = await thread("wf-7");
+  const worktree = run.widened("d-1", run.source, { "Chummer/frmCreate.cs": "class frmCreate { int restored; }" });
+  rmSync(join(worktree, "Core"), { recursive: true });
+  throws(() => promote(run.promotion("d-1", worktree, null)), (error) => error instanceof SetupError && /has no Core\/, which the candidate is compiled from/.test(error.message));
+  equal(run.branch.tip(), null);
+  equal(run.worktrees.head(worktree), run.source);
+});
+
+test("a fix change beside an unchanged Chummer/ makes no commit, and goes into the fix commit beside a change", async () => {
+  const run = await thread("wf-8");
+  const worktree = run.widened("d-1", run.source, { "fixes/openspec/changes/archive/2026-10-02-fix-d-1/fix.json": "{}" });
+  equal(promote(run.promotion("d-1", worktree, null)), null);
+  equal(run.branch.tip(), null);
+  write(worktree, "Chummer/frmCreate.cs", "class frmCreate { int restored; }");
+  const fix = committed(run.promotion("d-1", worktree, null));
+  deepStrictEqual(git(run.repo, "diff", "--name-only", run.source, fix).split("\n").sort(), ["Chummer/frmCreate.cs", "fixes/openspec/changes/archive/2026-10-02-fix-d-1/fix.json"]);
+});
+
+test("an attempt commit applies only where the accepted commit still has what it changed", async () => {
+  const run = await thread("wf-9");
+  // The attempt: an edit, an added file and a deletion on the source commit.
+  const attempt = join(scratch(), "source");
+  run.worktrees.add(attempt, threadBranches.attempt("wf-9", "d-2", 1), run.source);
+  write(attempt, "Chummer/frmCreate.cs", "class frmCreate { int restored; }");
+  write(attempt, "Chummer/added.cs", "added");
+  rmSync(join(attempt, "Chummer", "untracked.cs"));
+  const commit = run.worktrees.commitAll(attempt, "Repair attempt 1 of discrepancy d-2\n")!;
+  run.worktrees.remove(attempt);
+  deepStrictEqual(staleFiles(run.worktrees, commit, run.source), []);
+  // An earlier promotion changed frmCreate.cs, added added.cs and left untracked.cs alone.
+  const earlier = run.widened("d-1", run.source, { "Chummer/frmCreate.cs": "class frmCreate { int other; }", "Chummer/added.cs": "other" });
+  const accepted = committed(run.promotion("d-1", earlier, null));
+  deepStrictEqual(staleFiles(run.worktrees, commit, accepted), ["Chummer/added.cs", "Chummer/frmCreate.cs"]);
+  // A promotion that only touched another file leaves the attempt applicable.
+  const unrelated = run.widened("d-3", run.source, { "Core/XmlManager.cs": "class XmlManager { int other; }" });
+  const elsewhere = committed({ ...run.promotion("d-3", unrelated, null), branch: new AcceptedBranch(run.branchGit, "wf-9b") });
+  notEqual(elsewhere, accepted);
+  deepStrictEqual(staleFiles(run.worktrees, commit, elsewhere), []);
+});
+
+test("an attempt that adds a file where the accepted commit has a folder, or a file inside where it has a file, does not apply", async () => {
+  const run = await thread("wf-10");
+  const made = (name: string, edits: Readonly<Record<string, string>>) => {
+    const attempt = join(scratch(), "source");
+    run.worktrees.add(attempt, threadBranches.attempt("wf-10", name, 1), run.source);
+    for (const [path, text] of Object.entries(edits)) write(attempt, path, text);
+    const commit = run.worktrees.commitAll(attempt, `Repair attempt 1 of discrepancy ${name}\n`)!;
+    run.worktrees.remove(attempt);
+    return commit;
+  };
+  const asFile = made("d-2", { "Chummer/New.cs": "file" });
+  const asFolder = made("d-3", { "Chummer/New.cs/Nested.cs": "nested" });
+  deepStrictEqual(staleFiles(run.worktrees, asFile, run.source), []);
+  deepStrictEqual(staleFiles(run.worktrees, asFolder, run.source), []);
+  const fileFirst = committed(run.promotion("d-2", run.widened("d-2", run.source, { "Chummer/New.cs": "file" }), null));
+  deepStrictEqual(staleFiles(run.worktrees, asFolder, fileFirst), ["Chummer/New.cs/Nested.cs"]);
+  const folderFirst = committed({ ...run.promotion("d-3", run.widened("d-3", run.source, { "Chummer/New.cs/Nested.cs": "nested" }), null), branch: new AcceptedBranch(run.branchGit, "wf-10b") });
+  deepStrictEqual(staleFiles(run.worktrees, asFile, folderFirst), ["Chummer/New.cs"]);
 });

@@ -28,6 +28,8 @@ import { startAgentWithRider } from "./lanes/rider-dispatch.js";
 import { interruptSignal } from "./host/interrupt-signal.js";
 import { createScratchFolder } from "./host/scratch-folder.js";
 import { SetupError } from "./host/setup-error.js";
+import { processBranchGit } from "./git/branch-git.js";
+import { Worktrees } from "./git/worktrees.js";
 import { LoopService } from "./loop/loop-service.js";
 import { parseArguments, usage } from "./options/arguments.js";
 import { loadProfile, localDataFolder } from "./options/profile.js";
@@ -43,7 +45,6 @@ import { CompareReportSchema } from "../../contracts/generated/typescript/parity
 import { captureInputs, changedInputs } from "./steps/input-fingerprints.js";
 import { StepStore } from "./steps/step-store.js";
 import { SqliteStore } from "./store/sqlite-store.js";
-import { processBranchGit } from "./widening/accepted-branch.js";
 import { hostLevelCapture } from "./widening/level-capture.js";
 import { WideningService } from "./widening/widening-service.js";
 
@@ -91,14 +92,16 @@ async function main(): Promise<number> {
     readReport: (runFolder) => readDocument(join(runFolder, reportPath), CompareReportSchema),
     checkCapture: hostCheckCapture(paths, host, createScratchFolder), createScratchFolder, now, log,
   });
+  const branchGit = processBranchGit(repositoryRoot);
+  const worktrees = new Worktrees(branchGit, repositoryRoot);
   const repair = new RepairService({
     threadFolder: paths.threadFolder, agents, quota, build: hostAttemptBuild(paths, host), narrowCheck: hostNarrowCheck(paths, host, createScratchFolder),
-    createScratchFolder, now, log,
+    createScratchFolder, git: branchGit, worktrees, now, log,
   });
 
   const widening = new WideningService({
     threadFolder: paths.threadFolder, build: hostAttemptBuild(paths, host), capture: hostLevelCapture(paths, host, createScratchFolder),
-    allCases: (caseFile) => planCases(caseFile, [], []).cases, git: processBranchGit(repositoryRoot), now, log,
+    allCases: (caseFile) => planCases(caseFile, [], []).cases, git: branchGit, worktrees, now, log,
     fixes: { root: fixesRootOf(repositoryRoot), archive: openSpecArchiver(processOpenSpecCli(repositoryRoot)) },
     inputs: {
       environment: (signal) => readEnvironmentFingerprint(paths, host, createScratchFolder, "environment widening", signal),

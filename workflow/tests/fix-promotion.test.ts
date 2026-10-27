@@ -7,7 +7,7 @@ import { InMemoryStore, MemorySaver } from "@langchain/langgraph";
 import { openSpecArchiver, processOpenSpecCli, type FixChangeArchiver } from "../src/fixes/fix-archiver.js";
 import { FixRecordSchema } from "../src/fixes/fix-record.js";
 import { SetupError } from "../src/host/setup-error.js";
-import type { BranchGit } from "../src/widening/accepted-branch.js";
+import type { BranchGit } from "../src/git/branch-git.js";
 import { challengeAnswer, diagnosisHarness, FakeAgents, hypothesisAnswer, twoClusters, type JobCall, type Reply } from "./diagnosis-harness.js";
 import { repositoryRoot } from "./fix-fixtures.js";
 import { FakeRepairHost, patchedReply, repairedSource } from "./repair-fixtures.js";
@@ -84,33 +84,42 @@ test("without fix changes the fix commit holds Chummer/ only", async () => {
   ok(!run.agents.calls.some((call) => call.prompt.startsWith("PROMPT_VERSION=repair-plan-v2")));
 });
 
-test("a promotion resumed after its commit takes the commit and archives nothing again", async () => {
-  const checkpointer = new MemorySaver();
-  const store = new InMemoryStore();
+/** Kills the run at the accepted branch's first move: after the ref update, or before it, once the fix commit was made. */
+function crashAtMove(after: boolean): (inner: BranchGit) => BranchGit {
   let crashed = false;
-  const crashAfterMove = (inner: BranchGit): BranchGit => (args, options) => {
-    const output = inner(args, options);
-    if (args[0] === "update-ref" && !crashed) {
-      crashed = true;
-      throw new SetupError("the process died after the branch moved");
-    }
-    return output;
+  return (inner) => (args, options) => {
+    if (args[0] !== "update-ref" || args[3]?.startsWith("refs/heads/accepted/") !== true || crashed) return inner(args, options);
+    crashed = true;
+    if (after) inner(args, options);
+    throw new SetupError(`the process died ${after ? "after" : "before"} the branch moved`);
   };
-  const killed = harness({ git: crashAfterMove, extra: { checkpointer, store } });
-  equal(await killed.start({ fixChanges: true }), 3);
-  const threadId = killed.threadId();
-  const tip = git(killed.sourceRepository, "rev-parse", `accepted/${threadId}`);
-  let archived = 0;
-  const real = openSpecArchiver(processOpenSpecCli(repositoryRoot));
-  const counting: FixChangeArchiver = (request) => {
-    archived++;
-    return real(request);
-  };
-  const resumed = harness({ archive: counting, extra: { checkpointer, store, root: killed.root, repository: killed.sourceRepository } });
-  equal(await resumed.resume(threadId), 1);
-  equal(archived, 0);
-  equal(git(killed.sourceRepository, "rev-parse", `accepted/${threadId}`), tip);
-  equal(git(killed.sourceRepository, "rev-list", "--count", `accepted/${threadId}`), "3");
+}
+
+test("a promotion resumed after its commit takes the commit and archives nothing again", async () => {
+  for (const after of [true, false]) {
+    const checkpointer = new MemorySaver();
+    const store = new InMemoryStore();
+    const killed = harness({ git: crashAtMove(after), extra: { checkpointer, store } });
+    equal(await killed.start({ fixChanges: true }), 3);
+    const threadId = killed.threadId();
+    const widened = `workflow/${threadId}/widening/${cluster}/attempt-1`;
+    // The fix commit is on the widening's branch; the accepted branch has it only when the ref was updated.
+    const fix = git(killed.sourceRepository, "rev-parse", widened);
+    equal(git(killed.sourceRepository, "for-each-ref", "--format=%(objectname)", `refs/heads/accepted/${threadId}`), after ? fix : "");
+    let archived = 0;
+    const real = openSpecArchiver(processOpenSpecCli(repositoryRoot));
+    const counting: FixChangeArchiver = (request) => {
+      archived++;
+      return real(request);
+    };
+    const resumed = harness({ archive: counting, extra: { checkpointer, store, root: killed.root, repository: killed.sourceRepository } });
+    equal(await resumed.resume(threadId), 1);
+    equal(archived, 0, `after: ${after}`);
+    equal(git(killed.sourceRepository, "rev-parse", `accepted/${threadId}`), fix);
+    equal(git(killed.sourceRepository, "rev-parse", widened), fix);
+    equal(git(killed.sourceRepository, "rev-list", "--count", `accepted/${threadId}`), "3");
+    ok(git(killed.sourceRepository, "ls-tree", "-r", "--name-only", fix).includes("fixes/openspec/changes/archive/"));
+  }
 });
 
 test("a passed attempt without its draft cannot be promoted with fix changes", async () => {

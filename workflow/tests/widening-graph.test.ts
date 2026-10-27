@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { InMemoryStore, MemorySaver } from "@langchain/langgraph";
 import { EvalRecordSchema, recordNamespace } from "../src/evals/eval-record.js";
 import { SetupError } from "../src/host/setup-error.js";
-import type { BranchGit } from "../src/widening/accepted-branch.js";
+import type { BranchGit } from "../src/git/branch-git.js";
 import type { ClusterWidening } from "../src/widening/cluster-widening.js";
 import type { WideningDocument } from "../src/widening/widening-report.js";
 import type { WideningDependencies } from "../src/widening/widening-service.js";
@@ -85,6 +85,9 @@ test("passed attempts are widened one after the other through the levels and pro
   const tip = git(repository, "rev-parse", `accepted/${threadId}`);
   equal(state.accepted?.commit, tip);
   deepStrictEqual(state.accepted?.promoted, [first, second]);
+  // Each fix commit was made on its widening's branch, the second on the first.
+  equal(git(repository, "rev-parse", `workflow/${threadId}/widening/${second}/attempt-1`), tip);
+  equal(git(repository, "rev-parse", `workflow/${threadId}/widening/${first}/attempt-1`), git(repository, "rev-parse", `${tip}~1`));
   equal(state.widenings[second]!.levels[2]!.outcome, "nothing-new");
   const document = documentOf(run.root, threadId);
   deepStrictEqual([document.totals.promoted, document.totals.rejected], [2, 0]);
@@ -116,6 +119,9 @@ test("a level with a difference the patch brought rolls the attempt back, and it
   const rejected = state.widenings[first]!;
   deepStrictEqual([rejected.status, rejected.rejection?.stage, rejected.rejection?.reason], ["rejected", "character", "build-alpha/armor introduced"]);
   ok(!existsSync(join(rejected.folder, "source")) && !existsSync(join(rejected.folder, "build")));
+  // The rolled-back worktree is no longer registered, and its branch stays with the applied patch uncommitted on its start.
+  ok(!git(run.sourceRepository, "worktree", "list", "--porcelain").includes(`widening/${first}`));
+  equal(git(run.sourceRepository, "rev-parse", `workflow/${threadId}/widening/${first}/attempt-1`), git(run.sourceRepository, "rev-parse", `workflow/${threadId}/source`));
   // The second attempt starts from the snapshot, and its own new difference is attributed with the first one's baseline capture.
   equal(run.wideningHost.builtSources[run.wideningHost.builds.findIndex((build) => build.label === `widen ${second} build`)], "class frmCreate { int moved; }");
   deepStrictEqual(state.widenings[second]!.rejection, { stage: "suite", reason: "build-alpha/armor introduced", executionFailure: false });
@@ -198,6 +204,27 @@ test("a patch on a file an earlier promotion changed is rejected at stage apply"
   deepStrictEqual(state.widenings[second]!.rejection?.stage, "apply");
   ok(state.widenings[second]!.rejection?.reason.includes("Chummer/frmCreate.cs"));
   equal(run.wideningHost.builds.filter((build) => build.label === `widen ${second} build`).length, 0);
+  // The rejected widening's branch stays, at the accepted commit it started from; its worktree is gone.
+  const threadId = run.threadId();
+  equal(git(run.sourceRepository, "rev-parse", `workflow/${threadId}/widening/${second}/attempt-1`), git(run.sourceRepository, "rev-parse", `accepted/${threadId}`));
+  ok(!git(run.sourceRepository, "worktree", "list", "--porcelain").includes(`widening/${second}`));
+});
+
+test("a source branch that moved after the attempts were made is a setup error before any widening", async () => {
+  // After the attempt's worktree is gone, the source branch reads as the attempt's own commit, as if someone moved it.
+  let repaired = false;
+  const moveSource = (inner: BranchGit): BranchGit => (args, options) => {
+    if (args[0] === "worktree" && args[1] === "remove") repaired = true;
+    if (repaired && args[0] === "for-each-ref" && /^refs\/heads\/workflow\/[^/]+\/source$/.test(args.at(-1) ?? "")) {
+      return inner(["for-each-ref", "--format=%(objectname)", args.at(-1)!.replace(/\/source$/, `/repair/${first}/attempt-1`)], options);
+    }
+    return inner(args, options);
+  };
+  const run = harness({ spots: [twoClusters[0]!], git: moveSource });
+  equal(await run.start(), 3);
+  ok(run.lines.some((line) => /source branch workflow\/[^ ]+\/source is at [0-9a-f]+, which is neither the snapshot's commit/.test(line)), run.lines.join("\n"));
+  equal(run.wideningHost.builds.length, 0);
+  equal(git(run.sourceRepository, "for-each-ref", "refs/heads/accepted"), "");
 });
 
 test("--no-widening ends the run after repair", async () => {
@@ -256,7 +283,7 @@ test("a run killed after the promotion's commit resumes without a second commit"
   let crashed = false;
   const crashAfterMove = (inner: BranchGit): BranchGit => (args, options) => {
     const output = inner(args, options);
-    if (args[0] === "update-ref" && !crashed) {
+    if (args[0] === "update-ref" && args[3]?.startsWith("refs/heads/accepted/") === true && !crashed) {
       crashed = true;
       throw new SetupError("the process died after the branch moved");
     }
@@ -307,10 +334,13 @@ test("candidate runs with execution failures are no baseline, while valid ones a
 });
 
 test("a widened source that stages the accepted tree is rejected at stage promote and the next cluster is widened", async () => {
-  let adds = 0;
-  // The first promotion's two staging calls (the snapshot's source, then the fix) stage nothing, so its tree is the parent's.
-  const skipStaging = (inner: BranchGit): BranchGit => (args, options) => (args.includes("add") && ++adds <= 2 ? "" : inner(args, options));
-  const run = harness({ git: skipStaging });
+  // The first cluster's widened worktree is set back to its start before the promotion stages it, as when the patch
+  // differed only in line endings the repository normalises: it stages the accepted tree.
+  const setBack = (inner: BranchGit): BranchGit => (args, options) => {
+    if (args[0] === "add" && options?.worktree?.includes(join("widening", first)) === true) inner(["checkout", "--quiet", "HEAD", "--", "."], options);
+    return inner(args, options);
+  };
+  const run = harness({ git: setBack });
   equal(await run.start(), 1);
   const threadId = run.threadId();
   const state = await run.state(threadId);
@@ -330,7 +360,7 @@ test("a rollback does not need the accepted branch, which a user may have delete
   let moved = 0;
   const deleteAfterPromotion = (inner: BranchGit): BranchGit => (args, options) => {
     const output = inner(args, options);
-    if (args[0] === "update-ref" && args[1] !== "-d" && ++moved === 1) inner(["update-ref", "-d", args[3]!], options);
+    if (args[0] === "update-ref" && args[3]?.startsWith("refs/heads/accepted/") === true && ++moved === 1) inner(["update-ref", "-d", args[3]!], options);
     return output;
   };
   const run = harness({ git: deleteAfterPromotion, script: { observe: failAt(`widen ${second} suite`, "build-gamma", "armor") } });

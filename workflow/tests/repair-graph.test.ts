@@ -113,7 +113,7 @@ test("a run killed during a narrow check resumes with a new attempt and does not
   equal(await killed.start(), 3);
   const threadId = killed.threadId();
   ok(killed.lines.some((line) => /Interrupted/.test(line)));
-  const resumed = withRepair(fake, { spots: [twoClusters[0]!], extra: { checkpointer, store, root: killed.root } });
+  const resumed = withRepair(fake, { spots: [twoClusters[0]!], extra: { checkpointer, store, root: killed.root, repository: killed.sourceRepository } });
   equal(await resumed.resume(threadId), 1);
   deepStrictEqual(fake.calls.map((call) => call.kind), ["hypothesis", "challenge", "repair", "repair"]);
   const repair = (await resumed.state(threadId)).repairs[first]!;

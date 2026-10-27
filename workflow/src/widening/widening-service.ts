@@ -10,6 +10,11 @@ import { fixArchiveInRepository, type FixChangeArchiver } from "../fixes/fix-arc
 import { fixChangeFiles } from "../fixes/fix-documents.js";
 import { fixLevel } from "../fixes/fix-draft.js";
 import { FixRecordSchema } from "../fixes/fix-record.js";
+import { compiledFolders } from "../compiled-source.js";
+import type { BranchGit } from "../git/branch-git.js";
+import { snapshotFolders } from "../diagnosis/source-snapshot.js";
+import { requireSourceOfSnapshot, sourceMessage, threadBranches } from "../git/thread-source.js";
+import type { Worktrees } from "../git/worktrees.js";
 import { SetupError } from "../host/setup-error.js";
 import { usesFixChanges, type RunOptions } from "../options/run-options.js";
 import { judgeNarrowCheck, type AttemptBuild } from "../repair/attempt-host.js";
@@ -18,13 +23,12 @@ import { requireCoveredCases } from "../steps/capture-step.js";
 import type { InputFingerprints } from "../steps/input-fingerprints.js";
 import { readDocument } from "../steps/read-document.js";
 import { TriageDocumentSchema } from "../triage/triage-document.js";
-import { AcceptedBranch, promote, type BranchGit } from "./accepted-branch.js";
+import { AcceptedBranch, promote } from "./accepted-branch.js";
 import { attribute, BaselineIndex, blocks, key, readResults, type Finding } from "./attribution.js";
 import type { AcceptedState, ClusterWidening, LevelResult, WideningStage, WideningUpdate } from "./cluster-widening.js";
 import { levelSelection, nextLevel, type LevelName } from "./ladder.js";
 import type { LevelCapture } from "./level-capture.js";
 import { describeWidening, wideningDocument, writeJson } from "./widening-report.js";
-import { prepareWidenedSource } from "./widened-source.js";
 
 export type WideningDependencies = {
   readonly threadFolder: (threadId: string) => string;
@@ -33,6 +37,7 @@ export type WideningDependencies = {
   /** Every case of a case file. */
   readonly allCases: (caseFile: string) => readonly PlannedCase[];
   readonly git: BranchGit;
+  readonly worktrees: Worktrees;
   /** The repository's fixes root and the archiver that turns a promoted attempt's fix record into an archived fix change. */
   readonly fixes: { readonly root: string; readonly archive: FixChangeArchiver };
   readonly now: () => Date;
@@ -83,6 +88,8 @@ const fixArchiveFolder = fixArchiveInRepository();
 /** What widening reads from a repair archive's `attempt.json`. */
 const ArchivedAttemptSchema = z.object({
   recordId: z.string(),
+  /** Absent in an archive made before attempts had commits. */
+  commit: z.string().nullable().optional(),
   outcome: z.enum(["passed", "rejected"]),
   answer: z.object({ summary: z.string() }).nullable(),
   patch: z.object({
@@ -92,6 +99,35 @@ const ArchivedAttemptSchema = z.object({
     })),
   }).nullable(),
 });
+
+/** The commit a widening starts at: the accepted branch's after a promotion, else the thread's source commit. */
+function acceptedCommit(accepted: AcceptedState): string {
+  const commit = accepted.commit ?? accepted.sourceCommit;
+  if (commit === undefined) throw new SetupError("The thread's accepted state names no source commit; it was stored before widening worked in worktrees. Start a new thread.");
+  return commit;
+}
+
+/**
+ * The files an attempt commit changes whose blob in the accepted commit is not the one they had in the attempt commit's
+ * parent (an added file must be absent there), and the files it adds whose path the accepted commit uses as a folder, or
+ * has a file inside: the attempt cannot be applied while any is listed.
+ */
+export function staleFiles(worktrees: Worktrees, attemptCommit: string, accepted: string): string[] {
+  const changes = worktrees.changes(worktrees.parent(attemptCommit), attemptCommit);
+  const stale = new Set(changes.filter((change) => worktrees.blob(accepted, change.path) !== change.before).map((change) => change.path));
+  const added = changes.filter((change) => change.before === null && change.after !== null);
+  if (added.length > 0) {
+    const deleted = new Set(changes.filter((change) => change.after === null).map((change) => change.path));
+    const kept = [...worktrees.blobs(accepted).keys()].filter((path) => !deleted.has(path));
+    const keptFiles = new Set(kept);
+    for (const { path } of added) {
+      const parts = path.split("/");
+      const insideFile = parts.slice(1).some((_, index) => keptFiles.has(parts.slice(0, index + 1).join("/")));
+      if (insideFile || kept.some((other) => other.startsWith(`${path}/`))) stale.add(path);
+    }
+  }
+  return [...stale].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+}
 
 function readAttempt(archive: string) {
   const attempt = readDocument(join(archive, "attempt.json"), ArchivedAttemptSchema);
@@ -137,11 +173,30 @@ export class WideningService {
         baselineRuns.push(run.runFolder);
       }
     }
+    const sourceCommit = this.dependencies.worktrees.resolve(`refs/heads/${threadBranches.source(input.threadId)}`);
+    if (sourceCommit === null) throw new SetupError(`The thread's source branch ${threadBranches.source(input.threadId)} does not exist, though its repair passed; restore it or start a new thread.`);
+    this.requireThreadSource(input.threadId, sourceCommit, base!);
+    requireSourceOfSnapshot(this.dependencies.git, input.threadId, sourceCommit, base!, join(threadFolder, "diagnosis", "source"), join(threadFolder, "widening", "source.index"));
     const accepted: AcceptedState = {
-      branch: `accepted/${input.threadId}`, base: base!, commit: null, source: join(threadFolder, "diagnosis", "source"), build: null,
+      branch: `accepted/${input.threadId}`, base: base!, sourceCommit, commit: null, source: join(threadFolder, "diagnosis", "source"), build: null,
       baselineRuns, promoted: [],
     };
     return { widenings, accepted };
+  }
+
+  /**
+   * Fails unless the source branch still holds what the thread made of its snapshot: the snapshot's commit, or a commit on
+   * it that changes only the snapshot's folders and carries the thread's message. A branch that moved is not the source
+   * the attempts were made on.
+   */
+  private requireThreadSource(threadId: string, sourceCommit: string, base: string): void {
+    const { worktrees, git } = this.dependencies;
+    const moved = new SetupError(`The thread's source branch ${threadBranches.source(threadId)} is at ${sourceCommit}, which is neither the snapshot's commit ${base} nor the thread's commit of the snapshot's folders on it; it moved after the attempts were made. Restore it or start a new thread.`);
+    if (sourceCommit === base) return;
+    if (worktrees.parent(sourceCommit) !== base) throw moved;
+    if (git(["log", "-1", "--format=%B", sourceCommit]).trim() !== sourceMessage(threadId).trim()) throw moved;
+    const outside = worktrees.changes(base, sourceCommit).filter((change) => !snapshotFolders.some((folder) => change.path.startsWith(`${folder}/`)));
+    if (outside.length > 0) throw moved;
   }
 
   /** Fails when an input the pixels depend on is not the one the thread started with: its level runs would differ from the baselines for that reason. */
@@ -162,12 +217,28 @@ export class WideningService {
     const { widening, accepted } = input;
     const label = `widen ${widening.clusterId}`;
     const attempt = readAttempt(widening.archive);
-    const source = join(widening.folder, "source");
-    rmSync(widening.folder, { recursive: true, force: true });
-    const conflicts = prepareWidenedSource(accepted.source, widening.archive, attempt.patch.files, source);
-    if (conflicts.length > 0) {
-      return this.failed(widening, "apply", `the patch does not apply to the accepted source: ${conflicts.join(", ")} changed since the patch was made`, false);
+    const { worktrees } = this.dependencies;
+    if (attempt.commit === undefined || attempt.commit === null) {
+      throw new SetupError(`The passed attempt ${widening.archive} names no attempt commit, so it cannot be applied with git; start a new thread.`);
     }
+    const start = acceptedCommit(accepted);
+    // The attempt was made on the thread's source commit, which the accepted state holds as it was verified.
+    if (accepted.sourceCommit !== undefined && worktrees.parent(attempt.commit) !== accepted.sourceCommit) {
+      throw new SetupError(`The attempt commit ${attempt.commit} of ${widening.archive} was not made on the thread's source commit ${accepted.sourceCommit}; start a new thread.`);
+    }
+    const missing = worktrees.missingFolders(start, compiledFolders);
+    if (missing.length > 0) throw new SetupError(`The accepted commit ${start} has no ${missing.map((folder) => `${folder}/`).join(" or ")}, which the candidate is compiled from.`);
+    const source = join(widening.folder, "source");
+    // A step interrupted after its worktree was made starts again from nothing.
+    worktrees.remove(source);
+    rmSync(widening.folder, { recursive: true, force: true });
+    // The branch is made before the patch is looked at, so a rejected attempt keeps it; the rollback removes the worktree.
+    worktrees.add(source, threadBranches.widening(input.threadId, widening.clusterId, widening.attempt), start);
+    const conflicts = staleFiles(worktrees, attempt.commit, start);
+    if (conflicts.length > 0) {
+      return this.failed(widening, "apply", `the patch does not apply to the accepted source: ${conflicts.join(", ")} differ in the accepted source from what the patch was made on`, false);
+    }
+    this.dependencies.git(["cherry-pick", "--no-commit", attempt.commit], { worktree: source });
     this.dependencies.log(`${label}: building the patch on the accepted source.`);
     const started = this.dependencies.now().getTime();
     const status = await this.dependencies.build({
@@ -266,13 +337,15 @@ export class WideningService {
     const { widening, accepted } = input;
     if (widening.status !== "verified") throw new Error(`Widening ${widening.clusterId} is ${widening.status}, not verified.`);
     const attempt = readAttempt(widening.archive);
-    const branch = new AcceptedBranch(this.dependencies.git, input.threadId, join(widening.folder, "promote.index"));
+    const branch = new AcceptedBranch(this.dependencies.git, input.threadId);
+    const worktree = join(widening.folder, "source");
+    const { worktrees } = this.dependencies;
     // A promotion committed before an interruption is taken as it is; nothing is archived again.
-    const alsoCommitted = usesFixChanges(input.options) && !branch.promotedRecord(widening.recordId) ? [this.archiveFixChange(widening)] : [];
+    const committed = branch.promotedRecord(widening.recordId) || worktrees.trailer(worktrees.head(worktree), "Repair-Record") === widening.recordId;
+    if (usesFixChanges(input.options) && !committed) this.archiveFixChange(widening);
     const commit = promote({
-      branch, base: accepted.base, accepted: accepted.commit, snapshotFolder: join(this.dependencies.threadFolder(input.threadId), "diagnosis", "source"),
-      widenedSource: join(widening.folder, "source"), trailers: { thread: input.threadId, cluster: widening.clusterId, record: widening.recordId }, summary: attempt.answer.summary,
-      alsoCommitted,
+      branch, worktrees, accepted: accepted.commit, start: acceptedCommit(accepted), worktree,
+      trailers: { thread: input.threadId, cluster: widening.clusterId, record: widening.recordId }, summary: attempt.answer.summary,
     });
     // The rollback step removes the folders, so a promotion interrupted before its checkpoint can be repeated.
     if (commit === null) return this.failed(widening, "promote", "the widened source stages the same tree as the accepted source, so there is nothing to commit", false);
@@ -308,8 +381,10 @@ export class WideningService {
     return this.end({ ...widening, status: "rejected" }, store, null);
   }
 
+  /** Removes a failed widening's worktree and build; its branch stays. */
   private discard(widening: ClusterWidening): void {
-    for (const part of ["source", "build"]) rmSync(join(widening.folder, part), { recursive: true, force: true });
+    this.dependencies.worktrees.remove(join(widening.folder, "source"));
+    rmSync(join(widening.folder, "build"), { recursive: true, force: true });
   }
 
   /** Writes the cluster's `widening.json`, labels the repair record and returns the final update. */
