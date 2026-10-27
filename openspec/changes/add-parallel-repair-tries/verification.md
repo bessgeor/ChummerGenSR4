@@ -9,6 +9,7 @@
 | `npm run workflow:test`, run 2 | Passed with the new tests: 586 tests, 586 passed, 0 failed (exit 0). |
 | `npm run workflow:test`, run 3 | Passed after a whole cluster replaces the one it names in the state and with the merge test: 587 tests, 587 passed, 0 failed (exit 0). |
 | `npm run workflow:test`, run 4 | Passed on the final source, with a budget-stopped hypothesis ending an unconfirmed cluster as `budget_exhausted` and no quota wait for a failed cluster: 588 tests, 588 passed, 0 failed, 0 skipped (exit 0). |
+| `npm run workflow:test`, run 5 | Passed with a stored record that no hypothesis lists labelled by the hypothesis it names: 589 tests, 589 passed, 0 failed, 0 skipped (exit 0). |
 | `npm run openspec:validate` | Passed strict validation: 21 passed, 0 failed. |
 | SHA-256 of `bin/ChummerGenSR4.exe` | `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`; the executable was not built, launched or touched. |
 
@@ -24,4 +25,4 @@ Every test below runs the workflow graph with fake model jobs and fake check cap
 Review findings not changed:
 
 - A failed hypothesis ends its cluster's jobs, so the cluster's other hypotheses are not challenged: the cluster is failed whatever they would show, and it is not checked.
-- The record of a job interrupted before its task's write was checkpointed is listed by the cluster only and gets the cluster's label: a record holds no hypothesis number.
+- None of the findings about interrupted jobs' records remains: a diagnosis record holds the number of its hypothesis, so the record of a job stored before its hypothesis was checkpointed is labelled with that hypothesis's outcome (`diagnosis-hypotheses.test.ts`: a refuted hypothesis's interrupted challenge stays `refuted` when another hypothesis confirms the cluster).

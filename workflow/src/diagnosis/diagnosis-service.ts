@@ -9,7 +9,7 @@ import { ExecutionCoverageSchema } from "../../../contracts/generated/typescript
 import { compiledFoldersIn } from "../compiled-source.js";
 import { fixArchiveOf, fixesRootOf } from "../fixes/fix-archiver.js";
 import { readArchivedFixes } from "../fixes/retrieval.js";
-import { labelRecordById, nextRecordId, noLabels, putRecord, type EvalRecord } from "../evals/eval-record.js";
+import { findRecord, labelRecordById, nextRecordId, noLabels, putRecord, type EvalRecord } from "../evals/eval-record.js";
 import type { ScratchFolder } from "../host/scratch-folder.js";
 import { SetupError } from "../host/setup-error.js";
 import type { RunOptions } from "../options/run-options.js";
@@ -147,8 +147,7 @@ export class DiagnosisService {
 
   /**
    * Captures every predicted case and capture in one run, judges each challenged hypothesis of each challenged cluster
-   * and labels the records of each hypothesis with its own outcome; the records of interrupted jobs, which no
-   * hypothesis lists, get the cluster's.
+   * and labels the records of each hypothesis with its own outcome, those of interrupted jobs included.
    */
   async check(input: CheckInput, store: BaseStore): Promise<CheckResult> {
     const plan = planCheck(input.clusters);
@@ -167,8 +166,9 @@ export class DiagnosisService {
       // Every job of the cluster, the quota and interrupted attempts included. A hypothesis that was not judged
       // (it abstained or the budget stopped it) has no outcome, so its records keep no label.
       for (const recordId of cluster.records) {
-        const owner = variants.find((variant) => variant.records.includes(recordId));
-        const outcome = owner === undefined ? checked.outcome : checked.variants.find((item) => item.variant === owner.variant)?.outcome ?? null;
+        // A record of an interrupted job that no hypothesis lists belongs to the hypothesis its stored record names.
+        const owner = variants.find((variant) => variant.records.includes(recordId))?.variant ?? (await findRecord(store, recordId)).hypothesis ?? 1;
+        const outcome = checked.variants.find((item) => item.variant === owner)?.outcome ?? null;
         if (outcome !== null) await labelRecordById(store, recordId, outcome);
       }
       const judged = variants.length === 1 ? "" : ` (${checked.variants.map((item) => `hypothesis ${item.variant} ${item.outcome}`).join(", ")})`;
@@ -289,6 +289,7 @@ export class DiagnosisService {
     const record: EvalRecord = {
       schemaVersion: 2, recordId, jobKind: kind, origin: "workflow", threadId: input.threadId, subject: { kind: "discrepancy-cluster", id: cluster.clusterId },
       challenged: kind === "challenge" ? variant.hypothesis!.recordId : null,
+      hypothesis: variant.variant,
       contextHash: cluster.contextHash, promptVersion: tunedPromptVersion(kind === "hypothesis" ? hypothesisPromptVersionOf(manifest) : challengePromptVersion, tuning),
       agent: { provider: choice.provider, model: choice.model, effort: choice.effort },
       startedUtc: started.toISOString(), finishedUtc: finished.toISOString(), durationMs: measuredDuration(label, result),

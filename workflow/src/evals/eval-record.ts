@@ -101,6 +101,8 @@ export const EvalRecordSchema = z.strictObject({
   subject: z.strictObject({ kind: z.enum(["discrepancy-cluster", "eval-record", "discovery-thread", "discovery-target", "eval-run"]), id: z.string().min(1) }),
   /** For a workflow challenge: the ID of the hypothesis record it challenged; null for every other job. */
   challenged: z.string().min(1).nullable().default(null),
+  /** For a workflow diagnosis job: the number of the cluster's hypothesis it belongs to; absent in a record of the first hypothesis stored before there were several, and in every other job. */
+  hypothesis: z.number().int().positive().optional(),
   labels: LabelsSchema,
 });
 export type EvalRecord = z.infer<typeof EvalRecordSchema>;

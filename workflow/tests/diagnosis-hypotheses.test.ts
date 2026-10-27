@@ -169,6 +169,32 @@ test("a run killed during a hypothesis's challenge resumes it alone, and the lab
   for (const id of cluster.records) ok((await labelOf(store, id)) !== null, id);
 });
 
+test("a record a killed run stored before its hypothesis was checkpointed gets the label of the hypothesis it names", async () => {
+  const checkpointer = new MemorySaver();
+  const store = new InMemoryStore();
+  const controller = new AbortController();
+  const fake = agents(undefined, (call, attempt) => {
+    if (call.kind !== "challenge" || call.variant !== 2 || attempt > 1) return null;
+    setTimeout(() => controller.abort(), 10);
+    return { hang: true };
+  });
+  const killed = diagnosisHarness({ spots: [twoClusters[0]!], agents: fake, hypotheses: 2, checkpointer, store, signal: controller.signal });
+  equal(await killed.start(), 3);
+  const threadId = killed.threadId();
+  // The first hypothesis (refuted) ran a second challenge that stored its record and was killed before the state listed it.
+  const first = variantsOf(await clusterOf(killed, threadId))[0]!;
+  const interrupted = `${threadId}/${clusterId}/challenge/2`;
+  const stored = EvalRecordSchema.parse((await store.get(recordNamespace("challenge"), first.challenge!.recordId))!.value);
+  await store.put(recordNamespace("challenge"), interrupted, { ...stored, recordId: interrupted });
+  const resumed = diagnosisHarness({ spots: [twoClusters[0]!], agents: fake, hypotheses: 2, checkpointer, store, root: killed.root });
+  equal(await resumed.resume(threadId), 1);
+  const cluster = await clusterOf(resumed, threadId);
+  ok(cluster.records.includes(interrupted));
+  ok(variantsOf(cluster).every((variant) => !variant.records.includes(interrupted)));
+  equal(await labelOf(store, interrupted), "refuted");
+  deepStrictEqual(await labelsByVariant(store, cluster), [["refuted", "refuted"], ["confirmed", "confirmed"]]);
+});
+
 test("a thread stored with one hypothesis per cluster is read and resumed as one hypothesis", async () => {
   const checkpointer = new MemorySaver();
   const store = new InMemoryStore();
