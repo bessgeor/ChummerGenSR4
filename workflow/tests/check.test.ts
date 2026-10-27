@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { CaptureResults } from "../../contracts/generated/typescript/parity-capture-results.js";
-import { judge, observe, planCheck, type ObservedCapture } from "../src/diagnosis/check.js";
+import { checkCluster, judge, observe, planCheck, variantChecks, type ObservedCapture } from "../src/diagnosis/check.js";
 import { hostCheckCapture } from "../src/diagnosis/check-capture.js";
 import type { ClusterDiagnosis } from "../src/diagnosis/cluster-diagnosis.js";
 import type { DiagnosisDocument } from "../src/diagnosis/diagnosis-document.js";
@@ -73,6 +73,34 @@ test("a cluster is confirmed, refuted or undecided by its predictions", () => {
   });
   equal(judge(agreeing, seen([["build-alpha/skills", "differs"], ["career-beta/common", "matches"]])).outcome, "confirmed");
   equal(judge(agreeing, seen([["build-alpha/skills", "differs"], ["career-beta/common", "differs"]])).outcome, "refuted");
+});
+
+test("a cluster of several hypotheses is confirmed by any, refuted only when every predicting one is, else undecided", () => {
+  const refuting = hypothesisAnswer("Refuted.");
+  refuting.explanation!.predictions = [{ case: "build-alpha", capture: "skills", expect: "matches", why: "w" }];
+  const unobserved = hypothesisAnswer("Undecided.");
+  unobserved.explanation!.predictions = [{ case: "build-gamma", capture: "armor", expect: "differs", why: "w" }];
+  const variant = (number: number, base: ClusterDiagnosis, status: ClusterDiagnosis["status"] = "challenged") =>
+    ({ variant: number, status, hypothesis: base.hypothesis, challenge: base.challenge, failure: null, records: [] });
+  const several = (first: ClusterDiagnosis, ...others: ClusterDiagnosis[]): ClusterDiagnosis =>
+    ({ ...first, variants: others.map((other, index) => variant(index + 2, other, other.status)), firstRecords: [] });
+  const observed = seen([["build-alpha/skills", "differs"], ["career-beta/common", "matches"]]);
+  const confirmed = cluster("a", hypothesisAnswer(), challengeAnswer());
+  const refuted = cluster("a", refuting, null);
+  const undecided = cluster("a", unobserved, null);
+  const outcomes = (checked: ReturnType<typeof checkCluster>) => [checked.outcome, checked.variants.map((item) => [item.variant, item.outcome])];
+  deepStrictEqual(outcomes(checkCluster(several(refuted, confirmed), observed)), ["confirmed", [[1, "refuted"], [2, "confirmed"]]]);
+  deepStrictEqual(outcomes(checkCluster(several(refuted, refuted), observed)), ["refuted", [[1, "refuted"], [2, "refuted"]]]);
+  deepStrictEqual(outcomes(checkCluster(several(refuted, undecided), observed)), ["undecided", [[1, "refuted"], [2, "undecided"]]]);
+  // A hypothesis that was not challenged is not judged; the first judged one's predictions stay at the top level.
+  const checked = checkCluster(several(cluster("a", hypothesisAnswer(), null, "abstained"), refuted), observed);
+  deepStrictEqual(outcomes(checked), ["refuted", [[2, "refuted"]]]);
+  deepStrictEqual(checked.hypothesis.map((item) => item.expect), ["matches"]);
+  // The plan covers the predictions of every challenged hypothesis.
+  deepStrictEqual(planCheck({ a: several(confirmed, undecided) })?.cases, ["build-alpha", "career-beta", "build-gamma"]);
+  // A check stored with one hypothesis per cluster judged the first.
+  const { variants: _, ...stored } = checkCluster(confirmed, observed);
+  deepStrictEqual(variantChecks(stored).map((item) => [item.variant, item.outcome]), [[1, "confirmed"]]);
 });
 
 test("two clusters are checked in one capture with the union of cases and captures; records get the label", async () => {

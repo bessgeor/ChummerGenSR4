@@ -348,9 +348,20 @@ test("the router waits first, then hypothesizes, then challenges, then checks on
     waiting: waiting ? { job: "hypothesis", provider: "claude", since: "t", processId: "p", message: "m" } : null,
   });
   deepStrictEqual(nextDiagnosisRoute({ a: cluster("a", "pending", true), b: cluster("b", "pending") }, false), { kind: "wait_for_quota" });
-  deepStrictEqual(nextDiagnosisRoute({ a: cluster("a", "pending"), b: cluster("b", "hypothesized") }, false), { kind: "hypothesize", clusters: ["a"] });
-  deepStrictEqual(nextDiagnosisRoute({ a: cluster("a", "failed"), b: cluster("b", "hypothesized") }, false), { kind: "challenge", clusters: ["b"] });
+  deepStrictEqual(nextDiagnosisRoute({ a: cluster("a", "pending"), b: cluster("b", "hypothesized") }, false), { kind: "hypothesize", jobs: [{ clusterId: "a", variant: 1 }] });
+  deepStrictEqual(nextDiagnosisRoute({ a: cluster("a", "failed"), b: cluster("b", "hypothesized") }, false), { kind: "challenge", jobs: [{ clusterId: "b", variant: 1 }] });
   deepStrictEqual(nextDiagnosisRoute({ a: cluster("a", "challenged"), b: cluster("b", "abstained") }, false), { kind: "check" });
   deepStrictEqual(nextDiagnosisRoute({ a: cluster("a", "challenged") }, true), { kind: "end" });
   deepStrictEqual(nextDiagnosisRoute({ a: cluster("a", "budget_exhausted") }, false), { kind: "end" });
+  // Every pending hypothesis of every cluster at once; a cluster with a failed hypothesis gets no further job.
+  const variant = (number: number, status: ClusterDiagnosis["status"]) => ({ variant: number, status, hypothesis: null, challenge: null, failure: null, records: [] });
+  const several = (id: string, first: ClusterDiagnosis["status"], ...others: ClusterDiagnosis["status"][]): ClusterDiagnosis =>
+    ({ ...cluster(id, first), variants: others.map((status, index) => variant(index + 2, status)), firstRecords: [] });
+  deepStrictEqual(nextDiagnosisRoute({ a: several("a", "pending", "pending"), b: cluster("b", "pending") }, false),
+    { kind: "hypothesize", jobs: [{ clusterId: "a", variant: 1 }, { clusterId: "a", variant: 2 }, { clusterId: "b", variant: 1 }] });
+  deepStrictEqual(nextDiagnosisRoute({ a: several("a", "hypothesized", "abstained", "hypothesized") }, false),
+    { kind: "challenge", jobs: [{ clusterId: "a", variant: 1 }, { clusterId: "a", variant: 3 }] });
+  deepStrictEqual(nextDiagnosisRoute({ a: several("a", "hypothesized", "failed") }, false), { kind: "end" });
+  deepStrictEqual(nextDiagnosisRoute({ a: several("a", "abstained", "challenged") }, false), { kind: "check" });
+  deepStrictEqual(nextDiagnosisRoute({ a: several("a", "abstained", "abstained") }, false), { kind: "end" });
 });
