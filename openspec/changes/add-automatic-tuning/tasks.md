@@ -12,7 +12,7 @@ Each task names the tasks it builds on as `(after: …)`, by number in this list
 
 ## 3. Worktree and merge
 
-- [ ] 3.1 (after: 2.1, add-repair-worktrees#1.1) Run the cycle in a worktree on `tuning/<cycle>` when the tuning folders are inside the repository, commit its files and merge them into the branch; use folders outside the repository in place. Evidence: workflow tests on a temporary repository for a merged activation, uncommitted tuning files, a detached `HEAD`, a merge conflict with a resume, and external folders.
+- [x] 3.1 (after: 2.1, add-repair-worktrees#1.1) Run the cycle in a worktree on `tuning/<cycle>` when the tuning folders are inside the repository, commit its files and merge them into the branch; use folders outside the repository in place. Evidence: workflow tests on a temporary repository for a merged activation, uncommitted tuning files, a detached `HEAD`, a merge conflict with a resume, and external folders.
 
 ## 4. Docs
 
