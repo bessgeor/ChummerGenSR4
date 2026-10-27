@@ -1,6 +1,5 @@
 import type { BaseCheckpointSaver } from "@langchain/langgraph-checkpoint";
 import { join } from "node:path";
-import { threadConfig } from "../graph/run-workflow.js";
 import { SetupError } from "../host/setup-error.js";
 import type { Cycle } from "./cycle.js";
 import { buildTuningGraph, type TuningStateValue, type TuningSteps } from "./tuning-graph.js";
@@ -34,7 +33,9 @@ export async function runTuningThread(graph: TuningGraph, steps: TuningRun, inpu
   const unfinished = (await tuningThread(graph, input.tuningId)) === "unfinished";
   let final: TuningStateValue;
   try {
-    final = await graph.invoke(unfinished ? null : input, threadConfig(input.tuningId, signal)) as TuningStateValue;
+    final = await graph.invoke(unfinished ? null : input, {
+      configurable: { thread_id: input.tuningId }, durability: "sync", ...(signal === undefined ? {} : { signal }),
+    }) as TuningStateValue;
   } catch (error) {
     if (signal?.aborted === true) throw new SetupError(`Interrupted: tuning ${input.tuningId} stopped; resume it with ${resume}.`);
     throw error;

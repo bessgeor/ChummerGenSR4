@@ -1,16 +1,16 @@
 import { deepStrictEqual, equal, ok, rejects } from "node:assert/strict";
-import { existsSync, mkdirSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
-import { DatasetSchema, type Dataset } from "../src/evals/dataset.js";
+import { DatasetSchema, freezeDataset, type Dataset } from "../src/evals/dataset.js";
 import { runEvalCommand } from "../src/evals/eval-commands.js";
-import { putRecord } from "../src/evals/eval-record.js";
+import { listRecords, putRecord } from "../src/evals/eval-record.js";
 import { SetupError } from "../src/host/setup-error.js";
 import { workflowPaths } from "../src/paths.js";
 import { readDocument } from "../src/steps/read-document.js";
 import { readActiveFile } from "../src/tuning/active-configuration.js";
-import { autoTuningPath, newHypothesisRecords, readAutoTuning, resolveAutoTuning } from "../src/tuning/auto-tuning.js";
+import { autoTuningPath, newHypothesisRecords, readAutoTuning, recordAutoTuning, resolveAutoTuning, startAutoTuning } from "../src/tuning/auto-tuning.js";
 import { readCycle } from "../src/tuning/cycle.js";
 import { readLedger } from "../src/tuning/holdout.js";
 import type { TuningSteps } from "../src/tuning/tuning-graph.js";
@@ -90,6 +90,8 @@ test("a due automatic tuning freezes the next version of its dataset, activates 
   equal(await tuningThread(compileTuningGraph(refusingSteps(), context.tuningCheckpointer()), entry.tuningId), "finished");
   ok(context.lines.includes(`Automatic tuning ${entry.tuningId}: activated; dataset ${entry.dataset}; state ${autoTuningPath(context.paths.evalsFolder)}`), context.lines.join("\n"));
   ok(context.lines.some((line) => /proposal 1: candidate tuned-[0-9a-f]{12}, run er-.*pairs, mean difference 1.000, 95% t interval/.test(line)), context.lines.join("\n"));
+  // Its cycle is the tuning's: tune cycle does not resume it.
+  await rejects(runEvalCommand(["tune", "cycle", "--resume", entry.cycle!], context), (error: Error) => error instanceof SetupError && error.message.includes("tune auto continues it"));
 
   // Not due again until new records come; the next tuning freezes the next version.
   equal(await runEvalCommand(["tune", "auto"], context), 0);
@@ -234,6 +236,34 @@ test("tune cycle runs as a tuning thread under its cycle ID, from the baseline",
   equal(await tuningThread(compileTuningGraph(refusingSteps(), context.tuningCheckpointer()), cycleId), "finished");
   // A cycle thread neither counts nor freezes.
   deepStrictEqual([readAutoTuning(context.paths.evalsFolder).tunings.length, readdirSync(join(context.paths.evalsFolder, "datasets", "auto-hypothesis"))], [1, ["v1"]]);
+});
+
+test("a tuning whose freeze stopped after it put its version in place continues on that version", async () => {
+  const { context, records } = await dueTuning(agents([proposal("Cite the capture.")], "test", { "Cite the capture.": "all" }));
+  const evalsFolder = context.paths.evalsFolder;
+  // As if tune auto had recorded the tuning and its version, frozen it and stopped before its checkpoint.
+  const tuning = startAutoTuning({ store: context.store, evalsFolder, now: context.now, newTuningId: () => "tune-20261002T090000Z-0000abcd" },
+    { kind: "due", records, every: records.length, forced: false });
+  const target = join(evalsFolder, "datasets", "auto-hypothesis", "v1");
+  recordAutoTuning(evalsFolder, tuning.tuningId, { dataset: target });
+  const { folder } = await freezeDataset({
+    name: "auto-hypothesis", jobKind: "hypothesis", seed: "auto", testPercent: 50, reason: "r", datasetsFolder: join(evalsFolder, "datasets"),
+    threadFolder: context.paths.threadFolder, records: await listRecords(context.store), benchmark: [], snapshotBase: () => null, now: context.now, log: () => undefined,
+  });
+  equal(folder, target);
+  equal(await runEvalCommand(["tune", "auto"], context), 0, context.lines.join("\n"));
+  deepStrictEqual(readdirSync(join(evalsFolder, "datasets", "auto-hypothesis")), ["v1"]);
+  const { entry, cycle } = finishedTuning(evalsFolder);
+  deepStrictEqual([entry.tuningId, entry.dataset, cycle.options.dataset, entry.outcome], [tuning.tuningId, target, target, "activated"]);
+});
+
+test("a tune auto while another runs a tuning is a setup error that counts nothing", async () => {
+  const { context } = await dueTuning(agents([], "test", {}));
+  const lock = `${autoTuningPath(context.paths.evalsFolder)}.run.lock`;
+  mkdirSync(join(context.paths.evalsFolder, "tuning"), { recursive: true });
+  writeFileSync(lock, "1\n");
+  await rejects(runEvalCommand(["tune", "auto"], context), (error: Error) => error instanceof SetupError && error.message.includes("Another tune auto runs an automatic tuning"));
+  deepStrictEqual([existsSync(autoTuningPath(context.paths.evalsFolder)), existsSync(lock)], [false, true]);
 });
 
 test("the tuning graph compiles from steps that do nothing until a node runs", async () => {

@@ -8,9 +8,11 @@ import { metrics } from "../evals/metrics.js";
 import { SetupError } from "../host/setup-error.js";
 import type { ComparisonSummary } from "./active-configuration.js";
 import { activate, entryName, rollback } from "./activation.js";
-import { autoTuningDefaults, autoTuningPath, checkAutoTuning, newTuningId } from "./auto-tuning.js";
+import {
+  autoTuningDefaults, autoTuningPath, checkAutoTuning, newTuningId, readAutoTuning, withAutoTuningRun, type AutoTuningSettings, type AutoTuningTrigger,
+} from "./auto-tuning.js";
 import { candidatesFolder, parseTuningFile, storeCandidate } from "./candidates.js";
-import { cycleFolder, cycleOptions, readCycle, type Cycle, type CycleDependencies } from "./cycle.js";
+import { cycleFolder, cycleOptions, ensureCycle, readCycle, type Cycle, type CycleDependencies } from "./cycle.js";
 import { defaultMaximumExposures, openHoldout, type HoldoutDependencies } from "./holdout.js";
 import { proposeCandidate, type TuneDependencies } from "./propose.js";
 import type { TuningStateValue } from "./tuning-graph.js";
@@ -133,13 +135,13 @@ export function comparisonLine(comparison: ComparisonSummary): string {
 }
 
 /** The tuning graph's steps over the evaluation context, and the graph compiled with the tuning threads' checkpointer. */
-function tuningGraph(context: EvalContext): { graph: TuningGraph; steps: TuningRun } {
+function tuningGraph(context: EvalContext): { graph: TuningGraph; steps: TuningRun; cycle: CycleDependencies } {
   const cycle: CycleDependencies = {
     run: holdoutDependencies(context), tune: tuneDependencies(context), evalsFolder: context.paths.evalsFolder, tuningFolder: context.tuningFolder(),
     certificatesFolder: context.certificatesFolder(), newRunId: () => newEvalRunId(context.now()),
   };
   const steps = tuningSteps({ cycle, store: context.store, paths: context.paths, git: context.git });
-  return { graph: compileTuningGraph(steps, context.tuningCheckpointer()), steps };
+  return { graph: compileTuningGraph(steps, context.tuningCheckpointer()), steps, cycle };
 }
 
 /** Exit status of a finished cycle: 0 activated or no improvement, 1 rejected, 2 failed. */
@@ -150,11 +152,15 @@ function cycleStatus(cycle: Cycle): number {
 const cycleCommand: TuneCommand = async (args, context) => {
   const options = CommandOptions.parse("tune cycle", args, ["dataset", "metric", "min-pass", "candidates", "repeat", "max-exposures", "max-mean-cost-usd", "resume"]);
   const resumed = options.text("resume");
+  const { graph, steps, cycle: dependencies } = tuningGraph(context);
   let input: TuningStateValue;
   if (resumed !== null) {
     for (const other of ["dataset", "metric", "min-pass", "candidates", "repeat", "max-exposures", "max-mean-cost-usd"]) {
       if (options.text(other) !== null) throw new SetupError(`--resume takes no --${other}: a cycle keeps the options it was started with.`);
     }
+    const state = readAutoTuning(context.paths.evalsFolder);
+    const owner = [...(state.current === null ? [] : [state.current]), ...state.tunings].find((tuning) => tuning.cycle === resumed);
+    if (owner !== undefined) throw new SetupError(`Tuning cycle ${resumed} is the cycle of the automatic tuning ${owner.tuningId}; tune auto continues it.`);
     // A cycle keeps its stored options; its thread continues from its checkpoint, or runs again from the baseline when it
     // has none or concluded, and its steps find what the cycle recorded.
     const stored = readCycle(context.paths.evalsFolder, resumed);
@@ -170,8 +176,10 @@ const cycleCommand: TuneCommand = async (args, context) => {
       maxMeanCostUsd: options.text("max-mean-cost-usd") === null ? null : options.number("max-mean-cost-usd", 0, Number.MIN_VALUE, Number.MAX_VALUE),
     });
     input = { tuningId: cycleId, request: { kind: "cycle", options: cycle }, dataset: cycle.dataset, cycle: null, concluded: null };
+    // Recorded before its thread starts, so the cycle can be resumed from any point.
+    ensureCycle(dependencies, cycleId, cycle);
+    context.log(`Tuning cycle ${cycleId}: resume it after an interruption with: npm run eval -- tune cycle --resume ${cycleId}`);
   }
-  const { graph, steps } = tuningGraph(context);
   const cycle = await runTuningThread(graph, steps, input, `npm run eval -- tune cycle --resume ${input.tuningId}`, context.signal);
   for (const line of cycleLines(cycle)) context.log(line);
   context.log(`Cycle folder: ${cycleFolder(context.paths.evalsFolder, cycle.cycleId)}`);
@@ -222,6 +230,20 @@ const auto: TuneCommand = async (args, context) => {
     throw new SetupError(`tune auto runs its cycle on the tuning and certificates folders in place, so they must lie outside the repository; `
       + `${inside.join(" and ")} ${inside.length === 1 ? "lies" : "lie"} inside it. Name other folders with tuning and certificates in the profile.`);
   }
+  // One tune auto runs a tuning at a time; the trigger is read again under the lock, as another may have run meanwhile.
+  return withAutoTuningRun(evalsFolder, async () => {
+    const locked = await checkAutoTuning({ store: context.store, evalsFolder, now: context.now, newTuningId }, settings, options.flag("force"));
+    if (locked.kind === "not_due") {
+      context.log(`Automatic tuning: ${locked.count} of ${locked.every} new hypothesis records; not due.`);
+      return 0;
+    }
+    return runAutoTuning(context, locked, settings);
+  });
+};
+
+/** Starts the due tuning, or continues the one in progress, and returns the exit status of its cycle's outcome. */
+async function runAutoTuning(context: EvalContext, trigger: Exclude<AutoTuningTrigger, { kind: "not_due" }>, settings: AutoTuningSettings): Promise<number> {
+  const evalsFolder = context.paths.evalsFolder;
   let input: TuningStateValue;
   if (trigger.kind === "due") {
     context.log(`Automatic tuning: ${trigger.records.length} of ${trigger.every} new hypothesis records${trigger.forced ? ", forced" : ""}; due.`);
@@ -239,7 +261,7 @@ const auto: TuneCommand = async (args, context) => {
   context.log(`Cycle folder: ${cycleFolder(evalsFolder, cycle.cycleId)}`);
   context.log(`Automatic tuning ${input.tuningId}: ${cycle.outcome}; dataset ${cycle.options.dataset}; state ${autoTuningPath(evalsFolder)}`);
   return cycleStatus(cycle);
-};
+}
 
 const commands: Readonly<Record<string, TuneCommand>> = { add, propose, holdout, activate: activateCommand, rollback: rollbackCommand, cycle: cycleCommand, auto };
 

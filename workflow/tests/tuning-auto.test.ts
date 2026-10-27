@@ -8,7 +8,7 @@ import { putRecord } from "../src/evals/eval-record.js";
 import { SetupError } from "../src/host/setup-error.js";
 import { SqliteStore } from "../src/store/sqlite-store.js";
 import { loadProfile } from "../src/options/profile.js";
-import { autoTuningPath, checkAutoTuning, newHypothesisRecords, newTuningId, readAutoTuning, resolveAutoTuning, startAutoTuning, type AutoTuningState } from "../src/tuning/auto-tuning.js";
+import { autoTuningPath, checkAutoTuning, finishAutoTuning, newHypothesisRecords, newTuningId, readAutoTuning, resolveAutoTuning, startAutoTuning, type AutoTuningState } from "../src/tuning/auto-tuning.js";
 import { writeDocument } from "../src/steps/write-document.js";
 import { scratch } from "./diagnosis-fixtures.js";
 import { evalContext, record } from "./eval-fixtures.js";
@@ -56,7 +56,9 @@ test("a due tuning is recorded as in progress before its freeze; with nothing to
   const state = readAutoTuning(context.paths.evalsFolder);
   equal(state.counted.length, 13);
   deepStrictEqual(state.tunings, []);
-  deepStrictEqual([state.current?.records, state.current?.forced, state.current?.dataset, state.current?.cycle, state.current?.outcome], [state.counted, false, null, null, null]);
+  // The version's folder is recorded before the freeze; nothing was frozen there.
+  const target = join(context.paths.evalsFolder, "datasets", "auto-hypothesis", "v1");
+  deepStrictEqual([state.current?.records, state.current?.forced, state.current?.dataset, state.current?.cycle, state.current?.outcome], [state.counted, false, target, null, null]);
   equal(existsSync(join(context.paths.evalsFolder, "datasets", "auto-hypothesis")), false);
 
   // The next call continues the tuning in progress and counts nothing.
@@ -150,7 +152,7 @@ test("records added during a tuning are not counted by it, nothing is counted wh
   deepStrictEqual(readAutoTuning(context.paths.evalsFolder).counted, first.records);
   await rejects(runEvalCommand(["tune", "auto"], context), nothingToFreeze);
   deepStrictEqual(readAutoTuning(context.paths.evalsFolder).counted, first.records);
-  deepStrictEqual(readAutoTuning(context.paths.evalsFolder).current, tuning);
+  deepStrictEqual(readAutoTuning(context.paths.evalsFolder).current, { ...tuning, dataset: join(context.paths.evalsFolder, "datasets", "auto-hypothesis", "v1") });
 
   // The tuning ends: the records it did not count are the next tuning's.
   const state = readAutoTuning(context.paths.evalsFolder);
@@ -159,6 +161,23 @@ test("records added during a tuning are not counted by it, nothing is counted wh
   deepStrictEqual(await checkAutoTuning(dependencies(context), settings, false), { kind: "not_due", count: 5, every: 12 });
   const next = await checkAutoTuning(dependencies(context), settings, true);
   deepStrictEqual(next.kind === "due" ? next.records : null, added);
+});
+
+test("a tuning's end repeated after another tuning started finds it ended and changes nothing", async () => {
+  const context = await withRecords(13);
+  const first = await checkAutoTuning(dependencies(context), context.autoTuning(), false);
+  if (first.kind !== "due") throw new Error("expected due");
+  const tuning = startAutoTuning(dependencies(context), first);
+  const ended = finishAutoTuning(context.paths.evalsFolder, tuning.tuningId, "activated", new Date("2026-10-02T10:00:00Z"));
+  deepStrictEqual([ended.outcome, ended.finishedUtc], ["activated", "2026-10-02T10:00:00.000Z"]);
+  await addHypotheses(context, 100, 2);
+  const second = await checkAutoTuning(dependencies(context), context.autoTuning(), true);
+  if (second.kind !== "due") throw new Error("expected due");
+  const next = startAutoTuning({ ...dependencies(context), newTuningId: () => "tune-second" }, second);
+  const before = readAutoTuning(context.paths.evalsFolder);
+  deepStrictEqual(finishAutoTuning(context.paths.evalsFolder, tuning.tuningId, "rejected", new Date("2026-10-02T11:00:00Z")), ended);
+  deepStrictEqual(readAutoTuning(context.paths.evalsFolder), before);
+  equal(before.current?.tuningId, next.tuningId);
 });
 
 test("an invalid autoTuning in the profile is a setup error naming the profile, and tune auto counts nothing", async () => {

@@ -136,6 +136,13 @@ function reviewedRootCause(record: EvalRecord, records: readonly EvalRecord[]): 
 
 type Draft = { clusterId: string; contextHash: string; sourceIdentity: string; hypothesis: Explanation | null; records: EvalRecord[]; contextFolder: string; sourceFolder: string };
 
+/** The highest frozen version of a dataset name, 0 when none is frozen. */
+export function latestDatasetVersion(datasetsFolder: string, name: string): number {
+  const nameFolder = join(datasetsFolder, name);
+  const versions = existsSync(nameFolder) ? readdirSync(nameFolder).map((entry) => /^v(\d+)$/.exec(entry)).flatMap((match) => (match === null ? [] : [Number(match[1])])) : [];
+  return versions.length === 0 ? 0 : Math.max(...versions);
+}
+
 /** Freezes the next version of a dataset from the job kind's workflow records; an existing version is never changed. */
 export async function freezeDataset(input: FreezeInput): Promise<{ folder: string; dataset: Dataset }> {
   if (!datasetNamePattern.test(input.name)) throw new SetupError(`A dataset name is lower-case letters, digits and dashes, got '${input.name}'.`);
@@ -162,8 +169,7 @@ export async function freezeDataset(input: FreezeInput): Promise<{ folder: strin
   if (drafts.size === 0) throw new SetupError(`No succeeded workflow ${input.jobKind} record has its context in its thread folder; there is nothing to freeze.`);
 
   const nameFolder = join(input.datasetsFolder, input.name);
-  const versions = existsSync(nameFolder) ? readdirSync(nameFolder).map((entry) => /^v(\d+)$/.exec(entry)).flatMap((match) => (match === null ? [] : [Number(match[1])])) : [];
-  const previous = versions.length === 0 ? 0 : Math.max(...versions);
+  const previous = latestDatasetVersion(input.datasetsFolder, input.name);
   const before = previous === 0 ? null : readDocument(join(nameFolder, `v${previous}`, "dataset.json"), DatasetSchema);
   // A cluster keeps its partition across versions only while the seed and the share stay: a prompt tuned on the development partition of
   // one version must never meet its clusters in the test partition of the next.

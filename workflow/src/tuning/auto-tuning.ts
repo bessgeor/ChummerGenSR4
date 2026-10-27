@@ -29,7 +29,7 @@ const AutoTuningEntrySchema = z.strictObject({
   forced: z.boolean(),
   /** The records it counted when it started. */
   records: z.array(z.string().min(1)),
-  /** The folder of the dataset version it froze. */
+  /** The folder of the dataset version it freezes, recorded before the freeze. */
   dataset: z.string().min(1).nullable(),
   cycle: z.string().min(1).nullable(),
   /** The branch its cycle worked on, the commit of its files there, and the merge commit on the branch it started from. */
@@ -103,26 +103,45 @@ export async function checkAutoTuning(dependencies: AutoTuningDependencies, sett
   return { kind: "due", records, every: settings.every, forced: force };
 }
 
-/** Runs `action` holding the exclusive lock file of `auto.json`; another holder is a setup error, never waited for. */
-function withAutoTuningLock<T>(evalsFolder: string, action: () => T): T {
-  const path = autoTuningPath(evalsFolder);
-  const lock = `${path}.lock`;
-  mkdirSync(dirname(path), { recursive: true });
+/** Creates an exclusive lock file and returns its release; another holder is a setup error, never waited for. */
+function acquireLock(lock: string, held: string): () => void {
+  mkdirSync(dirname(lock), { recursive: true });
   let descriptor: number;
   try {
     descriptor = openSync(lock, "wx");
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-      throw new SetupError(`Another tune auto is changing ${path}: its lock file ${lock} exists. Remove the file if no tune auto runs.`);
-    }
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new SetupError(`${held}: its lock file ${lock} exists. Remove the file if no tune auto runs.`);
     throw error;
   }
   try {
     writeSync(descriptor, `${process.pid}\n`);
-    return action();
   } finally {
     closeSync(descriptor);
-    rmSync(lock, { force: true });
+  }
+  return () => rmSync(lock, { force: true });
+}
+
+/** Runs `action` holding the exclusive lock file of `auto.json`. */
+function withAutoTuningLock<T>(evalsFolder: string, action: () => T): T {
+  const path = autoTuningPath(evalsFolder);
+  const release = acquireLock(`${path}.lock`, `Another tune auto is changing ${path}`);
+  try {
+    return action();
+  } finally {
+    release();
+  }
+}
+
+/**
+ * Runs `action`, which starts or continues an automatic tuning, holding a lock file apart from the state's, so two
+ * `tune auto` never run a tuning at the same time.
+ */
+export async function withAutoTuningRun<T>(evalsFolder: string, action: () => Promise<T>): Promise<T> {
+  const release = acquireLock(`${autoTuningPath(evalsFolder)}.run.lock`, "Another tune auto runs an automatic tuning");
+  try {
+    return await action();
+  } finally {
+    release();
   }
 }
 
@@ -155,7 +174,7 @@ function recordStart(dependencies: AutoTuningDependencies, due: Extract<AutoTuni
 }
 
 /** The tuning in progress, which must be `tuningId`. */
-function currentTuning(evalsFolder: string, state: AutoTuningState, tuningId: string): AutoTuningEntry {
+export function currentTuning(evalsFolder: string, state: AutoTuningState, tuningId: string): AutoTuningEntry {
   if (state.current?.tuningId !== tuningId) {
     throw new SetupError(`The automatic tuning ${tuningId} is not the one in progress in ${autoTuningPath(evalsFolder)} (${state.current?.tuningId ?? "none"}).`);
   }
@@ -179,7 +198,7 @@ export function recordAutoTuning(evalsFolder: string, tuningId: string, fields: 
 export function finishAutoTuning(evalsFolder: string, tuningId: string, outcome: NonNullable<AutoTuningEntry["outcome"]>, now: Date): AutoTuningEntry {
   return withAutoTuningLock(evalsFolder, () => {
     const state = readAutoTuning(evalsFolder);
-    const ended = state.current === null ? state.tunings.find((tuning) => tuning.tuningId === tuningId) : undefined;
+    const ended = state.tunings.find((tuning) => tuning.tuningId === tuningId);
     if (ended !== undefined) return ended;
     const tuning: AutoTuningEntry = { ...currentTuning(evalsFolder, state, tuningId), outcome, finishedUtc: now.toISOString() };
     writeDocument(autoTuningPath(evalsFolder), AutoTuningStateSchema.parse({ ...state, tunings: [...state.tunings, tuning], current: null }));

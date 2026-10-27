@@ -1,14 +1,14 @@
 import type { BaseStore } from "@langchain/langgraph-checkpoint";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { Git } from "../diagnosis/source-snapshot.js";
 import { readBenchmark } from "../evals/benchmark.js";
-import { freezeDataset } from "../evals/dataset.js";
+import { freezeDataset, latestDatasetVersion } from "../evals/dataset.js";
 import { listRecords } from "../evals/eval-record.js";
 import { snapshotBaseCheck } from "../evals/snapshot-base.js";
 import { SetupError } from "../host/setup-error.js";
 import type { WorkflowPaths } from "../paths.js";
-import { finishAutoTuning, readAutoTuning, recordAutoTuning, startAutoTuning, type AutoTuningEntry } from "./auto-tuning.js";
+import { currentTuning, finishAutoTuning, readAutoTuning, recordAutoTuning, startAutoTuning, type AutoTuningEntry } from "./auto-tuning.js";
 import { cycleActivation, cycleBaseline, cycleFolder, cycleHoldout, cycleOptions, cycleProposal, cycleTestBaseline, ensureCycle, readCycle, recoverCycle, type CycleDependencies } from "./cycle.js";
 import { defaultMaximumExposures } from "./holdout.js";
 import type { TuningRequest, TuningStateValue, TuningSteps } from "./tuning-graph.js";
@@ -39,9 +39,7 @@ function autoRequest(state: TuningStateValue): Extract<TuningRequest, { kind: "a
 }
 
 function inProgress(evalsFolder: string, tuningId: string): AutoTuningEntry {
-  const current = readAutoTuning(evalsFolder).current;
-  if (current?.tuningId !== tuningId) throw new SetupError(`The automatic tuning ${tuningId} is not in progress (in progress: ${current?.tuningId ?? "none"}).`);
-  return current;
+  return currentTuning(evalsFolder, readAutoTuning(evalsFolder), tuningId);
 }
 
 /** The tuning graph's steps, and what a thread does with its cycle before it continues. */
@@ -67,18 +65,27 @@ export function tuningSteps(dependencies: TuningStepsDependencies): TuningRun {
     },
     async freeze(state) {
       const request = autoRequest(state);
-      const recorded = inProgress(evalsFolder, state.tuningId).dataset;
-      if (recorded !== null) return recorded;
+      // The version's folder is recorded before the freeze, so a freeze interrupted after it renamed the version into place
+      // finds it instead of freezing the next one.
+      const datasetsFolder = join(evalsFolder, "datasets");
+      let target = inProgress(evalsFolder, state.tuningId).dataset;
+      if (target !== null && existsSync(join(target, "dataset.json"))) return target;
+      if (target === null) {
+        target = join(datasetsFolder, request.settings.dataset, `v${latestDatasetVersion(datasetsFolder, request.settings.dataset) + 1}`);
+        recordAutoTuning(evalsFolder, state.tuningId, { dataset: target });
+      }
       const { folder, dataset } = await freezeDataset({
         name: request.settings.dataset, jobKind: "hypothesis", seed: autoDatasetSeed, testPercent: autoDatasetTestPercent,
-        reason: `automatic tuning after ${request.records.length} new hypothesis records`, datasetsFolder: join(evalsFolder, "datasets"),
+        reason: `automatic tuning after ${request.records.length} new hypothesis records`, datasetsFolder,
         threadFolder: paths.threadFolder, records: await listRecords(store), benchmark: readBenchmark(paths.benchmark),
         snapshotBase: snapshotBaseCheck(git, paths.threadFolder), now, log,
       });
+      if (resolve(folder) !== resolve(target)) {
+        throw new SetupError(`Automatic tuning ${state.tuningId} recorded its dataset as ${target}, but froze ${folder}: another freeze of ${request.settings.dataset} ran meanwhile.`);
+      }
       const count = (partition: string) => dataset.items.filter((item) => item.partition === partition).length;
       log(`Automatic tuning ${state.tuningId}: dataset ${dataset.name} v${dataset.version}, ${dataset.items.length} items, ${count("test")} test and ${count("development")} development; ${folder}`);
-      recordAutoTuning(evalsFolder, state.tuningId, { dataset: folder });
-      return folder;
+      return target;
     },
     async baseline(state) {
       const cycleId = cycleIdOf(state);
