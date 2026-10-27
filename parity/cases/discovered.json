@@ -1,0 +1,67 @@
+{
+  "startupDelaySeconds": 3,
+  "settleMilliseconds": 300,
+  "sequences": {},
+  "buildActions": [],
+  "careerActions": [],
+  "characters": [
+    {
+      "path": "../fixtures/characters/facemage_Sam.chum",
+      "mode": "build",
+      "scenario": "skillcontrol-ef9d2872",
+      "actions": [
+        {
+          "type": "selectTab",
+          "name": "Skills"
+        },
+        {
+          "type": "waitFor",
+          "label": "Free Knowledge Skill Points Remaining:"
+        },
+        {
+          "type": "wait",
+          "milliseconds": 1500
+        },
+        {
+          "type": "capture",
+          "name": "skills-controls"
+        }
+      ]
+    },
+    {
+      "path": "../fixtures/characters/facemage_Sam_career.chum",
+      "mode": "career",
+      "scenario": "frmcareer-tabcharactertabs-selection-455ce0c2",
+      "actions": [
+        {
+          "type": "capture",
+          "name": "common"
+        },
+        {
+          "type": "selectTab",
+          "name": "Skills"
+        },
+        {
+          "type": "waitFor",
+          "label": "Active Skills"
+        },
+        {
+          "type": "capture",
+          "name": "skills"
+        },
+        {
+          "type": "selectTab",
+          "name": "Character Info"
+        },
+        {
+          "type": "waitFor",
+          "label": "Description:"
+        },
+        {
+          "type": "capture",
+          "name": "character-info"
+        }
+      ]
+    }
+  ]
+}
