@@ -12,7 +12,7 @@ Each task names the tasks it builds on as `(after: …)`, by number in this list
 
 ## 3. Docs
 
-- [ ] 3.1 (after: 2.1) Document worktrees, branches and the merge in `AGENTS.md` and `README.md`. Evidence: `npm run workflow:typecheck`, `npm run workflow:test` and `npm run openspec:validate` pass (recorded in `verification.md`).
+- [x] 3.1 (after: 2.1) Document worktrees, branches and the merge in `AGENTS.md` and `README.md`. Evidence: `npm run workflow:typecheck`, `npm run workflow:test` and `npm run openspec:validate` pass (recorded in `verification.md`).
 
 ## 4. Verification and archive
 

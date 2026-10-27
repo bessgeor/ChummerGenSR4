@@ -129,3 +129,26 @@ None for this task. `bin/ChummerGenSR4.exe` was not run, built or touched.
 ## Unverified
 
 That a live `npm start` thread merges a real promoted fix into the branch it started on and advances that branch's checkout.
+
+## Task 3.1: docs for worktrees, branches and the merge
+
+`AGENTS.md` describes the thread's source branch, the attempt, subtask and widening worktrees and their branches, the patch from the source and attempt commits, promotion from the widened worktree, `merge_failed`, the new Merge section (the start branch, a detached `HEAD`, the rebase and merge commit per fix, conflicts and uncommitted source edits, the integration branch, the fast-forward or ref update, `merge` in `outcome.json`) and which branches may be deleted. `README.md` describes the attempts' worktrees and branches and the merge into the branch a run started on.
+
+| Command | Result |
+| --- | --- |
+| `npm run workflow:typecheck` | Passed (exit 0). |
+| `npm run workflow:test` | Passed: 576 tests, 576 passed, 0 failed, 0 skipped (exit 0). |
+| `npm run openspec:validate` | Passed strict validation: 21 passed, 0 failed. |
+| SHA-256 of `bin/ChummerGenSR4.exe` | `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`; the executable was not built, launched or touched. |
+
+## Fixture-tested scope
+
+None added: this task changes only documentation.
+
+## Live evidence
+
+None for this task.
+
+## Unverified
+
+That the documented behaviour holds in a live `npm start` thread.
