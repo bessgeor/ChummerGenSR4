@@ -9,7 +9,7 @@ import { blockerClosure, PlanOutputSchema, planPromptVersion, subtaskPromptVersi
 import type { RepairBrief } from "./repair-prompt.js";
 import { runRecordedJob, type AttemptJobs, type RecordedJob } from "./repair-job.js";
 import { RepairOutputSchema, validateRepair, type RepairOutput } from "./repair-schemas.js";
-import { applyJoin, joinChanges, joinedPaths, subtaskChanges, type JoinedFile, type SourceBlobs, type SubtaskChange } from "./subtask-join.js";
+import { applyJoin, joinChanges, joinedPaths, subtaskChanges, type Conflict, type JoinedFile, type SourceBlobs, type SubtaskChange } from "./subtask-join.js";
 import { changesOutsideSource, removeWorkspace, stageWorkspace, workspaceIn, WorktreeGuard, type AttemptWorkspace } from "./workspace.js";
 
 /** A subtask as the attempt's archive keeps it. */
@@ -269,6 +269,10 @@ export class PlannedAttempt {
   }
 }
 
-function conflictRejection(conflict: { path: string; first: number; second: number }): { stage: RepairStage; reason: string } {
+function conflictRejection(conflict: Conflict): { stage: RepairStage; reason: string } {
+  if (conflict.other !== undefined) {
+    const by = conflict.first === conflict.second ? `subtask ${conflict.second}` : `subtasks ${conflict.first} and ${conflict.second}`;
+    return { stage: "patch", reason: `${by} left ${conflict.path} and ${conflict.other} where one is a file and the other lies inside it, which cannot both exist` };
+  }
   return { stage: "patch", reason: `subtasks ${conflict.first} and ${conflict.second} both changed ${conflict.path}, and ${conflict.first} does not block ${conflict.second}` };
 }

@@ -15,8 +15,10 @@ import type { AttemptDocument } from "../src/repair/attempt-archive.js";
 import type { ClusterRepair } from "../src/repair/cluster-repair.js";
 import { blockerClosure, validatePlan, type PlanOutput, type Subtask } from "../src/repair/plan-schemas.js";
 import { RepairService, type RepairInput } from "../src/repair/repair-service.js";
+import { applyJoin, joinChanges } from "../src/repair/subtask-join.js";
 import { challengeAnswer, diagnosisHarness, FakeAgents, hypothesisAnswer, twoClusters, type JobCall, type Reply } from "./diagnosis-harness.js";
 import { record } from "./eval-fixtures.js";
+import { scratch, write } from "./diagnosis-fixtures.js";
 import { FakeRepairHost, repairedSource } from "./repair-fixtures.js";
 
 const cluster = "d-0000000000000100";
@@ -164,6 +166,70 @@ test("a subtask that changed a file of another it does not wait for rejects the 
     ["rejected", "patch", "subtasks 1 and 2 both changed Chummer/a.cs, and 1 does not block 2"]);
   equal(setup.host.builds.length, 0);
   ok(!existsSync(join(step.update.attempt!.folder, "fix")));
+});
+
+test("independent subtasks that add a file and a file inside the same path reject the attempt at stage patch before a build", async () => {
+  const setup = await planned({
+    plan: () => ({ answer: plan([task(1, ["Chummer/New.cs"]), task(2, ["Chummer/New.cs/Nested.cs"])]) }),
+    subtask: (id, call) => edit(call, id === 1 ? { "Chummer/New.cs": "file" } : { "Chummer/New.cs/Nested.cs": "nested" }),
+  });
+  const step = await setup.service.repair(setup.input(setup.repairs[cluster]!), setup.store);
+  deepStrictEqual([step.update.status, step.update.attempt!.stage, step.update.attempt!.reason],
+    ["rejected", "patch", "subtasks 1 and 2 left Chummer/New.cs/Nested.cs and Chummer/New.cs where one is a file and the other lies inside it, which cannot both exist"]);
+  equal(setup.host.builds.length, 0);
+});
+
+test("a join refuses a file where the join has a folder or inside a file, and lets a subtask replace a file by a folder of the same name", () => {
+  const source = new Map([["Chummer/a.cs", "a0"], ["Chummer/dir/x.cs", "x0"]]);
+  const add = (path: string, after: string | null = "n", start: string | null = null) => ({ path, start, after, commit: after === null ? null : "c" });
+  const joined = (...subtasks: { id: number; changes: ReturnType<typeof add>[] }[]) => joinChanges(source, subtasks);
+  // A file added where the source has a folder, and inside a file the source has.
+  deepStrictEqual(joined({ id: 1, changes: [add("Chummer/dir")] }), { conflict: { path: "Chummer/dir", first: 1, second: 1, other: "Chummer/dir/x.cs" } });
+  deepStrictEqual(joined({ id: 1, changes: [add("Chummer/a.cs/b.cs")] }), { conflict: { path: "Chummer/a.cs/b.cs", first: 1, second: 1, other: "Chummer/a.cs" } });
+  // Between two subtasks, in either order of their IDs.
+  deepStrictEqual(joined({ id: 1, changes: [add("Chummer/New.cs/Nested.cs")] }, { id: 2, changes: [add("Chummer/New.cs")] }),
+    { conflict: { path: "Chummer/New.cs", first: 1, second: 2, other: "Chummer/New.cs/Nested.cs" } });
+  deepStrictEqual(joined({ id: 1, changes: [add("Chummer/New.cs")] }, { id: 2, changes: [add("Chummer/New.cs/Nested.cs")] }),
+    { conflict: { path: "Chummer/New.cs/Nested.cs", first: 1, second: 2, other: "Chummer/New.cs" } });
+  // Replacing a file by a folder, or a folder's only file by a file, is a valid state of one subtask.
+  const replaced = joined({ id: 1, changes: [add("Chummer/a.cs/b.cs"), add("Chummer/a.cs", null, "a0")] }, { id: 2, changes: [add("Chummer/dir/x.cs", null, "x0"), add("Chummer/dir")] });
+  ok("joined" in replaced);
+  deepStrictEqual([...replaced.joined.keys()].sort(), ["Chummer/a.cs", "Chummer/a.cs/b.cs", "Chummer/dir", "Chummer/dir/x.cs"]);
+});
+
+test("a join is written into a worktree with a folder replaced by a file and a file by a folder", () => {
+  const root = scratch("workflow-join-");
+  const run = (...args: string[]) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trim();
+  run("init", "-q", "-b", "main");
+  run("config", "user.email", "test@example.com");
+  run("config", "user.name", "Test");
+  run("config", "core.autocrlf", "false");
+  write(root, "Chummer/dir/x.cs", "x\n");
+  write(root, "Chummer/file.cs", "file\n");
+  run("add", "-A");
+  run("commit", "-q", "-m", "initial");
+  const { worktrees } = gitOf(root);
+  const start = run("rev-parse", "HEAD");
+  const changed = join(scratch(), "changed");
+  worktrees.addDetached(changed, start);
+  rmSync(join(changed, "Chummer", "dir"), { recursive: true });
+  rmSync(join(changed, "Chummer", "file.cs"));
+  write(changed, "Chummer/dir", "now a file\n");
+  write(changed, "Chummer/file.cs/inner.cs", "inner\n");
+  const commit = worktrees.commitAll(changed, "Replace\n")!;
+  worktrees.remove(changed);
+  const blobs = new Map([["Chummer/dir/x.cs", run("rev-parse", `${start}:Chummer/dir/x.cs`)], ["Chummer/file.cs", run("rev-parse", `${start}:Chummer/file.cs`)]]);
+  const changes = worktrees.changes(start, commit).filter((change) => !change.special)
+    .map((change) => ({ path: change.path, start: change.before, after: change.after, commit: change.after === null ? null : commit }));
+  const joined = joinChanges(blobs, [{ id: 1, changes }]);
+  ok("joined" in joined);
+  const target = join(scratch(), "target");
+  worktrees.addDetached(target, start);
+  applyJoin(worktrees, joined.joined, target);
+  equal(readFileSync(join(target, "Chummer", "dir"), "utf8").replace(/\r\n/g, "\n"), "now a file\n");
+  equal(readFileSync(join(target, "Chummer", "file.cs", "inner.cs"), "utf8").replace(/\r\n/g, "\n"), "inner\n");
+  const joinedCommit = worktrees.commitAll(target, "Joined\n")!;
+  equal(run("rev-parse", `${joinedCommit}^{tree}`), run("rev-parse", `${commit}^{tree}`));
 });
 
 test("a subtask that also changed a link or a submodule it did not report is rejected at stage patch, not joined without it", async () => {
