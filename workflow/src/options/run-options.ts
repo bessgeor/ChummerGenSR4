@@ -24,6 +24,8 @@ export type RunOptions = {
   readonly recapture: boolean;
   /** Whether triage's clusters are diagnosed (--no-diagnosis turns it off). */
   readonly diagnosis: boolean;
+  /** How many hypotheses each cluster gets (the profile's `diagnosis.hypotheses`); absent in a thread stored before it existed, which has 1. */
+  readonly hypotheses?: number;
   readonly agents: AgentSettings;
   /** Diagnosis dispatches only job kinds with a certificate for their configuration (--unattended). */
   readonly unattended: boolean;
@@ -54,6 +56,13 @@ export type DiscoverySettings = {
 };
 
 export const defaultDiscoveryTargets = 3;
+
+/** How many hypotheses each cluster of a thread gets. */
+export function hypothesesOf(options: RunOptions): number {
+  return options.hypotheses ?? 1;
+}
+
+export const defaultHypotheses = 1;
 
 /** Whether a thread works in fix changes: priors in diagnosis, planned repair and a fix change with every promotion. */
 export function usesFixChanges(options: RunOptions): boolean {
@@ -105,6 +114,7 @@ export function resolveRunOptions(args: Arguments, profile: Profile, env: Enviro
     only: args.only,
     recapture: args.recapture,
     diagnosis: !args.noDiagnosis,
+    hypotheses: profile.diagnosis?.hypotheses ?? defaultHypotheses,
     agents: resolveAgentSettings(profile.agents),
     unattended: args.unattended,
     certificates: resolve(repositoryRoot, profile.certificates ?? join("workflow", "evals", "certificates")),

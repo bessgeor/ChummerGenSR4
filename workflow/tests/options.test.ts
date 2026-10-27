@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { SetupError } from "../src/host/setup-error.js";
 import { parseArguments, type Arguments } from "../src/options/arguments.js";
 import { loadProfile } from "../src/options/profile.js";
-import { resolveRunOptions, usesFixChanges } from "../src/options/run-options.js";
+import { hypothesesOf, resolveRunOptions, usesFixChanges } from "../src/options/run-options.js";
 
 function start(args: string[]): Arguments {
   const command = parseArguments(args);
@@ -164,4 +164,20 @@ test("the profile is optional, validated strictly and read from PARITY_WORKFLOW_
 
 test("local app data is required when nothing else names the cache", () => {
   throws(() => resolveRunOptions(start([]), {}, {}, scratch()), /LOCALAPPDATA/);
+});
+
+test("the profile's diagnosis.hypotheses is 1 to 3, stored with the thread, and 1 by default and in a thread stored without it", () => {
+  const root = scratch();
+  const path = join(root, "profile.json");
+  writeFileSync(path, JSON.stringify({ diagnosis: { hypotheses: 2 } }));
+  const profile = loadProfile({ PARITY_WORKFLOW_PROFILE: path });
+  equal(resolveRunOptions(start([]), profile, { LOCALAPPDATA: root }, root).hypotheses, 2);
+  const stored = resolveRunOptions(start([]), {}, { LOCALAPPDATA: root }, root);
+  equal(stored.hypotheses, 1);
+  const { hypotheses: _, ...older } = stored;
+  equal(hypothesesOf(older), 1);
+  for (const diagnosis of [{ hypotheses: 0 }, { hypotheses: 4 }, { hypotheses: 1.5 }, { variants: 2 }]) {
+    writeFileSync(path, JSON.stringify({ diagnosis }));
+    throws(() => loadProfile({ PARITY_WORKFLOW_PROFILE: path }), (error: Error) => error instanceof SetupError && error.message.includes(path), JSON.stringify(diagnosis));
+  }
 });

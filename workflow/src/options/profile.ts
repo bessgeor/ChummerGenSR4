@@ -27,6 +27,10 @@ export const ProfileSchema = z.strictObject({
     minPass: z.number().min(0).max(1).optional(),
     candidates: z.number().int().min(1).max(3).optional(),
   }).optional(),
+  diagnosis: z.strictObject({
+    /** How many independent hypotheses each cluster gets. */
+    hypotheses: z.number().int().min(1).max(3).optional(),
+  }).optional(),
   repair: z.strictObject({
     /** How long a repair attempt's model job and build may take together, in minutes; capped like a job's time limit. */
     deadlineMinutes: z.number().positive().max(35_000).optional(),
