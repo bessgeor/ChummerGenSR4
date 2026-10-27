@@ -1,17 +1,26 @@
 import type { BaseStore } from "@langchain/langgraph-checkpoint";
 import { randomBytes } from "node:crypto";
-import { closeSync, existsSync, mkdirSync, openSync, rmSync, writeSync } from "node:fs";
+import { closeSync, existsSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeSync } from "node:fs";
+import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { readRecord, recordNamespace } from "../evals/eval-record.js";
+import { datasetNamePattern } from "../evals/dataset.js";
 import { isGradable } from "../evals/hindsight.js";
+import { isProcessRunning } from "../host/desktop-lane.js";
 import { SetupError } from "../host/setup-error.js";
 import type { Profile } from "../options/profile.js";
 import { readDocument } from "../steps/read-document.js";
 import { writeDocument } from "../steps/write-document.js";
 
 /** The profile's `autoTuning` with its defaults. */
-export type AutoTuningSettings = { readonly every: number; readonly dataset: string; readonly minPass: number; readonly candidates: number };
+const AutoTuningSettingsSchema = z.strictObject({
+  every: z.number().int().positive(),
+  dataset: z.string().regex(datasetNamePattern),
+  minPass: z.number().min(0).max(1),
+  candidates: z.number().int().min(1).max(3),
+});
+export type AutoTuningSettings = z.infer<typeof AutoTuningSettingsSchema>;
 
 export const autoTuningDefaults: AutoTuningSettings = { every: 12, dataset: "auto-hypothesis", minPass: 0.5, candidates: 1 };
 
@@ -29,6 +38,8 @@ const AutoTuningEntrySchema = z.strictObject({
   forced: z.boolean(),
   /** The records it counted when it started. */
   records: z.array(z.string().min(1)),
+  /** The settings it started with: a tuning continued later keeps them, whatever the profile says by then. */
+  settings: AutoTuningSettingsSchema,
   /** The folder of the dataset version it freezes, recorded before the freeze. */
   dataset: z.string().min(1).nullable(),
   cycle: z.string().min(1).nullable(),
@@ -88,7 +99,7 @@ export type AutoTuningDependencies = {
 /** What the trigger finds, without changing anything. */
 export type AutoTuningTrigger =
   | { readonly kind: "not_due"; readonly count: number; readonly every: number }
-  | { readonly kind: "due"; readonly records: readonly string[]; readonly every: number; readonly forced: boolean }
+  | { readonly kind: "due"; readonly records: readonly string[]; readonly every: number; readonly forced: boolean; readonly settings: AutoTuningSettings }
   | { readonly kind: "in_progress"; readonly tuning: AutoTuningEntry };
 
 /**
@@ -100,25 +111,70 @@ export async function checkAutoTuning(dependencies: AutoTuningDependencies, sett
   if (state.current !== null) return { kind: "in_progress", tuning: state.current };
   const records = await newHypothesisRecords(dependencies.store, new Set(state.counted));
   if (records.length < settings.every && !force) return { kind: "not_due", count: records.length, every: settings.every };
-  return { kind: "due", records, every: settings.every, forced: force };
+  return { kind: "due", records, every: settings.every, forced: force, settings };
 }
 
-/** Creates an exclusive lock file and returns its release; another holder is a setup error, never waited for. */
-function acquireLock(lock: string, held: string): () => void {
-  mkdirSync(dirname(lock), { recursive: true });
-  let descriptor: number;
+const LockOwnerSchema = z.strictObject({ host: z.string(), processId: z.number().int() });
+type LockOwner = z.infer<typeof LockOwnerSchema>;
+
+function readLockOwner(lock: string): LockOwner | null {
   try {
-    descriptor = openSync(lock, "wx");
+    return LockOwnerSchema.parse(JSON.parse(readFileSync(lock, "utf8")));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Removes the lock of an owner that was killed: a lock of this machine whose process no longer runs. The lock is moved
+ * aside first, so of two processes that judge it abandoned only one removes it, and it is removed only if it still names
+ * the owner that was judged.
+ */
+function removeAbandonedLock(lock: string, judged: LockOwner): boolean {
+  const aside = `${lock}.${process.pid}.${randomBytes(4).toString("hex")}.abandoned`;
+  try {
+    renameSync(lock, aside);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new SetupError(`${held}: its lock file ${lock} exists. Remove the file if no tune auto runs.`);
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return true;
     throw error;
   }
-  try {
-    writeSync(descriptor, `${process.pid}\n`);
-  } finally {
-    closeSync(descriptor);
+  const moved = readLockOwner(aside);
+  if (moved !== null && moved.host === judged.host && moved.processId === judged.processId) {
+    rmSync(aside, { force: true });
+    return true;
   }
-  return () => rmSync(lock, { force: true });
+  // The lock was replaced by a live owner between the judgement and the move: put it back.
+  try {
+    linkSync(aside, lock);
+  } finally {
+    rmSync(aside, { force: true });
+  }
+  return false;
+}
+
+/**
+ * Creates an exclusive lock file naming this process and returns its release. A lock left by a killed process of this
+ * machine is removed; any other holder is a setup error, never waited for.
+ */
+function acquireLock(lock: string, held: string): () => void {
+  mkdirSync(dirname(lock), { recursive: true });
+  for (;;) {
+    let descriptor: number;
+    try {
+      descriptor = openSync(lock, "wx");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      const owner = readLockOwner(lock);
+      if (owner !== null && owner.host === hostname() && !isProcessRunning(owner.processId) && removeAbandonedLock(lock, owner)) continue;
+      throw new SetupError(`${held}: its lock file ${lock} exists${owner === null ? "" : `, held by process ${owner.processId} on ${owner.host}`}. Remove the file if no tune auto runs.`);
+    }
+    try {
+      writeSync(descriptor, `${JSON.stringify({ host: hostname(), processId: process.pid } satisfies LockOwner)}\n`);
+    } finally {
+      closeSync(descriptor);
+    }
+    return () => rmSync(lock, { force: true });
+  }
 }
 
 /** Runs `action` holding the exclusive lock file of `auto.json`. */
@@ -166,7 +222,7 @@ function recordStart(dependencies: AutoTuningDependencies, due: Extract<AutoTuni
     throw new SetupError(`Another automatic tuning counted some of these hypothesis records in ${autoTuningPath(dependencies.evalsFolder)}; run tune auto again.`);
   }
   const tuning: AutoTuningEntry = {
-    tuningId, startedUtc: now.toISOString(), forced: due.forced, records: [...due.records],
+    tuningId, startedUtc: now.toISOString(), forced: due.forced, records: [...due.records], settings: due.settings,
     dataset: null, cycle: null, branch: null, commit: null, merge: null, outcome: null, finishedUtc: null,
   };
   writeDocument(autoTuningPath(dependencies.evalsFolder), AutoTuningStateSchema.parse({ ...state, counted: [...state.counted, ...due.records], current: tuning }));

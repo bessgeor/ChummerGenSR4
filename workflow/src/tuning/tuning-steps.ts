@@ -1,13 +1,14 @@
 import type { BaseStore } from "@langchain/langgraph-checkpoint";
 import { existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import type { Git } from "../diagnosis/source-snapshot.js";
 import { readBenchmark } from "../evals/benchmark.js";
-import { freezeDataset, latestDatasetVersion } from "../evals/dataset.js";
+import { DatasetSchema, freezeDataset, latestDatasetVersion } from "../evals/dataset.js";
 import { listRecords } from "../evals/eval-record.js";
 import { snapshotBaseCheck } from "../evals/snapshot-base.js";
 import { SetupError } from "../host/setup-error.js";
 import type { WorkflowPaths } from "../paths.js";
+import { readDocument } from "../steps/read-document.js";
 import { currentTuning, finishAutoTuning, readAutoTuning, recordAutoTuning, startAutoTuning, type AutoTuningEntry } from "./auto-tuning.js";
 import { cycleActivation, cycleBaseline, cycleFolder, cycleHoldout, cycleOptions, cycleProposal, cycleTestBaseline, ensureCycle, readCycle, recoverCycle, type CycleDependencies } from "./cycle.js";
 import { defaultMaximumExposures } from "./holdout.js";
@@ -27,6 +28,18 @@ export type TuningStepsDependencies = {
 /** The cycle of an automatic tuning: its ID with the cycle prefix, so a resumed node finds the same cycle. */
 export function autoCycleId(tuningId: string): string {
   return `tc-${tuningId.replace(/^tune-/, "")}`;
+}
+
+/** The reason an automatic tuning gives its dataset version: it names the tuning, so the version shows who froze it. */
+function autoDatasetReason(tuningId: string, records: number): string {
+  return `automatic tuning ${tuningId} after ${records} new hypothesis records`;
+}
+
+/** Whether the dataset version in `folder` is the one the automatic tuning froze, by what the freeze gives it. */
+function frozenBy(folder: string, name: string, reason: string): boolean {
+  const dataset = readDocument(join(folder, "dataset.json"), DatasetSchema);
+  return dataset.name === name && dataset.jobKind === "hypothesis" && dataset.seed === autoDatasetSeed && dataset.testPercent === autoDatasetTestPercent
+    && dataset.reason === reason && basename(folder) === `v${dataset.version}`;
 }
 
 function cycleIdOf(state: TuningStateValue): string {
@@ -61,22 +74,28 @@ export function tuningSteps(dependencies: TuningStepsDependencies): TuningRun {
     count(state) {
       const request = autoRequest(state);
       startAutoTuning({ store, evalsFolder, now, newTuningId: () => state.tuningId },
-        { kind: "due", records: request.records, every: request.settings.every, forced: request.forced });
+        { kind: "due", records: request.records, every: request.settings.every, forced: request.forced, settings: request.settings });
     },
     async freeze(state) {
       const request = autoRequest(state);
       // The version's folder is recorded before the freeze, so a freeze interrupted after it renamed the version into place
-      // finds it instead of freezing the next one.
+      // finds it instead of freezing the next one. A version at the recorded folder is this tuning's only when it says so: a
+      // freeze by another command that took the version meanwhile is not run on, the tuning records the next version instead.
       const datasetsFolder = join(evalsFolder, "datasets");
+      const reason = autoDatasetReason(state.tuningId, request.records.length);
       let target = inProgress(evalsFolder, state.tuningId).dataset;
-      if (target !== null && existsSync(join(target, "dataset.json"))) return target;
+      if (target !== null && existsSync(join(target, "dataset.json"))) {
+        if (frozenBy(target, request.settings.dataset, reason)) return target;
+        log(`Automatic tuning ${state.tuningId}: ${target} was frozen by another command; freezing the next version of ${request.settings.dataset}.`);
+        target = null;
+      }
       if (target === null) {
         target = join(datasetsFolder, request.settings.dataset, `v${latestDatasetVersion(datasetsFolder, request.settings.dataset) + 1}`);
         recordAutoTuning(evalsFolder, state.tuningId, { dataset: target });
       }
       const { folder, dataset } = await freezeDataset({
         name: request.settings.dataset, jobKind: "hypothesis", seed: autoDatasetSeed, testPercent: autoDatasetTestPercent,
-        reason: `automatic tuning after ${request.records.length} new hypothesis records`, datasetsFolder,
+        reason, datasetsFolder,
         threadFolder: paths.threadFolder, records: await listRecords(store), benchmark: readBenchmark(paths.benchmark),
         snapshotBase: snapshotBaseCheck(git, paths.threadFolder), now, log,
       });

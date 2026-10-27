@@ -118,7 +118,8 @@ export function ensureCycle(dependencies: CycleDependencies, cycleId: string, op
 async function ensureRun(dependencies: CycleDependencies, runId: string, start: () => Parameters<typeof startEvalRun>[1]): Promise<void> {
   const folder = join(dependencies.run.runsFolder, runId);
   if (existsSync(runFolders(folder).settings)) {
-    if (!runState(folder).complete) await resumeEvalRun(dependencies.run, runId);
+    // A run whose samples are all written but whose summary is not was stopped before it ended; resuming writes the summary.
+    if (!runState(folder).complete || !existsSync(runFolders(folder).summary)) await resumeEvalRun(dependencies.run, runId);
     return;
   }
   await startEvalRun({ ...dependencies.run, newRunId: () => runId }, start());

@@ -34,7 +34,8 @@ export const tuneUsage = `  tune add --file <json>          store a tuning confi
   tune cycle --resume <cycle>     continue a stopped cycle with its stored options
   tune auto [--force]             count the new workflow hypothesis records against the profile's autoTuning.every (default ${autoTuningDefaults.every}); a tuning is
                                   due with that many, or with --force: it freezes the next version of autoTuning.dataset (default ${autoTuningDefaults.dataset})
-                                  and runs a cycle on it (out/evals/tuning/auto.json); a tuning in progress is continued first`;
+                                  and runs a cycle on it (out/evals/tuning/auto.json); a tuning in progress is continued first. It runs the cycle on the
+                                  tuning and certificates folders in place, so it needs both outside the repository (the profile's tuning and certificates)`;
 
 type TuneCommand = (args: readonly string[], context: EvalContext) => Promise<number>;
 
@@ -253,7 +254,7 @@ async function runAutoTuning(context: EvalContext, trigger: Exclude<AutoTuningTr
   } else {
     const { tuning } = trigger;
     context.log(`Automatic tuning ${tuning.tuningId}: in progress since ${tuning.startedUtc}; continued.`);
-    input = { tuningId: tuning.tuningId, request: { kind: "auto", records: tuning.records, forced: tuning.forced, settings }, dataset: tuning.dataset, cycle: null, concluded: null };
+    input = { tuningId: tuning.tuningId, request: { kind: "auto", records: tuning.records, forced: tuning.forced, settings: tuning.settings }, dataset: tuning.dataset, cycle: null, concluded: null };
   }
   const { graph, steps } = tuningGraph(context);
   const cycle = await runTuningThread(graph, steps, input, "npm run eval -- tune auto", context.signal);

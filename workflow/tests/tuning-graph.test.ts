@@ -1,6 +1,8 @@
 import { deepStrictEqual, equal, ok, rejects } from "node:assert/strict";
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { spawnSync } from "node:child_process";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
 import { DatasetSchema, freezeDataset, type Dataset } from "../src/evals/dataset.js";
@@ -72,8 +74,8 @@ function finishedTuning(evalsFolder: string) {
   return { state, entry, dataset: readDataset(entry.dataset!), cycle: readCycle(evalsFolder, entry.cycle!) };
 }
 
-function checkDataset(dataset: Dataset, records: readonly string[], version = 1) {
-  deepStrictEqual([dataset.name, dataset.version, dataset.seed, dataset.testPercent, dataset.reason], ["auto-hypothesis", version, "auto", 50, `automatic tuning after ${records.length} new hypothesis records`]);
+function checkDataset(dataset: Dataset, tuningIdValue: string, records: readonly string[], version = 1) {
+  deepStrictEqual([dataset.name, dataset.version, dataset.seed, dataset.testPercent, dataset.reason], ["auto-hypothesis", version, "auto", 50, `automatic tuning ${tuningIdValue} after ${records.length} new hypothesis records`]);
   deepStrictEqual([...new Set(dataset.items.map((item) => `${item.clusterId}:${item.partition}`))].sort(), [`${testCluster}:test`, `${developmentCluster}:development`]);
 }
 
@@ -84,7 +86,7 @@ test("a due automatic tuning freezes the next version of its dataset, activates 
   deepStrictEqual(state.counted, records);
   deepStrictEqual([entry.records, entry.forced, entry.outcome, entry.cycle, entry.branch, entry.commit, entry.merge], [records, false, "activated", autoCycleId(entry.tuningId), null, null, null]);
   equal(entry.dataset, join(context.paths.evalsFolder, "datasets", "auto-hypothesis", "v1"));
-  checkDataset(dataset, records);
+  checkDataset(dataset, entry.tuningId, records);
   deepStrictEqual([cycle.outcome, cycle.options.dataset, cycle.options.metric, cycle.options.minPass, cycle.options.candidates], ["activated", entry.dataset, "prediction", 0.3, 1]);
   equal(readActiveFile(context.tuningFolder(), "hypothesis")!.active.tuning?.guidance[0], "Cite the capture.");
   equal(await tuningThread(compileTuningGraph(refusingSteps(), context.tuningCheckpointer()), entry.tuningId), "finished");
@@ -99,7 +101,7 @@ test("a due automatic tuning freezes the next version of its dataset, activates 
   equal(await runEvalCommand(["tune", "auto", "--force"], context), 0, context.lines.join("\n"));
   const second = readAutoTuning(context.paths.evalsFolder).tunings[1]!;
   deepStrictEqual([second.records, second.forced, second.dataset, second.outcome], [[], true, join(context.paths.evalsFolder, "datasets", "auto-hypothesis", "v2"), "no_improvement"]);
-  checkDataset(readDataset(second.dataset!), [], 2);
+  checkDataset(readDataset(second.dataset!), second.tuningId, [], 2);
 });
 
 test("an automatic tuning without a better candidate ends no_improvement with exit status 0 and activates nothing", async () => {
@@ -242,19 +244,91 @@ test("a tuning whose freeze stopped after it put its version in place continues 
   const { context, records } = await dueTuning(agents([proposal("Cite the capture.")], "test", { "Cite the capture.": "all" }));
   const evalsFolder = context.paths.evalsFolder;
   // As if tune auto had recorded the tuning and its version, frozen it and stopped before its checkpoint.
-  const tuning = startAutoTuning({ store: context.store, evalsFolder, now: context.now, newTuningId: () => "tune-20261002T090000Z-0000abcd" },
-    { kind: "due", records, every: records.length, forced: false });
+  const tuning = recordedTuning(context, records);
   const target = join(evalsFolder, "datasets", "auto-hypothesis", "v1");
   recordAutoTuning(evalsFolder, tuning.tuningId, { dataset: target });
-  const { folder } = await freezeDataset({
-    name: "auto-hypothesis", jobKind: "hypothesis", seed: "auto", testPercent: 50, reason: "r", datasetsFolder: join(evalsFolder, "datasets"),
-    threadFolder: context.paths.threadFolder, records: await listRecords(context.store), benchmark: [], snapshotBase: () => null, now: context.now, log: () => undefined,
-  });
+  const { folder } = await freezeAs(context, `automatic tuning ${tuning.tuningId} after ${records.length} new hypothesis records`);
   equal(folder, target);
   equal(await runEvalCommand(["tune", "auto"], context), 0, context.lines.join("\n"));
   deepStrictEqual(readdirSync(join(evalsFolder, "datasets", "auto-hypothesis")), ["v1"]);
   const { entry, cycle } = finishedTuning(evalsFolder);
   deepStrictEqual([entry.tuningId, entry.dataset, cycle.options.dataset, entry.outcome], [tuning.tuningId, target, target, "activated"]);
+});
+
+/** As if tune auto had recorded the tuning and stopped before its checkpoint. */
+function recordedTuning(context: Awaited<ReturnType<typeof dueTuning>>["context"], records: readonly string[]) {
+  return startAutoTuning({ store: context.store, evalsFolder: context.paths.evalsFolder, now: context.now, newTuningId: () => "tune-20261002T090000Z-0000abcd" },
+    { kind: "due", records, every: records.length, forced: false, settings: context.autoTuning() });
+}
+
+/** A freeze of the automatic dataset's next version by another command, with `reason`. */
+async function freezeAs(context: Awaited<ReturnType<typeof dueTuning>>["context"], reason: string) {
+  return freezeDataset({
+    name: "auto-hypothesis", jobKind: "hypothesis", seed: "auto", testPercent: 50, reason, datasetsFolder: join(context.paths.evalsFolder, "datasets"),
+    threadFolder: context.paths.threadFolder, records: await listRecords(context.store), benchmark: [], snapshotBase: () => null, now: context.now, log: () => undefined,
+  });
+}
+
+test("a tuning whose recorded version another command froze meanwhile freezes the next version and does not run on the other's", async () => {
+  const { context, records } = await dueTuning(agents([proposal("Cite the capture.")], "test", { "Cite the capture.": "all" }));
+  const evalsFolder = context.paths.evalsFolder;
+  const tuning = recordedTuning(context, records);
+  const target = join(evalsFolder, "datasets", "auto-hypothesis", "v1");
+  recordAutoTuning(evalsFolder, tuning.tuningId, { dataset: target });
+  equal((await freezeAs(context, "a manual freeze")).folder, target);
+  equal(await runEvalCommand(["tune", "auto"], context), 0, context.lines.join("\n"));
+  deepStrictEqual(readdirSync(join(evalsFolder, "datasets", "auto-hypothesis")), ["v1", "v2"]);
+  const { entry, dataset, cycle } = finishedTuning(evalsFolder);
+  deepStrictEqual([entry.dataset, cycle.options.dataset, entry.outcome], [join(evalsFolder, "datasets", "auto-hypothesis", "v2"), entry.dataset, "activated"]);
+  checkDataset(dataset, tuning.tuningId, records, 2);
+});
+
+test("a tuning continued after the profile changed keeps the settings it started with", async () => {
+  const { context, records } = await dueTuning(agents([proposal("Cite the capture.")], "test", { "Cite the capture.": "all" }));
+  const tuning = recordedTuning(context, records);
+  const changed = { ...context, autoTuning: () => ({ every: 1, dataset: "auto-other", minPass: 0.9, candidates: 3 }) };
+  equal(await runEvalCommand(["tune", "auto"], changed), 0, context.lines.join("\n"));
+  const { entry, dataset, cycle } = finishedTuning(context.paths.evalsFolder);
+  deepStrictEqual([entry.tuningId, entry.settings, dataset.name, cycle.options.minPass, cycle.options.candidates], [tuning.tuningId, tuning.settings, "auto-hypothesis", 0.3, 1]);
+  equal(existsSync(join(context.paths.evalsFolder, "datasets", "auto-other")), false);
+});
+
+test("a tune auto after a killed one removes the locks the dead process left and continues the tuning", async () => {
+  const { context, stopped, path } = await stoppedTuning((call) => call.prompt.includes("+tuned-") && call.prompt.includes(testCluster));
+  const dead = spawnSync(process.execPath, ["-e", ""]).pid!;
+  const owner = `${JSON.stringify({ host: hostname(), processId: dead })}\n`;
+  const state = autoTuningPath(context.paths.evalsFolder);
+  writeFileSync(`${state}.run.lock`, owner);
+  writeFileSync(`${state}.lock`, owner);
+  const { status } = await resume(context, path);
+  equal(status, 0, context.lines.join("\n"));
+  equal(finishedTuning(context.paths.evalsFolder).entry.tuningId, stopped.tuningId);
+  deepStrictEqual(readdirSync(dirname(state)).filter((name) => name.includes(".lock") || name.endsWith(".abandoned")), []);
+});
+
+test("a tune auto does not remove the lock of a process that still runs", async () => {
+  const { context } = await dueTuning(agents([], "test", {}));
+  const lock = `${autoTuningPath(context.paths.evalsFolder)}.run.lock`;
+  mkdirSync(join(context.paths.evalsFolder, "tuning"), { recursive: true });
+  writeFileSync(lock, `${JSON.stringify({ host: hostname(), processId: process.pid })}\n`);
+  await rejects(runEvalCommand(["tune", "auto"], context), (error: Error) => error instanceof SetupError && error.message.includes(`held by process ${process.pid}`));
+  equal(existsSync(lock), true);
+});
+
+test("a run whose samples are all written but whose summary is not is finished when its tuning continues", async () => {
+  const { context, stopped, path } = await stoppedTuning((call) => call.prompt.includes("+tuned-"));
+  const cycle = readCycle(context.paths.evalsFolder, stopped.cycle!);
+  const runs = join(context.paths.evalsFolder, "runs");
+  // The candidate's development run stopped after its samples were written, before its summary: the baseline's samples have the same keys.
+  mkdirSync(join(runs, cycle.proposals[0]!.run!, "samples"), { recursive: true });
+  for (const sample of readdirSync(join(runs, cycle.baseline!, "samples"))) {
+    copyFileSync(join(runs, cycle.baseline!, "samples", sample), join(runs, cycle.proposals[0]!.run!, "samples", sample));
+  }
+  equal(existsSync(join(runs, cycle.proposals[0]!.run!, "summary.json")), false);
+  const { status, fake } = await resume(context, path);
+  equal(status, 0, context.lines.join("\n"));
+  equal(existsSync(join(runs, cycle.proposals[0]!.run!, "summary.json")), true);
+  equal(fake.calls.some((call) => call.prompt.includes("+tuned-") && call.prompt.includes(developmentCluster)), false);
 });
 
 test("a tune auto while another runs a tuning is a setup error that counts nothing", async () => {
