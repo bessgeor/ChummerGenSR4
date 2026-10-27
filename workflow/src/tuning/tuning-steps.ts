@@ -180,9 +180,7 @@ ${tuningCommitTrailer}: ${cycle.cycleId}
       const { merge, commit } = repository.merge(workspace, cycle.cycleId, join(cycleFolder(evalsFolder, cycle.cycleId), "merge"),
         `Merge ${workspace.branch}: ${cycle.jobKind} ${cycle.outcome}`, [{ key: "Tuning", value: state.tuningId }]);
       recordAutoTuning(evalsFolder, state.tuningId, { commit, merge });
-      log(merge === null
-        ? `Automatic tuning ${state.tuningId}: ${workspace.target} has the changes of ${workspace.branch} already.`
-        : `Automatic tuning ${state.tuningId}: merged ${workspace.branch} into ${workspace.target} as ${merge}.`);
+      log(`Automatic tuning ${state.tuningId}: merged ${workspace.branch} into ${workspace.target} as ${merge}.`);
       return merge;
     },
   };

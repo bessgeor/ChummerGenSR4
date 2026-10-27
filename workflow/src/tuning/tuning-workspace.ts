@@ -146,7 +146,7 @@ export class TuningRepository {
     const present = workspace.paths.filter((path) => existsSync(join(workspace.folder, path)) || this.worktrees.missingFolders(workspace.start, [path]).length === 0);
     if (present.length > 0) {
       this.worktrees.stage(workspace.folder, present);
-      const staged = this.git(["diff", "--cached", "--name-only", "-z"], { worktree: workspace.folder }).split(" ").filter((path) => path.length > 0);
+      const staged = this.git(["diff", "--cached", "--name-only", "-z"], { worktree: workspace.folder }).split("\0").filter((path) => path.length > 0);
       const temporary = staged.filter((path) => path.endsWith(temporarySuffix));
       if (temporary.length > 0) this.git(["rm", "--cached", "--quiet", "--", ...temporary], { worktree: workspace.folder });
       if (staged.length > temporary.length) this.worktrees.commitStaged(workspace.folder, message);
@@ -169,10 +169,11 @@ export class TuningRepository {
    * Merges the cycle's commit, the tip of its branch, into the workspace's target: rebased onto the target's tip as the
    * tuning branch and merged with a merge commit carrying `Merged-Tuning: <cycle>`, then the target is advanced, a
    * checkout of it by a fast-forward with the user's git configuration. Returns the merge commit, or the one that merged
-   * the cycle before, and the commit the branch keeps; when the target has the changes already there is no merge
-   * commit, and the branch keeps the cycle's commit. A conflict is a setup error naming the branch.
+   * the cycle before, and the commit the branch keeps. When the target has the changes already, the rebase drops the
+   * commit as empty: the merge commit then has the target's tree and the cycle's own commit as its second parent, and
+   * the branch keeps that commit. A conflict is a setup error naming the branch.
    */
-  merge(workspace: TuningWorkspace, cycleId: string, mergeFolder: string, subject: string, trailers: readonly { key: string; value: string }[]): { merge: string | null; commit: string } {
+  merge(workspace: TuningWorkspace, cycleId: string, mergeFolder: string, subject: string, trailers: readonly { key: string; value: string }[]): { merge: string; commit: string } {
     const ref = `refs/heads/${workspace.branch}`;
     const commit = this.worktrees.resolve(ref);
     if (commit === null || this.worktrees.trailer(commit, tuningCommitTrailer) !== cycleId) {
@@ -188,10 +189,7 @@ export class TuningRepository {
         + `Rebase ${workspace.branch} onto ${workspace.target} and resolve the conflict, keeping its commit message, then run tune auto again.`);
     }
     if (item.mergeCommit === null) {
-      // The rebase dropped the commit as empty and left the branch at the target's tip: it keeps the cycle's commit instead.
-      const now = this.worktrees.resolve(ref);
-      if (now !== commit) this.git(["update-ref", "-m", `tuning: keep the commit of ${cycleId}`, ref, commit, ...(now === null ? [] : [now])]);
-      return { merge: null, commit };
+      throw new SetupError(`The merge of ${workspace.branch} into ${workspace.target} made no merge commit.`);
     }
     return { merge: item.mergeCommit, commit: this.worktrees.resolve(ref)! };
   }

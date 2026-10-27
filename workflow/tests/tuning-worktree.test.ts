@@ -280,7 +280,7 @@ test("a checkout made with core.autocrlf keeps its line endings: its status and 
   equal(repo.run("status", "--porcelain=v1"), "");
 });
 
-test("a tuning commit the branch has the changes of already is not merged, and its branch keeps it", () => {
+test("a tuning commit the branch has the changes of already is still merged with a merge commit that carries the trailer, and its branch keeps the commit", () => {
   const repo = tuningRepository();
   const start = repo.run("rev-parse", "main");
   const branchGit = processBranchGit(repo.root);
@@ -290,12 +290,18 @@ test("a tuning commit the branch has the changes of already is not merged, and i
   const commit = tuning.commit(workspace, "tc-1", "Tune hypothesis: rejected\n\nTuning-Cycle: tc-1\n")!;
   equal(repo.run("rev-parse", `${commit}^`), start);
   tuning.remove(workspace);
-  repo.commit("the same ledger", { "workflow/evals/tuning/holdout.json": "{}\n" });
-  const tip = repo.run("rev-parse", "main");
-  for (const attempt of [1, 2]) {
-    deepStrictEqual(tuning.merge(workspace, "tc-1", join(scratch(), "merge"), "Merge", []), { merge: null, commit }, `attempt ${attempt}`);
-    deepStrictEqual([repo.run("rev-parse", "main"), repo.run("rev-parse", "tuning/tc-1")], [tip, commit]);
-  }
+  const moved = repo.commit("the same ledger", { "workflow/evals/tuning/holdout.json": "{}\n" });
+  const first = tuning.merge(workspace, "tc-1", join(scratch(), "merge"), "Merge tuning/tc-1", []);
+  deepStrictEqual(first.commit, commit);
+  equal(repo.run("rev-parse", "main"), first.merge);
+  deepStrictEqual([repo.run("rev-parse", `${first.merge}^1`), repo.run("rev-parse", `${first.merge}^2`), repo.run("rev-parse", "tuning/tc-1")], [moved, commit, commit]);
+  equal(repo.run("rev-parse", `${first.merge}^{tree}`), repo.run("rev-parse", `${moved}^{tree}`));
+  equal(trailer(repo, first.merge, "Merged-Tuning"), "tc-1");
+  repo.run("merge-base", "--is-ancestor", commit, "main");
+  equal(repo.run("status", "--porcelain=v1"), "");
+  // Merged again, as a resumed merge node would: the trailer is reachable, so nothing changes.
+  deepStrictEqual(tuning.merge(workspace, "tc-1", join(scratch(), "merge"), "Merge", []), first);
+  deepStrictEqual([repo.run("rev-parse", "main"), repo.run("rev-parse", "tuning/tc-1")], [first.merge, commit]);
 });
 
 test("a commit whose message a hook rewrote without the trailer is a setup error, and nothing is merged", () => {
