@@ -8,6 +8,7 @@ import { metrics } from "../evals/metrics.js";
 import { SetupError } from "../host/setup-error.js";
 import type { ComparisonSummary } from "./active-configuration.js";
 import { activate, entryName, rollback } from "./activation.js";
+import { autoTuningDefaults, autoTuningPath, checkAutoTuning, newTuningId, startAutoTuning } from "./auto-tuning.js";
 import { candidatesFolder, parseTuningFile, storeCandidate } from "./candidates.js";
 import { cycleFolder, resumeCycle, startCycle, type Cycle, type CycleDependencies } from "./cycle.js";
 import { defaultMaximumExposures, openHoldout, type HoldoutDependencies } from "./holdout.js";
@@ -25,7 +26,9 @@ export const tuneUsage = `  tune add --file <json>          store a tuning confi
                                   restore the job kind's previous configuration and certificate
   tune cycle --dataset <folder> --min-pass <0-1> [--metric <m>] [--candidates <1-3>] [--repeat <n>] [--max-exposures <1-3>] [--max-mean-cost-usd <usd>]
                                   development baseline, proposals, holdout and activation in one resumable cycle
-  tune cycle --resume <cycle>     continue a stopped cycle with its stored options`;
+  tune cycle --resume <cycle>     continue a stopped cycle with its stored options
+  tune auto [--force]             count the new workflow hypothesis records against the profile's autoTuning.every (default ${autoTuningDefaults.every}); a tuning is
+                                  due with that many, or with --force (out/evals/tuning/auto.json)`;
 
 type TuneCommand = (args: readonly string[], context: EvalContext) => Promise<number>;
 
@@ -166,7 +169,33 @@ export function cycleLines(cycle: Cycle): string[] {
   ];
 }
 
-const commands: Readonly<Record<string, TuneCommand>> = { add, propose, holdout, activate: activateCommand, rollback: rollbackCommand, cycle: cycleCommand };
+/**
+ * Counts the new hypothesis records. Not due prints the count and exits with 0. A due tuning is recorded as in progress
+ * with the records it counts; this command freezes no dataset and runs no cycle, so it then ends with a setup error
+ * rather than a success, and the tuning stays in progress. A tuning already in progress is reported the same way.
+ */
+const auto: TuneCommand = async (args, context) => {
+  const options = CommandOptions.parse("tune auto", args, [], ["force"]);
+  const settings = context.autoTuning();
+  const evalsFolder = context.paths.evalsFolder;
+  const dependencies = { store: context.store, evalsFolder, now: context.now, newTuningId };
+  const trigger = await checkAutoTuning(dependencies, settings, options.flag("force"));
+  switch (trigger.kind) {
+    case "not_due":
+      context.log(`Automatic tuning: ${trigger.count} of ${trigger.every} new hypothesis records; not due.`);
+      return 0;
+    case "due":
+      context.log(`Automatic tuning: ${trigger.records.length} of ${trigger.every} new hypothesis records${trigger.forced ? ", forced" : ""}; due.`);
+      const tuning = startAutoTuning(dependencies, trigger);
+      throw new SetupError(`Automatic tuning ${tuning.tuningId} is recorded as in progress in ${autoTuningPath(evalsFolder)} with ${tuning.records.length} counted records; `
+        + "tune auto freezes no dataset and runs no tuning cycle, so it has not tuned.");
+    case "in_progress":
+      context.log(`Automatic tuning ${trigger.tuning.tuningId}: in progress since ${trigger.tuning.startedUtc}.`);
+      throw new SetupError(`Automatic tuning ${trigger.tuning.tuningId} is in progress in ${autoTuningPath(evalsFolder)}; tune auto does not continue it.`);
+  }
+};
+
+const commands: Readonly<Record<string, TuneCommand>> = { add, propose, holdout, activate: activateCommand, rollback: rollbackCommand, cycle: cycleCommand, auto };
 
 /** Runs a `tune` subcommand and returns its exit status; a setup error is thrown. */
 export async function runTuneCommand(args: readonly string[], context: EvalContext): Promise<number> {

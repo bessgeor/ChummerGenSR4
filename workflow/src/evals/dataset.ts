@@ -41,9 +41,12 @@ const DatasetItemSchema = z.strictObject({
 });
 export type DatasetItem = z.infer<typeof DatasetItemSchema>;
 
+/** A dataset name: lower-case letters, digits and dashes. */
+export const datasetNamePattern = /^[a-z0-9][a-z0-9-]*$/;
+
 export const DatasetSchema = z.strictObject({
   schemaVersion: z.literal(1),
-  name: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
+  name: z.string().regex(datasetNamePattern),
   version: z.number().int().positive(),
   previousHash: z.string().nullable(),
   reason: z.string().nullable(),
@@ -135,7 +138,7 @@ type Draft = { clusterId: string; contextHash: string; sourceIdentity: string; h
 
 /** Freezes the next version of a dataset from the job kind's workflow records; an existing version is never changed. */
 export async function freezeDataset(input: FreezeInput): Promise<{ folder: string; dataset: Dataset }> {
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(input.name)) throw new SetupError(`A dataset name is lower-case letters, digits and dashes, got '${input.name}'.`);
+  if (!datasetNamePattern.test(input.name)) throw new SetupError(`A dataset name is lower-case letters, digits and dashes, got '${input.name}'.`);
   const drafts = new Map<string, Draft>();
   for (const record of input.records.filter((item) => isGradable(item) && item.jobKind === input.jobKind)) {
     if (!contextExists(input.threadFolder, record)) {

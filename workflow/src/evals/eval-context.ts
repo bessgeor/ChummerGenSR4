@@ -6,6 +6,7 @@ import type { QuotaWaiter } from "../diagnosis/quota-waiter.js";
 import type { Git } from "../diagnosis/source-snapshot.js";
 import type { ScratchFolder } from "../host/scratch-folder.js";
 import type { WorkflowPaths } from "../paths.js";
+import type { AutoTuningSettings } from "../tuning/auto-tuning.js";
 import { newEvalRunId, type EvalRunDependencies } from "./eval-run.js";
 
 /** What the evaluation commands use; the composition root makes the real ones. */
@@ -21,6 +22,8 @@ export type EvalContext = {
   readonly certificatesFolder: () => string;
   /** The tuning folder of the local profile, or the repository's. */
   readonly tuningFolder: () => string;
+  /** The local profile's `autoTuning` with its defaults. */
+  readonly autoTuning: () => AutoTuningSettings;
   readonly agents: AgentRunners;
   readonly quota: QuotaWaiter;
   readonly createScratchFolder: (prefix: string) => ScratchFolder;
