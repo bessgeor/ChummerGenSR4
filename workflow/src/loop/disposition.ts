@@ -1,5 +1,5 @@
 import type { CheckResult } from "../diagnosis/check.js";
-import { clusterFailure, clusterStatus, type ClusterDiagnosis } from "../diagnosis/cluster-diagnosis.js";
+import { clusterFailure, clusterStatus, variantsOf, type ClusterDiagnosis } from "../diagnosis/cluster-diagnosis.js";
 import { finishedAttempts, type ClusterRepair } from "../repair/cluster-repair.js";
 import type { ClusterWidening } from "../widening/cluster-widening.js";
 import { latestRejection } from "./retry.js";
@@ -73,6 +73,8 @@ export function clusterEnd(clusterId: string, input: DispositionInput): ClusterE
   if (diagnosed === "abstained") return end("abstained", "hypothesis", diagnosis.hypothesis?.output.reason ?? null);
   if (diagnosed !== "challenged") throw new Error(`Cluster ${clusterId}'s diagnosis is ${diagnosed} when the thread concludes.`);
   const checked = input.check?.clusters[clusterId]?.outcome ?? "undecided";
+  // A hypothesis the budget stopped might have been confirmed: without a confirmed one, the budget ended the cluster.
+  if (checked !== "confirmed" && variantsOf(diagnosis).some((variant) => variant.status === "budget_exhausted")) return budgetEnd();
   if (checked !== "confirmed") return end(checked, "check");
   if (repair === undefined) return end("not_repaired");
   const attempt = repair.attempt;

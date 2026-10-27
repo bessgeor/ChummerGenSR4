@@ -1,5 +1,5 @@
 import { END, Send, START, StateGraph, type LangGraphRunnableConfig } from "@langchain/langgraph";
-import { nextDiagnosisRoute } from "../../diagnosis/cluster-diagnosis.js";
+import { isWaiting, nextDiagnosisRoute } from "../../diagnosis/cluster-diagnosis.js";
 import type { JobInput, JobStep } from "../../diagnosis/diagnosis-service.js";
 import { hypothesesOf, usesFixChanges } from "../../options/run-options.js";
 import type { DiagnosisSteps } from "../workflow-graph.js";
@@ -43,9 +43,9 @@ export function buildDiagnoseStage(diagnosis: DiagnosisSteps) {
     .addNode("challenge", async (state: VariantTask, config: LangGraphRunnableConfig) =>
       applyJob(await diagnosis.challenge(jobInput(state, config), requireStore(config))))
     .addNode("wait_for_quota", async (state: WorkflowStateValue, config: LangGraphRunnableConfig) => {
-      const waiting = Object.values(state.clusters).filter((cluster) => cluster.waiting !== null);
-      await diagnosis.waitForQuota(waiting.map((cluster) => cluster.waiting!), config.signal);
-      return { clusters: Object.fromEntries(waiting.map((cluster) => [cluster.clusterId, { clusterId: cluster.clusterId, waiting: null }])) };
+      await diagnosis.waitForQuota(Object.values(state.clusters).filter(isWaiting).map((cluster) => cluster.waiting!), config.signal);
+      const marked = Object.values(state.clusters).filter((cluster) => cluster.waiting !== null);
+      return { clusters: Object.fromEntries(marked.map((cluster) => [cluster.clusterId, { clusterId: cluster.clusterId, waiting: null }])) };
     })
     .addNode("check", async (state: WorkflowStateValue, config: LangGraphRunnableConfig) => ({
       diagnosisCheck: await diagnosis.check({ options: state.options, clusters: state.clusters, ...(config.signal === undefined ? {} : { signal: config.signal }) }, requireStore(config)),

@@ -180,7 +180,7 @@ export type DiagnosisRoute =
  */
 export function nextDiagnosisRoute(clusters: Readonly<Record<string, ClusterDiagnosis>>, checked: boolean): DiagnosisRoute {
   const all = Object.values(clusters);
-  if (all.some((cluster) => cluster.waiting !== null)) return { kind: "wait_for_quota" };
+  if (all.some(isWaiting)) return { kind: "wait_for_quota" };
   const jobs = (status: ClusterStatus): VariantJob[] => all.filter((cluster) => clusterStatus(cluster) !== "failed")
     .flatMap((cluster) => variantsOf(cluster).filter((variant) => variant.status === status).map((variant) => ({ clusterId: cluster.clusterId, variant: variant.variant })));
   const pending = jobs("pending");
@@ -189,4 +189,9 @@ export function nextDiagnosisRoute(clusters: Readonly<Record<string, ClusterDiag
   if (hypothesized.length > 0) return { kind: "challenge", jobs: hypothesized };
   if (!checked && all.some((cluster) => clusterStatus(cluster) === "challenged")) return { kind: "check" };
   return { kind: "end" };
+}
+
+/** Whether a cluster waits for a usage limit: a cluster that a failed hypothesis ended gets no further job, so it does not. */
+export function isWaiting(cluster: ClusterDiagnosis): boolean {
+  return cluster.waiting !== null && clusterStatus(cluster) !== "failed";
 }

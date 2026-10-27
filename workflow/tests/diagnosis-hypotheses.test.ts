@@ -3,10 +3,11 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { InMemoryStore, MemorySaver } from "@langchain/langgraph";
-import { variantChecks } from "../src/diagnosis/check.js";
-import { clusterStatus, mergeClusters, pendingVariants, variantsOf, variantUpdate, type ClusterDiagnosis } from "../src/diagnosis/cluster-diagnosis.js";
+import { variantChecks, type CheckResult } from "../src/diagnosis/check.js";
+import { clusterStatus, mergeClusters, nextDiagnosisRoute, pendingVariants, variantsOf, variantUpdate, type ClusterDiagnosis } from "../src/diagnosis/cluster-diagnosis.js";
 import type { DiagnosisDocument } from "../src/diagnosis/diagnosis-document.js";
 import { EvalRecordSchema, recordNamespace, type CheckLabel } from "../src/evals/eval-record.js";
+import { clusterEnd } from "../src/loop/disposition.js";
 import type { OutcomeDocument } from "../src/loop/outcome.js";
 import { challengeAnswer, diagnosisHarness, FakeAgents, hypothesisAnswer, twoClusters, type JobCall, type Reply } from "./diagnosis-harness.js";
 import { FakeRepairHost, patchedReply, repairedSource } from "./repair-fixtures.js";
@@ -211,4 +212,21 @@ test("the updates of two hypotheses of one cluster in one step both stay, and a 
   const single: ClusterDiagnosis = { ...fields, records: ["r"] };
   deepStrictEqual(variantUpdate(single, 1, { status: "hypothesized", records: ["r"] }), { clusterId: "a", status: "hypothesized" });
   deepStrictEqual(mergeClusters({ a: merged }, { a: single })["a"], single);
+});
+
+test("a hypothesis the budget stopped ends an unconfirmed cluster as budget_exhausted; a failed cluster does not wait for quota", () => {
+  const cluster: ClusterDiagnosis = {
+    clusterId: "a", contextFolder: "f", contextHash: "h", status: "challenged", hypothesis: null, challenge: null, waiting: null, failure: null,
+    records: [], firstRecords: [], variants: [{ ...pendingVariants(2)[0]!, status: "budget_exhausted" }],
+  };
+  const check = (outcome: CheckLabel): CheckResult => ({
+    runFolder: "r", cases: [], captures: [], execution: { status: 0, coverageValid: true, invalidReasons: [], failures: 0 }, observations: [],
+    clusters: { a: { outcome, hypothesis: [], alternative: null, variants: [{ variant: 1, outcome, hypothesis: [], alternative: null }] } },
+  });
+  const end = (outcome: CheckLabel) => clusterEnd("a", { clusters: { a: cluster }, check: check(outcome), repairs: {}, widenings: {}, budgetBlocked: [], merges: null }).disposition;
+  deepStrictEqual([end("refuted"), end("undecided"), end("confirmed")], ["budget_exhausted", "budget_exhausted", "not_repaired"]);
+  const quota = { job: "hypothesis" as const, provider: "claude" as const, since: "t", processId: "p", message: "m" };
+  const failed: ClusterDiagnosis = { ...cluster, status: "failed", failure: { job: "hypothesis", kind: "refused", message: "no" }, variants: [{ ...pendingVariants(2)[0]! }], waiting: quota };
+  deepStrictEqual(nextDiagnosisRoute({ a: failed }, false), { kind: "end" });
+  deepStrictEqual(nextDiagnosisRoute({ a: { ...failed, status: "hypothesized", failure: null } }, false), { kind: "wait_for_quota" });
 });
