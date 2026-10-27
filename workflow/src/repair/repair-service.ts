@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { BaseStore } from "@langchain/langgraph-checkpoint";
 import type { AgentRunners } from "../agents/agent-runners.js";
-import type { CheckResult } from "../diagnosis/check.js";
+import { confirmedHypothesis, type CheckResult } from "../diagnosis/check.js";
 import type { ClusterDiagnosis, QuotaWaitMark } from "../diagnosis/cluster-diagnosis.js";
 import type { ContextManifest } from "../diagnosis/context.js";
 import { readSealedManifest } from "../diagnosis/diagnosis-service.js";
@@ -113,7 +113,9 @@ export class RepairService {
     return path;
   }
 
-  async repair(input: RepairInput, store: BaseStore): Promise<RepairStep> {
+  async repair(given: RepairInput, store: BaseStore): Promise<RepairStep> {
+    // The attempt repairs from the cluster's first confirmed hypothesis, with that hypothesis's challenge.
+    const input: RepairInput = { ...given, diagnosis: confirmedHypothesis(given.diagnosis, given.check) };
     const { repair, diagnosis, options } = input;
     const clusterId = repair.clusterId;
     const label = `repair ${clusterId}`;

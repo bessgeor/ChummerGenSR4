@@ -16,9 +16,11 @@ import type { RunOptions } from "../options/run-options.js";
 import { readDocument } from "../steps/read-document.js";
 import { TriageDocumentSchema } from "../triage/triage-document.js";
 import { dispatchedTuningOf, tunedPromptVersion } from "../tuning/tuning.js";
-import { judge, observe, planCheck, type CheckResult, type ClusterCheck } from "./check.js";
+import { checkCluster, observe, planCheck, type CheckResult, type ClusterCheck } from "./check.js";
 import type { CheckCapture } from "./check-capture.js";
-import type { ClusterDiagnosis, ClusterUpdate, QuotaWaitMark } from "./cluster-diagnosis.js";
+import {
+  pendingVariants, variantOf, variantsOf, variantUpdate, type ClusterDiagnosis, type ClusterUpdate, type QuotaWaitMark,
+} from "./cluster-diagnosis.js";
 import { diagnosisDocument, writeDiagnosisDocument } from "./diagnosis-document.js";
 import { ContextManifestSchema, contextHash, sealContext, type ContextManifest } from "./context.js";
 import { jobFolderIn, stageJobFolder } from "./job-folder.js";
@@ -58,12 +60,16 @@ export type PrepareInput = {
   readonly threadId: string; readonly triagePath: string; readonly caseFile: string; readonly candidate: string; readonly candidateSource: string;
   /** Whether the thread works in fix changes: then the repository's archived fixes are ranked into each context as priors. */
   readonly fixChanges: boolean;
+  /** How many hypotheses each cluster gets. */
+  readonly hypotheses: number;
 };
 
 export type JobInput = {
   readonly threadId: string;
   readonly options: RunOptions;
   readonly cluster: ClusterDiagnosis;
+  /** The cluster's hypothesis the job is for: 1 for the first. */
+  readonly variant: number;
   /** Model time the thread's finished jobs used, in milliseconds. */
   readonly spentMs: number;
   readonly signal?: AbortSignal;
@@ -82,6 +88,8 @@ export type JobStep = { readonly update: ClusterUpdate; readonly chargedMs: numb
 export class DiagnosisService {
   /** Model time the jobs finished in this process charged to each thread, before the graph state has them. */
   private readonly charged = new Map<string, number>();
+  /** The record IDs of the jobs running in this process: the hypotheses of one cluster run side by side and number their records from one sequence. */
+  private readonly reserved = new Set<string>();
 
   constructor(private readonly dependencies: DiagnosisDependencies) {}
 
@@ -117,6 +125,8 @@ export class DiagnosisService {
       clusters[cluster.id] = {
         clusterId: cluster.id, contextFolder: sealed.folder, contextHash: sealed.hash, status: "pending",
         hypothesis: null, challenge: null, waiting: null, failure: null, records: [],
+        // With one hypothesis every record is the first's, as in a thread stored before a cluster could have several.
+        ...(input.hypotheses > 1 ? { variants: pendingVariants(input.hypotheses), firstRecords: [] } : {}),
       };
     }
     return clusters;
@@ -135,7 +145,11 @@ export class DiagnosisService {
     await this.dependencies.quota.wait(marks.map((mark) => mark.processId), signal);
   }
 
-  /** Captures every predicted case and capture in one run, judges each challenged cluster and labels its records. */
+  /**
+   * Captures every predicted case and capture in one run, judges each challenged hypothesis of each challenged cluster
+   * and labels the records of each hypothesis with its own outcome; the records of interrupted jobs, which no
+   * hypothesis lists, get the cluster's.
+   */
   async check(input: CheckInput, store: BaseStore): Promise<CheckResult> {
     const plan = planCheck(input.clusters);
     if (plan === null) throw new Error("The diagnosis check ran without a prediction.");
@@ -147,11 +161,18 @@ export class DiagnosisService {
     const clusters: Record<string, ClusterCheck> = {};
     for (const id of plan.checked) {
       const cluster = input.clusters[id]!;
-      const checked = judge(cluster, observations);
+      const checked = checkCluster(cluster, observations);
       clusters[id] = checked;
-      // Every job of the cluster, the quota and interrupted attempts included.
-      for (const recordId of cluster.records) await labelRecordById(store, recordId, checked.outcome);
-      this.dependencies.log(`Diagnosis check: ${id} ${checked.outcome}.`);
+      const variants = variantsOf(cluster);
+      // Every job of the cluster, the quota and interrupted attempts included. A hypothesis that was not judged
+      // (it abstained or the budget stopped it) has no outcome, so its records keep no label.
+      for (const recordId of cluster.records) {
+        const owner = variants.find((variant) => variant.records.includes(recordId));
+        const outcome = owner === undefined ? checked.outcome : checked.variants.find((item) => item.variant === owner.variant)?.outcome ?? null;
+        if (outcome !== null) await labelRecordById(store, recordId, outcome);
+      }
+      const judged = variants.length === 1 ? "" : ` (${checked.variants.map((item) => `hypothesis ${item.variant} ${item.outcome}`).join(", ")})`;
+      this.dependencies.log(`Diagnosis check: ${id} ${checked.outcome}${judged}.`);
     }
     return {
       runFolder: run.runFolder, cases: plan.cases, captures: plan.captures,
@@ -175,9 +196,20 @@ export class DiagnosisService {
    * The ID of the next record of a kind, and the earlier records of that kind the state never saw: a job that failed
    * with `infra` stored its record and then ended the run, so only the store knows it.
    */
-  private nextRecord(store: BaseStore, threadId: string, cluster: ClusterDiagnosis, kind: JobKind): Promise<{ recordId: string; unlisted: string[] }> {
+  private async nextRecord(store: BaseStore, threadId: string, cluster: ClusterDiagnosis, kind: JobKind): Promise<{ recordId: string; unlisted: string[] }> {
     // The listed records of a kind are attempts 1 to n, so a stored record the state does not list comes after them.
-    return nextRecordId(store, kind, `${threadId}/${cluster.clusterId}/${kind}`, cluster.records.filter((id) => id.includes(`/${kind}/`)).length);
+    // A record ID that another hypothesis's running job holds is taken too; it is that job's, not an unlisted one.
+    let listed = cluster.records.filter((id) => id.includes(`/${kind}/`)).length;
+    const unlisted: string[] = [];
+    for (;;) {
+      const next = await nextRecordId(store, kind, `${threadId}/${cluster.clusterId}/${kind}`, listed);
+      unlisted.push(...next.unlisted.filter((id) => !cluster.records.includes(id)));
+      if (!this.reserved.has(next.recordId)) {
+        this.reserved.add(next.recordId);
+        return { recordId: next.recordId, unlisted };
+      }
+      listed = next.attempt;
+    }
   }
 
   /** Model time charged to a thread: the state's total, or more when finished jobs of the same step are not in it yet. */
@@ -189,22 +221,31 @@ export class DiagnosisService {
     this.charged.set(threadId, this.spentMs(threadId, stateMs) + milliseconds);
   }
 
-  private budgetExhausted(label: string, clusterId: string, budgetMinutes: number): JobStep {
+  private budgetExhausted(label: string, cluster: ClusterDiagnosis, variant: number, budgetMinutes: number): JobStep {
     this.dependencies.log(`${label}: the run budget of ${budgetMinutes} min is spent; not started.`);
-    return { update: { clusterId, status: "budget_exhausted" }, chargedMs: 0 };
+    return { update: variantUpdate(cluster, variant, { status: "budget_exhausted" }), chargedMs: 0 };
   }
 
   private async runJob(kind: "hypothesis" | "challenge", input: JobInput, store: BaseStore): Promise<JobStep> {
+    const { recordId, unlisted } = await this.nextRecord(store, input.threadId, input.cluster, kind);
+    try {
+      return await this.runReservedJob(kind, input, store, recordId, unlisted);
+    } finally {
+      this.reserved.delete(recordId);
+    }
+  }
+
+  private async runReservedJob(kind: "hypothesis" | "challenge", input: JobInput, store: BaseStore, recordId: string, unlisted: readonly string[]): Promise<JobStep> {
     const { cluster, options } = input;
-    const label = `${kind} ${cluster.clusterId}`;
+    const variant = variantOf(cluster, input.variant);
+    const label = `${kind} ${cluster.clusterId}${variantsOf(cluster).length === 1 ? "" : ` #${variant.variant}`}`;
     const budgetMs = options.agents.runBudgetMinutes * 60_000;
     const budgetSpent = () => this.spentMs(input.threadId, input.spentMs) >= budgetMs;
-    if (budgetSpent()) return this.budgetExhausted(label, cluster.clusterId, options.agents.runBudgetMinutes);
+    if (budgetSpent()) return this.budgetExhausted(label, cluster, variant.variant, options.agents.runBudgetMinutes);
     const manifest = this.manifest(cluster);
     const folders = diagnosisFolders(this.dependencies.threadFolder(input.threadId));
-    const hypothesis: Explanation | null = cluster.hypothesis?.output.explanation ?? null;
+    const hypothesis: Explanation | null = variant.hypothesis?.output.explanation ?? null;
     if (kind === "challenge" && hypothesis === null) throw new Error(`${label}: there is no hypothesis to challenge.`);
-    const { recordId, unlisted } = await this.nextRecord(store, input.threadId, cluster, kind);
     const choice = options.agents.jobs[kind];
     const tuning = dispatchedTuningOf(options.tuning, kind);
     const scratch = this.dependencies.createScratchFolder("workflow-job-");
@@ -243,11 +284,11 @@ export class DiagnosisService {
         this.dependencies.log(`${label}: the scratch copy ${scratch.path} could not be removed (${(error as Error).message}); remove it by hand.`);
       }
     }
-    if (wasNotStarted(result)) return this.budgetExhausted(label, cluster.clusterId, options.agents.runBudgetMinutes);
+    if (wasNotStarted(result)) return this.budgetExhausted(label, cluster, variant.variant, options.agents.runBudgetMinutes);
     const finished = this.dependencies.now();
     const record: EvalRecord = {
       schemaVersion: 2, recordId, jobKind: kind, origin: "workflow", threadId: input.threadId, subject: { kind: "discrepancy-cluster", id: cluster.clusterId },
-      challenged: kind === "challenge" ? cluster.hypothesis!.recordId : null,
+      challenged: kind === "challenge" ? variant.hypothesis!.recordId : null,
       contextHash: cluster.contextHash, promptVersion: tunedPromptVersion(kind === "hypothesis" ? hypothesisPromptVersionOf(manifest) : challengePromptVersion, tuning),
       agent: { provider: choice.provider, model: choice.model, effort: choice.effort },
       startedUtc: started.toISOString(), finishedUtc: finished.toISOString(), durationMs: measuredDuration(label, result),
@@ -257,27 +298,31 @@ export class DiagnosisService {
       labels: noLabels,
     };
     await putRecord(store, record);
+    // The cluster lists the interrupted jobs' records too; the hypothesis lists only its own jobs'.
     const records = [...cluster.records, ...unlisted, recordId];
+    const update = (change: Parameters<typeof variantUpdate>[2]): ClusterUpdate => ({
+      ...variantUpdate(cluster, variant.variant, { ...change, records: [...variant.records, recordId] }), records,
+    });
     if (result.ok) {
       this.dependencies.quota.reset();
       const answer = { recordId, provider: choice.provider, model: choice.model, effort: choice.effort };
       if (kind === "hypothesis") {
         const output = HypothesisOutputSchema.parse(result.output);
         this.dependencies.log(`${label}: ${output.outcome === "abstain" ? `abstained: ${output.reason}` : output.explanation!.claim}`);
-        return { update: { clusterId: cluster.clusterId, status: output.outcome === "abstain" ? "abstained" : "hypothesized", hypothesis: { ...answer, output }, records }, chargedMs: record.durationMs };
+        return { update: update({ status: output.outcome === "abstain" ? "abstained" : "hypothesized", hypothesis: { ...answer, output } }), chargedMs: record.durationMs };
       }
       const output = ChallengeOutputSchema.parse(result.output);
       this.dependencies.log(`${label}: ${output.outcome === "no_alternative" ? `no alternative: ${output.reason}` : output.alternative!.claim}`);
-      return { update: { clusterId: cluster.clusterId, status: "challenged", challenge: { ...answer, output }, records }, chargedMs: record.durationMs };
+      return { update: update({ status: "challenged", challenge: { ...answer, output } }), chargedMs: record.durationMs };
     }
     const failure = result.failure;
     this.dependencies.log(`${label}: ${failure.kind}: ${failure.message}`);
     if (failure.kind === "quota_exhausted") {
       const waiting: QuotaWaitMark = { job: kind, provider: choice.provider, since: finished.toISOString(), processId: this.dependencies.quota.processId, message: failure.message };
-      return { update: { clusterId: cluster.clusterId, waiting, records }, chargedMs: 0 };
+      return { update: { ...update({}), waiting }, chargedMs: 0 };
     }
     if (failure.kind === "infra" || failure.kind === "timeout") throw new SetupError(`${label} failed: ${failure.message} (record ${recordId})`);
-    return { update: { clusterId: cluster.clusterId, status: "failed", failure: { job: kind, kind: failure.kind, message: failure.message }, records }, chargedMs: record.durationMs };
+    return { update: update({ status: "failed", failure: { job: kind, kind: failure.kind, message: failure.message } }), chargedMs: record.durationMs };
   }
 }
 

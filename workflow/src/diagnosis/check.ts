@@ -1,6 +1,6 @@
 import type { CaptureResults } from "../../../contracts/generated/typescript/parity-capture-results.js";
 import type { CheckLabel } from "../evals/eval-record.js";
-import type { ClusterDiagnosis } from "./cluster-diagnosis.js";
+import { clusterStatus, variantOf, variantsOf, type ClusterDiagnosis, type HypothesisVariant } from "./cluster-diagnosis.js";
 import type { Prediction } from "./job-schemas.js";
 
 export type Observation = "differs" | "matches" | "not-observed";
@@ -10,11 +10,21 @@ export type ObservedCapture = { readonly case: string; readonly capture: string;
 /** One prediction against what the check run observed; `held` is null when nothing was observed. */
 export type PredictionCheck = Prediction & { readonly observed: Observation; readonly held: boolean | null };
 
-export type ClusterCheck = {
+/** One hypothesis judged with its own alternative. */
+export type Judgement = {
   readonly outcome: CheckLabel;
   readonly hypothesis: readonly PredictionCheck[];
   readonly alternative: readonly PredictionCheck[] | null;
 };
+
+/** A judged hypothesis of a cluster: 1 for the first. */
+export type VariantCheck = Judgement & { readonly variant: number };
+
+/**
+ * A cluster's check: its outcome from its hypotheses', the first judged hypothesis's predictions at the top level, and
+ * every judged hypothesis in `variants`, which a check stored with one hypothesis per cluster lacks.
+ */
+export type ClusterCheck = Judgement & { readonly variants?: readonly VariantCheck[] };
 
 /** The check run: its execution outcome apart from its observations, and each checked cluster's outcome. */
 export type CheckResult = {
@@ -34,21 +44,32 @@ export type CheckPlan = {
   readonly predicted: readonly { readonly case: string; readonly capture: string }[];
 };
 
-function predictionsOf(cluster: ClusterDiagnosis): { hypothesis: readonly Prediction[]; alternative: readonly Prediction[] | null } {
+/** What a hypothesis and its challenge predict. */
+type Predicting = Pick<HypothesisVariant, "hypothesis" | "challenge">;
+
+function predictionsOf(variant: Predicting): { hypothesis: readonly Prediction[]; alternative: readonly Prediction[] | null } {
   return {
-    hypothesis: cluster.hypothesis?.output.explanation?.predictions ?? [],
-    alternative: cluster.challenge?.output.alternative?.predictions ?? null,
+    hypothesis: variant.hypothesis?.output.explanation?.predictions ?? [],
+    alternative: variant.challenge?.output.alternative?.predictions ?? null,
   };
 }
 
-/** The union of the cases and captures every challenged cluster predicts, in first-named order; null when there are none. */
+/** The hypotheses of a cluster that the check judges: those that were challenged. */
+function challengedVariants(cluster: ClusterDiagnosis): HypothesisVariant[] {
+  return variantsOf(cluster).filter((variant) => variant.status === "challenged");
+}
+
+/**
+ * The union of the cases and captures that every challenged hypothesis of every challenged cluster and their
+ * alternatives predict, in first-named order; null when there are none.
+ */
 export function planCheck(clusters: Readonly<Record<string, ClusterDiagnosis>>): CheckPlan | null {
-  const checked = Object.values(clusters).filter((cluster) => cluster.status === "challenged");
+  const checked = Object.values(clusters).filter((cluster) => clusterStatus(cluster) === "challenged");
   const cases: string[] = [];
   const captures: string[] = [];
   const predicted: { case: string; capture: string }[] = [];
-  for (const cluster of checked) {
-    const { hypothesis, alternative } = predictionsOf(cluster);
+  for (const variant of checked.flatMap(challengedVariants)) {
+    const { hypothesis, alternative } = predictionsOf(variant);
     for (const prediction of [...hypothesis, ...(alternative ?? [])]) {
       if (!cases.includes(prediction.case)) cases.push(prediction.case);
       if (!captures.includes(prediction.capture)) captures.push(prediction.capture);
@@ -80,8 +101,8 @@ function checkPredictions(predictions: readonly Prediction[], observations: read
  * `refuted` when an observed hypothesis prediction is wrong; `confirmed` when every hypothesis prediction is
  * observed and right and the alternative, if any, has an observed wrong prediction; else `undecided`.
  */
-export function judge(cluster: ClusterDiagnosis, observations: readonly ObservedCapture[]): ClusterCheck {
-  const { hypothesis, alternative } = predictionsOf(cluster);
+export function judge(variant: Predicting, observations: readonly ObservedCapture[]): Judgement {
+  const { hypothesis, alternative } = predictionsOf(variant);
   const hypothesisChecks = checkPredictions(hypothesis, observations);
   const alternativeChecks = alternative === null ? null : checkPredictions(alternative, observations);
   let outcome: CheckLabel = "undecided";
@@ -92,4 +113,35 @@ export function judge(cluster: ClusterDiagnosis, observations: readonly Observed
     outcome = "confirmed";
   }
   return { outcome, hypothesis: hypothesisChecks, alternative: alternativeChecks };
+}
+
+/**
+ * Judges every challenged hypothesis of a cluster: the cluster is `confirmed` when any hypothesis is, `refuted` when
+ * every hypothesis that predicted is refuted, and `undecided` otherwise.
+ */
+export function checkCluster(cluster: ClusterDiagnosis, observations: readonly ObservedCapture[]): ClusterCheck & { readonly variants: readonly VariantCheck[] } {
+  const variants = challengedVariants(cluster).map((variant) => ({ variant: variant.variant, ...judge(variant, observations) }));
+  const first = variants[0];
+  if (first === undefined) throw new Error(`Cluster ${cluster.clusterId} has no challenged hypothesis to check.`);
+  const predicting = variants.filter((variant) => variant.hypothesis.length > 0);
+  const outcome: CheckLabel = variants.some((variant) => variant.outcome === "confirmed") ? "confirmed"
+    : predicting.length > 0 && predicting.every((variant) => variant.outcome === "refuted") ? "refuted" : "undecided";
+  return { outcome, hypothesis: first.hypothesis, alternative: first.alternative, variants };
+}
+
+/** A cluster's judged hypotheses; a check stored with one hypothesis per cluster judged the first. */
+export function variantChecks(check: ClusterCheck): readonly VariantCheck[] {
+  return check.variants ?? [{ variant: 1, outcome: check.outcome, hypothesis: check.hypothesis, alternative: check.alternative }];
+}
+
+/**
+ * The cluster as its first confirmed hypothesis shows it: that hypothesis's status, answers and failure in the
+ * cluster's first-hypothesis fields. A cluster without a confirmed hypothesis is a bug of the caller.
+ */
+export function confirmedHypothesis(cluster: ClusterDiagnosis, check: CheckResult): ClusterDiagnosis {
+  const judged = check.clusters[cluster.clusterId];
+  const confirmed = judged === undefined ? undefined : variantChecks(judged).find((item) => item.outcome === "confirmed");
+  if (confirmed === undefined) throw new Error(`Cluster ${cluster.clusterId} has no confirmed hypothesis.`);
+  const variant = variantOf(cluster, confirmed.variant);
+  return { ...cluster, status: variant.status, hypothesis: variant.hypothesis, challenge: variant.challenge, failure: variant.failure };
 }

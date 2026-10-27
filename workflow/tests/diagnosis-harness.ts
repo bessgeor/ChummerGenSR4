@@ -61,7 +61,10 @@ export const challengeAnswer = (): ChallengeOutput => ({
 export type Reply = { readonly answer: unknown } | { readonly failure: AgentFailure } | { readonly hang: true };
 
 export type JobCall = {
-  readonly kind: string; readonly cluster: string; readonly prompt: string; readonly images: readonly string[]; readonly provider: string;
+  readonly kind: string; readonly cluster: string;
+  /** The cluster's hypothesis a diagnosis job is for, from its label: 1 unless the label names another. */
+  readonly variant: number;
+  readonly prompt: string; readonly images: readonly string[]; readonly provider: string;
   /** The job's folders and what they held while the job ran. */
   readonly workspace: { readonly folder: string; readonly readOnly: readonly string[]; readonly contextFiles: readonly string[]; readonly snapshotFiles: readonly string[] };
 };
@@ -108,12 +111,12 @@ export class FakeAgents implements AgentRunner {
       return notStarted;
     }
     const call: JobCall = {
-      kind: job.kind, cluster: job.label.split(" ")[1]!, prompt: job.prompt, images: job.images, provider: job.choice.provider,
+      kind: job.kind, cluster: job.label.split(" ")[1]!, variant: Number(/ #(\d+)$/.exec(job.label)?.[1] ?? 1), prompt: job.prompt, images: job.images, provider: job.choice.provider,
       workspace: { ...job.workspace, contextFiles: readdirSync(job.workspace.folder), snapshotFiles: job.workspace.readOnly[0] === undefined ? [] : readdirSync(job.workspace.readOnly[0]) },
     };
     this.calls.push(call);
-    const attempt = this.calls.filter((other) => other.kind === call.kind && other.cluster === call.cluster).length;
-    this.events.push(`${job.kind} ${call.cluster} start`);
+    const attempt = this.calls.filter((other) => other.kind === call.kind && other.cluster === call.cluster && other.variant === call.variant).length;
+    this.events.push(`${job.label} start`);
     try {
       await delay(15);
       const reply = this.reply(call, attempt);
@@ -132,7 +135,7 @@ export class FakeAgents implements AgentRunner {
       return result;
     } finally {
       this.release();
-      this.events.push(`${job.kind} ${call.cluster} end`);
+      this.events.push(`${job.label} end`);
     }
   }
 }
@@ -173,6 +176,8 @@ export type HarnessOptions = {
   readonly candidateSource?: string;
   /** Runs after triage, before diagnosis, with the fixture repository's folder: an edit made between the build and the diagnosis. */
   readonly afterTriage?: (repository: string) => void;
+  /** How many hypotheses each cluster gets; a new thread's options lack the field when absent, like a thread stored before it existed. */
+  readonly hypotheses?: number;
   /** The active configurations a new thread stores in its options. */
   readonly tuning?: DispatchedTuning;
   /** Turns repair on (it is off by default here), with this deadline and fake host for builds and narrow checks. */
@@ -296,7 +301,7 @@ export function diagnosisHarness(options: HarnessOptions) {
       diagnosis: !command.arguments.noDiagnosis, agents: settings, unattended: command.arguments.unattended, certificates: join(root, "certificates"),
       repair: options.repair === undefined || command.arguments.noRepair ? null : { deadlineMinutes: options.repair.deadlineMinutes, maxAttempts: options.repair.maxAttempts ?? 1 },
       widening: options.repair !== undefined && options.widening !== undefined && !command.arguments.noRepair && !command.arguments.noWidening,
-      fixChanges: command.arguments.fixChanges, ...(options.tuning === undefined ? {} : { tuning: options.tuning }),
+      fixChanges: command.arguments.fixChanges, ...(options.hypotheses === undefined ? {} : { hypotheses: options.hypotheses }), ...(options.tuning === undefined ? {} : { tuning: options.tuning }),
     }),
     prepareThread: (_command, resolved, threadId) => {
       prepared.push(threadId);
