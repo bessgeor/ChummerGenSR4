@@ -275,7 +275,7 @@ test("a resumed merge checks the source edits against the last fix merged before
   equal(other.run("rev-parse", "main"), tipBefore);
 });
 
-test("a fix the branch holds in its history already still gets a commit that records it", () => {
+test("a fix the branch holds in its history already still gets a merge commit with two parents that records it", () => {
   const repo = repositoryOnMain();
   const fix = repo.commitOn(repo.start, "Fix d-1", { "Chummer/frmCreate.cs": "create fixed\n" });
   // The branch is advanced to the fix commit itself, then moves on.
@@ -284,7 +284,8 @@ test("a fix the branch holds in its history already still gets a commit that rec
   const recorded = result.items[0]!;
   equal(recorded.status, "merged");
   ok(recorded.mergeCommit !== null && recorded.mergeCommit !== fix);
-  equal(repo.run("rev-parse", `${recorded.mergeCommit}^1`), fix);
+  deepStrictEqual([repo.run("rev-parse", `${recorded.mergeCommit}^1`), repo.run("rev-parse", `${recorded.mergeCommit}^2`)], [fix, repo.start]);
+  equal(repo.run("rev-parse", `${recorded.mergeCommit}^{tree}`), repo.run("rev-parse", `${fix}^{tree}`));
   equal(repo.run("log", "-1", "--format=%(trailers:key=Merged-Fix,valueonly)", "main"), "wf-1/d-1");
 
   const other = repositoryOnMain();

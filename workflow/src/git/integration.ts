@@ -153,10 +153,10 @@ export function integrate(git: BranchGit, worktrees: Worktrees, request: Integra
       const rebased = worktrees.head(request.worktree);
       inWorktree(["checkout", "--quiet", "--detach", tip]);
       if (rebased === tip) {
-        // The replay was dropped: the branch has the change. The fix still gets a commit of its own with the branch's
-        // tree, which has the fix commit as a second parent (unless that is the tip itself), so that the fix commit is
-        // part of the branch's history and the trailer marks the merge.
-        const recorded = inWorktree(["commit-tree", `${tip}^{tree}`, "-p", tip, ...(item.commit === tip ? [] : ["-p", item.commit]), ...message(item)]).trim();
+        // The replay was dropped: the branch has the change. The fix still gets a merge commit of its own with the
+        // branch's tree, so that the trailer marks the merge. Its second parent is the fix commit, or the commit the
+        // fix was made on when the branch is at the fix commit itself (a merge needs two parents that differ).
+        const recorded = inWorktree(["commit-tree", `${tip}^{tree}`, "-p", tip, "-p", item.commit === tip ? parent : item.commit, ...message(item)]).trim();
         inWorktree(["checkout", "--quiet", "--detach", recorded]);
         tip = recorded;
         items.push({ name: item.name, status: "merged", branch: item.branch, mergeCommit: recorded, reason: `${request.branch} has the change already; the merge commit records the fix without changing the tree`, files: [] });
