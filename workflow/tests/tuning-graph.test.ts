@@ -207,7 +207,7 @@ test("tune auto stopped while its candidate's development run runs resumes that 
   equal(readCycle(context.paths.evalsFolder, cycleId).proposals.length, 1);
 });
 
-test("tune auto killed during its holdout run resumes at its holdout node: freeze, baseline and proposals do not run again", async () => {
+test("tune auto stopped during its holdout run resumes at its holdout node: freeze, baseline and proposals do not run again", async () => {
   const { context, stopped, path } = await stoppedTuning((call) => call.prompt.includes("+tuned-") && call.prompt.includes(testCluster));
   deepStrictEqual(await nextNodes(path, stopped.tuningId), ["holdout"]);
   const cycle = readCycle(context.paths.evalsFolder, stopped.cycle!);
@@ -300,6 +300,13 @@ test("a tuning whose thread concluded before the tuning ended is ended by the ne
   const ended = finishedTuning(evalsFolder);
   deepStrictEqual([ended.entry.tuningId, ended.entry.outcome, ended.state.counted], [entry.tuningId, "rejected", records]);
   ok(context.lines.some((line) => line.includes(`Automatic tuning ${entry.tuningId}: rejected`)), context.lines.join("\n"));
+});
+
+test("tune cycle --resume refuses the cycle ID of an automatic tuning that has not recorded its cycle yet", async () => {
+  const { context, records } = await dueTuning(agents([], "test", {}));
+  const tuning = recordedTuning(context, records);
+  equal(tuning.cycle, null);
+  await rejects(runEvalCommand(["tune", "cycle", "--resume", autoCycleId(tuning.tuningId)], context), (error: Error) => error instanceof SetupError && error.message.includes("tune auto continues it"));
 });
 
 test("a tuning continued after the profile changed keeps the settings it started with", async () => {

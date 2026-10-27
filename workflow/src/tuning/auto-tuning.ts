@@ -116,7 +116,7 @@ export async function checkAutoTuning(dependencies: AutoTuningDependencies, sett
   return { kind: "due", records, every: settings.every, forced: force, settings };
 }
 
-/** Runs `action` holding the exclusive lock file of `auto.json`. */
+/** Runs `action` holding the exclusive lock on the lock database of `auto.json`. */
 function withAutoTuningLock<T>(evalsFolder: string, action: () => T): T {
   const path = autoTuningPath(evalsFolder);
   const release = acquireExclusiveLock(`${path}.lock`, `Another tune auto is changing ${path}`);
@@ -128,7 +128,7 @@ function withAutoTuningLock<T>(evalsFolder: string, action: () => T): T {
 }
 
 /**
- * Runs `action`, which starts or continues an automatic tuning, holding a lock file apart from the state's, so two
+ * Runs `action`, which starts or continues an automatic tuning, holding a lock database apart from the state's, so two
  * `tune auto` never run a tuning at the same time.
  */
 export async function withAutoTuningRun<T>(evalsFolder: string, action: () => Promise<T>): Promise<T> {
@@ -142,7 +142,7 @@ export async function withAutoTuningRun<T>(evalsFolder: string, action: () => Pr
 
 /**
  * Records a tuning in progress that counts `records`, so records added while it runs count toward the next one. The state
- * is read and written under a lock file, so of two overlapping starts one records its tuning and the other is refused. A
+ * is read and written under a lock, so of two overlapping starts one records its tuning and the other is refused. A
  * tuning already in progress is a conflict, not replaced, and so are records that another tuning counted since the trigger.
  */
 export function startAutoTuning(dependencies: AutoTuningDependencies, due: Extract<AutoTuningTrigger, { kind: "due" }>): AutoTuningEntry {

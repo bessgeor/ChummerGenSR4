@@ -17,7 +17,7 @@ import { defaultMaximumExposures, openHoldout, type HoldoutDependencies } from "
 import { proposeCandidate, type TuneDependencies } from "./propose.js";
 import type { TuningStateValue } from "./tuning-graph.js";
 import { compileTuningGraph, concludedTuning, runTuningThread, type TuningGraph } from "./tuning-runner.js";
-import { tuningSteps, type TuningRun } from "./tuning-steps.js";
+import { autoCycleId, tuningSteps, type TuningRun } from "./tuning-steps.js";
 import { requireCurrent } from "./tuning.js";
 
 export const tuneUsage = `  tune add --file <json>          store a tuning configuration as a candidate (out/evals/tuning/candidates/)
@@ -160,7 +160,7 @@ const cycleCommand: TuneCommand = async (args, context) => {
       if (options.text(other) !== null) throw new SetupError(`--resume takes no --${other}: a cycle keeps the options it was started with.`);
     }
     const state = readAutoTuning(context.paths.evalsFolder);
-    const owner = [...(state.current === null ? [] : [state.current]), ...state.tunings].find((tuning) => tuning.cycle === resumed);
+    const owner = [...(state.current === null ? [] : [state.current]), ...state.tunings].find((tuning) => tuning.cycle === resumed || autoCycleId(tuning.tuningId) === resumed);
     if (owner !== undefined) throw new SetupError(`Tuning cycle ${resumed} is the cycle of the automatic tuning ${owner.tuningId}; tune auto continues it.`);
     // A cycle keeps its stored options; its thread continues from its checkpoint, or runs again from the baseline when it
     // has none or concluded, and its steps find what the cycle recorded.

@@ -172,7 +172,7 @@ export async function freezeDataset(input: FreezeInput): Promise<{ folder: strin
   if (drafts.size === 0) throw new SetupError(`No succeeded workflow ${input.jobKind} record has its context in its thread folder; there is nothing to freeze.`);
 
   const nameFolder = join(input.datasetsFolder, input.name);
-  // Two freezes of a name never choose the same version: the version is chosen, announced and put in place under one lock.
+  // Two freezes through this function never choose the same version of a name: the version is chosen, announced and put in place under one lock.
   const release = acquireExclusiveLock(join(input.datasetsFolder, `${input.name}.freeze.lock`), `Another freeze of dataset ${input.name} is running`);
   try {
     return await freezeVersion(input, drafts, nameFolder);
