@@ -88,8 +88,9 @@ That a real repair job edits its worktree, that the worktree builds with the can
 | `npm run workflow:test`, run 1 | Passed: 550 tests, 550 passed, 0 failed, 0 skipped (exit 0). |
 | `node --import tsx --test` on `git-integration`, `loop-graph`, `graph`, `suite` and `steps` tests, after the review fixes | Failed: 76 tests, 75 passed, 1 failed (exit 1). `not ok 51 - a fast-forward refused for a local edit of a merged file is a setup error, and once the edit is committed the resumed thread merges each fix once`: `Expected values to be strictly equal: + 'class frmCreate {\r\n  int restored;\r\n}\r\n// one\r\n// two\r\n// local edit\r\n' - 'class frmCreate {\n  int restored;\n}\n// one\n// two\n// local edit\n'` (`loop-graph.test.ts:394`). Cause: the fast-forward now writes the checkout with the machine's git settings (`core.autocrlf=true` here), and the test compared the bytes with LF line endings; it now compares the text with its line endings normalized and still requires a clean `git status`. |
 | `npm run workflow:test`, run 2 | Passed on the final source: 551 tests, 551 passed, 0 failed, 0 skipped (exit 0). |
-| `npm run workflow:test`, run 3 (after the merge of uncommitted source edits and of an already-held fix) | Passed on the final source: 553 tests, 553 passed, 0 failed, 0 skipped (exit 0). |
-| `npm run openspec:validate` | Passed strict validation: 21 passed, 0 failed. |
+| `npm run workflow:test`, run 3 (after the merge of uncommitted source edits and of an already-held fix) | Passed: 553 tests, 553 passed, 0 failed, 0 skipped (exit 0). |
+| `npm run workflow:test`, run 4 (after the resumed check of source edits and the commit for a fix the branch holds in its history) | Passed on the final source: 555 tests, 555 passed, 0 failed, 0 skipped (exit 0). |
+| `npm run openspec:validate` | Passed strict validation: 21 passed, 0 failed (on the final source). |
 | SHA-256 of `bin/ChummerGenSR4.exe` | `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`; the executable was not built, launched or touched. |
 
 Every test below runs on temporary git repositories made by the test, with fake model jobs, builds and captures; the thread repairs, widens, promotes and concludes through the workflow graph.
@@ -109,6 +110,8 @@ Also covered:
 - `fixed` only with a merge, `merge_failed` with stage `merge`, the reason and the fix's commit, and `merge_failed` keeping the outcome at `findings_remaining`: `loop-rules.test.ts`.
 - The branch `HEAD` names is read by its full ref, so a tag with the branch's name does not make it ambiguous: `git-integration.test.ts`, headBranch names the checked-out branch, or none when HEAD is detached.
 - Fixes verified on a source that held uncommitted edits are not merged (all end `blocked`, then `merge_failed`, naming the edited files) into a branch that lacks them, and are merged once the branch has them: `git-integration.test.ts`.
+- A resumed merge checks the source edits against the last fix merged before (a fix that changed an edited file itself does not block the next one; an edit the branch lost since blocks it): `git-integration.test.ts`.
+- A fix whose commit the branch holds in its history already (the branch was advanced to it, with or without later commits) gets a commit with the branch's tree and the `Merged-Fix` trailer: `git-integration.test.ts`.
 - A fix whose change the branch has already (the rebase drops it) gets a merge commit of its own with the branch's tree and the `Merged-Fix` trailer, and is skipped as merged before when asked again: `git-integration.test.ts`.
 - The fast-forward writes the person's checkout with the repository's line-ending settings (`core.autocrlf=true` gives CRLF) and leaves `git status` clean: `git-integration.test.ts`.
 

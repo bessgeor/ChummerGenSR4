@@ -70,10 +70,13 @@ function sourceEdits(git: BranchGit, source: string): string[] {
   return git(["diff-tree", "-r", "--no-renames", "--name-only", `${source}^`, source]).split(/\r?\n/).filter((path) => path.length > 0);
 }
 
-/** The files the thread's source commit changed that `tip` holds in another state: the fixes were verified on top of those edits. */
-function missingEdits(git: BranchGit, source: string, tip: string): string[] {
+/**
+ * The files the thread's source commit changed that `tip` holds in another state than `verified` does: the fixes were
+ * verified on top of those edits, so `verified` is the source or the last fix merged before.
+ */
+function missingEdits(git: BranchGit, source: string, verified: string, tip: string): string[] {
   return sourceEdits(git, source).filter((path) => {
-    const wanted = git(["ls-tree", source, "--", path]).trim().split(/\s+/)[2] ?? null;
+    const wanted = git(["ls-tree", verified, "--", path]).trim().split(/\s+/)[2] ?? null;
     const held = git(["ls-tree", tip, "--", path]).trim().split(/\s+/)[2] ?? null;
     return wanted !== held;
   });
@@ -106,10 +109,11 @@ export function integrate(git: BranchGit, worktrees: Worktrees, request: Integra
   let blocked: string | null = null;
   // The first fix was made on the thread's source. When that captured edits the repository's commits lack, the fixes
   // cannot be merged until the branch has them: the merged branch would not be the state the fixes were verified on.
-  // A merge made before has checked it (a fix may have changed an edited file since).
-  const unmergedEdits = request.items.length === 0 || request.items.some((item) => mergedBefore(item) !== null)
+  // A resumed merge checks it again, against the state its last merged fix was verified on, since that fix may have changed an edited file.
+  const lastMerged = request.items.map((item) => mergedBefore(item) !== null).lastIndexOf(true);
+  const unmergedEdits = request.items.every((item) => mergedBefore(item) !== null)
     ? []
-    : missingEdits(git, worktrees.parent(request.items[0]!.commit), before);
+    : missingEdits(git, worktrees.parent(request.items[0]!.commit), request.items[lastMerged]?.commit ?? worktrees.parent(request.items[0]!.commit), before);
   if (unmergedEdits.length > 0) {
     blocked = `the thread's source held edits of ${unmergedEdits.join(", ")} that ${request.branch} lacks`;
   }
@@ -149,14 +153,13 @@ export function integrate(git: BranchGit, worktrees: Worktrees, request: Integra
       const rebased = worktrees.head(request.worktree);
       inWorktree(["checkout", "--quiet", "--detach", tip]);
       if (rebased === tip) {
-        // The replay was dropped: the branch has the change. The fix still gets a merge commit of its own, with the
-        // branch's tree, so that the fix commit is part of the branch's history and the trailer marks the merge.
-        inWorktree(["merge", "--quiet", "--no-ff", "--no-edit", "-s", "ours", ...message(item), item.commit]);
-        const merged = worktrees.head(request.worktree);
-        const made = merged !== tip;
-        const reason = !made ? `${item.commit} is part of the history of ${request.branch} already` : `${request.branch} has the change already; the merge commit records the fix without changing the tree`;
-        tip = merged;
-        items.push({ name: item.name, status: "merged", branch: item.branch, mergeCommit: made ? merged : null, reason, files: [] });
+        // The replay was dropped: the branch has the change. The fix still gets a commit of its own with the branch's
+        // tree, which has the fix commit as a second parent (unless that is the tip itself), so that the fix commit is
+        // part of the branch's history and the trailer marks the merge.
+        const recorded = inWorktree(["commit-tree", `${tip}^{tree}`, "-p", tip, ...(item.commit === tip ? [] : ["-p", item.commit]), ...message(item)]).trim();
+        inWorktree(["checkout", "--quiet", "--detach", recorded]);
+        tip = recorded;
+        items.push({ name: item.name, status: "merged", branch: item.branch, mergeCommit: recorded, reason: `${request.branch} has the change already; the merge commit records the fix without changing the tree`, files: [] });
         continue;
       }
       inWorktree(["merge", "--quiet", "--no-ff", "--no-edit", ...message(item), item.branch]);

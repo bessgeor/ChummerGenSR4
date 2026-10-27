@@ -241,3 +241,62 @@ test("a fix whose change the branch has already gets a merge commit of its own, 
   const again = integrate(repo.git, repo.worktrees, repo.request([repo.item("d-1", fix)]));
   deepStrictEqual([again.items[0]!.reason, again.items[0]!.mergeCommit, again.after], ["merged before", merge.mergeCommit, merge.mergeCommit]);
 });
+
+test("a resumed merge checks the source edits against the last fix merged before, which may have changed an edited file itself", () => {
+  const repo = repositoryOnMain();
+  const source = repo.commitOn(repo.start, "Source captured by thread wf-1", { "Core/XmlManager.cs": "xml edited\n" });
+  const fix = repo.commitOn(source, "Fix d-1", { "Core/XmlManager.cs": "xml edited and fixed\n" });
+  const later = repo.commitOn(fix, "Fix d-2", { "Chummer/added.cs": "added\n" });
+  write(repo.root, "Core/XmlManager.cs", "xml edited\n");
+  repo.run("commit", "-q", "-am", "the edits");
+  const first = integrate(repo.git, repo.worktrees, repo.request([repo.item("d-1", fix)]));
+  equal(first.items[0]!.status, "merged");
+  // The edit the fixes were verified on stays on the branch: the later fix merges although the first changed the file.
+  const kept = integrate(repo.git, repo.worktrees, repo.request([repo.item("d-1", fix), repo.item("d-2", later)]));
+  deepStrictEqual(kept.items.map((item) => item.status), ["merged", "merged"]);
+  equal(repo.run("show", "main:Core/XmlManager.cs"), "xml edited and fixed");
+
+  // The branch loses another edit before the resume: the unmerged fix is not merged.
+  const other = repositoryOnMain();
+  const otherSource = other.commitOn(other.start, "Source captured by thread wf-1", { "Core/XmlManager.cs": "xml edited\n", "README.md": "edited\n" });
+  const one = other.commitOn(otherSource, "Fix d-1", { "Chummer/frmCreate.cs": "create fixed\n" });
+  const two = other.commitOn(one, "Fix d-2", { "Chummer/added.cs": "added\n" });
+  write(other.root, "Core/XmlManager.cs", "xml edited\n");
+  write(other.root, "README.md", "edited\n");
+  other.run("add", "-A");
+  other.run("commit", "-q", "-m", "the edits");
+  equal(integrate(other.git, other.worktrees, other.request([other.item("d-1", one)])).items[0]!.status, "merged");
+  write(other.root, "README.md", "edited again\n");
+  other.run("commit", "-q", "-am", "the edit is gone");
+  const tipBefore = other.run("rev-parse", "main");
+  const resumed = integrate(other.git, other.worktrees, other.request([other.item("d-1", one), other.item("d-2", two)]));
+  deepStrictEqual(resumed.items.map((item) => item.status), ["merged", "blocked"]);
+  ok(resumed.items[1]!.reason!.includes("README.md"));
+  equal(other.run("rev-parse", "main"), tipBefore);
+});
+
+test("a fix the branch holds in its history already still gets a commit that records it", () => {
+  const repo = repositoryOnMain();
+  const fix = repo.commitOn(repo.start, "Fix d-1", { "Chummer/frmCreate.cs": "create fixed\n" });
+  // The branch is advanced to the fix commit itself, then moves on.
+  repo.run("merge", "-q", "--ff-only", fix);
+  const result = integrate(repo.git, repo.worktrees, repo.request([repo.item("d-1", fix)]));
+  const recorded = result.items[0]!;
+  equal(recorded.status, "merged");
+  ok(recorded.mergeCommit !== null && recorded.mergeCommit !== fix);
+  equal(repo.run("rev-parse", `${recorded.mergeCommit}^1`), fix);
+  equal(repo.run("log", "-1", "--format=%(trailers:key=Merged-Fix,valueonly)", "main"), "wf-1/d-1");
+
+  const other = repositoryOnMain();
+  const fixed = other.commitOn(other.start, "Fix d-1", { "Chummer/frmCreate.cs": "create fixed\n" });
+  other.run("merge", "-q", "--ff-only", fixed);
+  write(other.root, "README.md", "moved on\n");
+  other.run("add", "README.md");
+  other.run("commit", "-q", "-m", "main moved");
+  const moved = other.run("rev-parse", "main");
+  const behind = integrate(other.git, other.worktrees, other.request([other.item("d-1", fixed)]));
+  const commit = behind.items[0]!.mergeCommit!;
+  deepStrictEqual([other.run("rev-parse", `${commit}^1`), other.run("rev-parse", `${commit}^2`)], [moved, fixed]);
+  equal(other.run("rev-parse", `${commit}^{tree}`), other.run("rev-parse", `${moved}^{tree}`));
+  equal(other.run("rev-parse", "main"), commit);
+});
