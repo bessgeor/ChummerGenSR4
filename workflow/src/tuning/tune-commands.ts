@@ -83,8 +83,22 @@ function holdoutDependencies(context: EvalContext): HoldoutDependencies {
   return { ...runDependencies(context), evalsFolder: context.paths.evalsFolder, tuningFolder: context.tuningFolder() };
 }
 
+/**
+ * An automatic tuning that works in a worktree reads and writes the holdout ledger, the active files and the certificates
+ * there, not in the checkout, until it merges them: a command that changes those files in the checkout meanwhile would
+ * not see the tuning's exposures, and the exposure limit would not hold across them. Such a command waits for the tuning.
+ */
+function requireNoWorktreeTuning(context: EvalContext, command: string): void {
+  const current = readAutoTuning(context.paths.evalsFolder).current;
+  if (current !== null && current.branch !== null) {
+    throw new SetupError(`${command} would change the tuning files in the checkout while the automatic tuning ${current.tuningId} works on them in a worktree on ${current.branch} and has not merged them yet. `
+      + "Finish it first with: npm run eval -- tune auto");
+  }
+}
+
 const holdout: TuneCommand = async (args, context) => {
   const options = CommandOptions.parse("tune holdout", args, ["candidate", "baseline", "run", "metric", "max-exposures"]);
+  requireNoWorktreeTuning(context, "tune holdout");
   const outcome = await openHoldout(holdoutDependencies(context), {
     candidate: options.required("candidate"), baselineRun: options.required("baseline"), candidateRun: options.required("run"),
     metric: options.text("metric") === null ? null : options.choice("metric", metrics, "prediction"),
@@ -103,6 +117,7 @@ const activateCommand: TuneCommand = async (args, context) => {
   const options = CommandOptions.parse("tune activate", args, ["run", "baseline", "metric", "min-pass", "max-mean-cost-usd"]);
   options.required("metric");
   options.required("min-pass");
+  requireNoWorktreeTuning(context, "tune activate");
   const outcome = activate({ evalsFolder: context.paths.evalsFolder, tuningFolder: context.tuningFolder(), certificatesFolder: context.certificatesFolder() }, {
     run: options.required("run"), baseline: options.required("baseline"),
     thresholds: {
@@ -125,6 +140,7 @@ const rollbackCommand: TuneCommand = async (args, context) => {
   const options = CommandOptions.parse("tune rollback", args, ["job", "reason"]);
   options.required("job");
   const jobKind = options.choice("job", evaluatedJobKinds, "hypothesis");
+  requireNoWorktreeTuning(context, "tune rollback");
   const { restored, stale } = rollback({ tuningFolder: context.tuningFolder(), certificatesFolder: context.certificatesFolder() }, jobKind, options.text("reason"), context.now());
   context.log(`Rolled back ${jobKind} to ${entryName(restored)}${restored.certificate === null ? ", without a certificate" : `, certificate ${restored.certificate.promptVersion}`}.`);
   if (stale !== null) context.log(`It cannot be dispatched: ${stale}. Roll back again.`);
@@ -156,6 +172,7 @@ function cycleStatus(cycle: Cycle): number {
 const cycleCommand: TuneCommand = async (args, context) => {
   const options = CommandOptions.parse("tune cycle", args, ["dataset", "metric", "min-pass", "candidates", "repeat", "max-exposures", "max-mean-cost-usd", "resume"]);
   const resumed = options.text("resume");
+  requireNoWorktreeTuning(context, "tune cycle");
   const { graph, steps, cycle: dependencies } = tuningGraph(context);
   let input: TuningStateValue;
   if (resumed !== null) {

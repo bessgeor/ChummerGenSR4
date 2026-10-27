@@ -105,6 +105,8 @@ None for this task: the cycle's model jobs are faked.
 | `npm run workflow:typecheck` and `npm run workflow:test`, output kept (after the commit check was tightened) | Typecheck passed; 577 tests, all passed (0 failed, 0 cancelled, 0 skipped). |
 | `node --import tsx --test workflow/tests/tuning-worktree.test.ts workflow/tests/git-integration.test.ts` (after a tuning commit the branch has already gets a merge commit) | 22 tests, all passed. |
 | `npm run workflow:typecheck` and `npm run workflow:test`, output kept (after a tuning commit the branch has already gets a merge commit) | Typecheck passed; 577 tests, all passed (0 failed, 0 cancelled, 0 skipped). |
+| `git rebase master` | Conflicts in `workflow/src/git/integration.ts` (master now has its own `userSettings` option and its own merge commit for a change the branch has already). Resolved by keeping master's versions; the branch adds only the restoring of the item's branch and the trailer check of the merge commit. `processCheckoutGit` and the `checkoutGit` fields were removed in favour of `userSettings`. |
+| `npm run workflow:typecheck` and `npm run workflow:test`, output kept (after the rebase, the guard of the tuning commands, the narrow worktree and the review fixes) | Typecheck passed; 593 tests, all passed (0 failed, 0 cancelled, 0 skipped). |
 | `npm run openspec:validate` | Passed: 21 passed, 0 failed. |
 | SHA-256 of `bin/ChummerGenSR4.exe` | `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`, unchanged; no run launched it. |
 
@@ -122,6 +124,10 @@ None for this task: the cycle's model jobs are faked.
 - a checkout made with `core.autocrlf=true`, whose committed ledger is CRLF in the working tree and whose time is newer than the index's, is not reported as changed. After the fast-forward its ledger is CRLF, with nothing uncommitted. The test was not run against the code before the fix;
 - a tuning commit whose changes the branch has already: the rebase drops it as empty, and the merge still gets a merge commit with the branch's tree, the tuning's own commit as its second parent and `Merged-Tuning: <cycle>`. `tuning/<cycle>` keeps that commit, `main` is advanced to the merge commit, and asking for the merge again finds the trailer and changes nothing;
 - a `prepare-commit-msg` hook that strips the `Tuning-Cycle` trailer from the commit message: `commit` ends with a setup error naming the branch and the trailer, `main` does not move and the files stay on `tuning/<cycle>`; the cycle is never reported finished without its merge;
+- a `prepare-commit-msg` hook that strips `Merged-Tuning` from the merge commit: `merge` ends with a setup error naming the trailer and the branch does not move;
+- `tune holdout`, `tune activate`, `tune rollback` and `tune cycle` (also with `--resume`) end with a setup error naming the tuning and its branch while an automatic tuning has its worktree and has not merged; after it merged, `tune rollback` runs. A command started in the checkout in the instant between its check and its write to the ledger is not excluded; a ledger it left uncommitted is refused when the next tuning adds its worktree;
+- the cycle's worktree holds only the tuning and certificates folders (not `README.md` or `.gitignore`), and its commit changes nothing else;
+- a staged rename in the tuning folder is reported with the full paths of both files, and tracked tuning files that an ignore pattern matches are not refused.
 - external folders: with both folders outside the repository, the cycle uses them in place. No branch is made, `main` does not move and the checkout stays clean. With only the tuning folder inside, the certificate is written in place and only the tuning files are merged;
 - the graph has the nodes `worktree`, `commit` and `merge` beside the earlier ones (`tuning-graph.test.ts`), and the tests of `tuning-graph.test.ts` pass with folders outside the repository.
 

@@ -117,7 +117,7 @@ export class TuningRepository {
     const start = requireWorkspaceStart(this.git, this.repositoryRoot, folders);
     const branch = tuningBranch(cycleId);
     this.worktrees.remove(folder);
-    this.worktrees.add(folder, branch, start.commit);
+    this.worktrees.addPartial(folder, branch, start.commit, start.paths);
     const mapped = (path: string) => {
       const inside = insidePath(this.repositoryRoot, path);
       return inside === null ? path : join(folder, inside);
@@ -132,7 +132,7 @@ export class TuningRepository {
   requireWorktree(workspace: TuningWorkspace): void {
     const state = this.worktrees.state(workspace.folder);
     if (state.gitFile === null || state.branch !== workspace.branch) {
-      throw new SetupError(`The tuning's worktree ${workspace.folder} on ${workspace.branch} is gone or on ${state.branch ?? "no branch"}, so the cycle's files there are lost; the tuning cannot continue.`);
+      throw new SetupError(`The tuning's worktree ${workspace.folder} on ${workspace.branch} is gone or on ${state.branch ?? "no branch"}, so the cycle's files there are lost and the tuning cannot continue. If the branch is still there, run 'git worktree prune' and then 'git worktree add ${workspace.folder} ${workspace.branch}' to give the cycle its worktree back, then run tune auto again.`);
     }
   }
 

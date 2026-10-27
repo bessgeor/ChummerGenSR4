@@ -16,7 +16,7 @@
 - **THEN** it resumes that cycle without freezing another version or counting records
 
 ### Requirement: An automatic tuning works in its own worktree and merges its files
-When the tuning folder or the certificates folder lies inside the repository, an automatic tuning SHALL require the branch the repository's `HEAD` names, else a setup error, and a working tree without uncommitted changes in those folders, else a setup error naming them. Its cycle SHALL read and write those folders in a worktree on the branch `tuning/<cycle>` started at that branch's tip, never in the repository's working tree. When the cycle ends with any outcome, the changes of those folders SHALL be committed on `tuning/<cycle>` when there are any, and that commit SHALL be rebased onto the branch's tip and merged into it with a merge commit carrying the trailer `Merged-Tuning: <cycle>`; the branch SHALL then be advanced by a fast-forward of the worktree that has it checked out, or by a compare-and-swap ref update when none has. A rebase conflict or a refused fast-forward SHALL be a setup error naming the branch, and the resumed tuning SHALL try the merge again, skipping it when the trailer is already reachable from the branch. Folders outside the repository SHALL be used in place, and nothing SHALL be committed for them. No branch SHALL be pushed or deleted.
+When the tuning folder or the certificates folder lies inside the repository, an automatic tuning SHALL require the branch the repository's `HEAD` names, else a setup error, and a working tree without uncommitted changes in those folders, else a setup error naming them. Its cycle SHALL read and write those folders in a worktree on the branch `tuning/<cycle>` started at that branch's tip, never in the repository's working tree. When the cycle ends with any outcome, the changes of those folders SHALL be committed on `tuning/<cycle>` when there are any, and that commit SHALL be rebased onto the branch's tip and merged into it with a merge commit carrying the trailer `Merged-Tuning: <cycle>`; the branch SHALL then be advanced by a fast-forward of the worktree that has it checked out, or by a compare-and-swap ref update when none has. A rebase conflict or a refused fast-forward SHALL be a setup error naming the branch, and the resumed tuning SHALL try the merge again, skipping it when the trailer is already reachable from the branch. While such a tuning is in progress after its worktree was added, `tune holdout`, `tune activate`, `tune rollback` and `tune cycle` SHALL end with a setup error naming the tuning and its branch, so that the exposure limit is kept on one copy of the ledger. Folders outside the repository SHALL be used in place, and nothing SHALL be committed for them. No branch SHALL be pushed or deleted.
 
 #### Scenario: Activation merged
 - **WHEN** an automatic cycle activates a hypothesis configuration
@@ -25,6 +25,10 @@ When the tuning folder or the certificates folder lies inside the repository, an
 #### Scenario: A refused activation still records the ledger
 - **WHEN** a cycle's candidate is held out and the activation is refused
 - **THEN** the ledger's exposure is committed on `tuning/<cycle>` and merged, and the cycle's outcome is `rejected`
+
+#### Scenario: Tuning commands wait for the tuning
+- **WHEN** an automatic tuning has added its worktree and has not merged, and `tune holdout` is run in the checkout
+- **THEN** it exits with 3 naming the tuning and its branch, and the checkout's ledger is not touched
 
 #### Scenario: Uncommitted tuning files
 - **WHEN** `workflow/evals/tuning/holdout.json` has an uncommitted change and a tuning is due

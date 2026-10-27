@@ -29,6 +29,19 @@ export class Worktrees {
     this.git(["worktree", "add", "--quiet", "--force", "-B", branch, folder, start]);
   }
 
+  /**
+   * Adds a worktree at `folder` on `branch`, (re)set to `start`, whose files are only those under `paths` (the ones
+   * `start` has): its index holds every file of `start`, so a commit made in it changes nothing outside `paths`.
+   */
+  addPartial(folder: string, branch: string, start: string, paths: readonly string[]): void {
+    this.git(["worktree", "prune"]);
+    if (existsSync(folder)) throw new SetupError(`The worktree folder ${folder} exists already.`);
+    this.git(["worktree", "add", "--quiet", "--force", "--no-checkout", "-B", branch, folder, start]);
+    this.git(["reset", "--quiet"], { worktree: folder });
+    const present = paths.filter((path) => !this.missingFolders(start, [path]).length);
+    if (present.length > 0) this.git(["checkout", "--quiet", "--", ...present], { worktree: folder });
+  }
+
   /** Adds a worktree at `folder` detached at `start`. */
   addDetached(folder: string, start: string): void {
     this.git(["worktree", "prune"]);

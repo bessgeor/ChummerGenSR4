@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { certificatePath } from "../src/evals/certificate.js";
 import { runEvalCommand } from "../src/evals/eval-commands.js";
 import { processBranchGit } from "../src/git/branch-git.js";
+import { evaluatedJobKinds } from "../src/evals/evaluated-job-kinds.js";
 import { SetupError } from "../src/host/setup-error.js";
 import { readActiveFile, tuningFiles } from "../src/tuning/active-configuration.js";
 import { autoTuningPath, readAutoTuning } from "../src/tuning/auto-tuning.js";
@@ -14,7 +15,7 @@ import { readLedger } from "../src/tuning/holdout.js";
 import type { TuningStateValue } from "../src/tuning/tuning-graph.js";
 import { compileTuningGraph } from "../src/tuning/tuning-runner.js";
 import { autoCycleId } from "../src/tuning/tuning-steps.js";
-import { TuningRepository } from "../src/tuning/tuning-workspace.js";
+import { requireWorkspaceStart, TuningRepository } from "../src/tuning/tuning-workspace.js";
 import type { JobCall } from "./diagnosis-harness.js";
 import { scratch, write } from "./diagnosis-fixtures.js";
 import { agents, dueTuning, proposal, refusingSteps, testCluster } from "./tuning-auto-fixtures.js";
@@ -239,12 +240,38 @@ test("a tuning stopped during its holdout run in a worktree resumes there and me
   const worktree = join(cycleFolder(context.paths.evalsFolder, stopped.cycle!), "worktree");
   ok(existsSync(join(worktree, "workflow", "evals", "tuning", "holdout.json")));
   equal(existsSync(tuningFiles(repo.tuningFolder).holdout), false);
+  // The worktree holds the cycle's folders and nothing else of the repository.
+  deepStrictEqual([existsSync(join(worktree, "README.md")), existsSync(join(worktree, ".gitignore")), existsSync(join(worktree, "workflow", "evals", "certificates", "README.md"))], [false, false, true]);
   stop = false;
   equal(await runEvalCommand(["tune", "auto"], { ...context, signal: new AbortController().signal }), 0, context.lines.join("\n"));
   const entry = finished(context.paths.evalsFolder);
   deepStrictEqual([entry.tuningId, entry.outcome, entry.merge], [stopped.tuningId, "activated", repo.run("rev-parse", "main")]);
   equal(readLedger(repo.tuningFolder).exposures.length, 1);
   equal(existsSync(worktree), false);
+});
+
+test("the tuning commands that change the tuning files in the checkout wait while an automatic tuning works on them in its worktree", async () => {
+  const repo = tuningRepository();
+  const controller = new AbortController();
+  let stop = true;
+  const fake = agents([proposal("Cite the capture.")], "test", { "Cite the capture.": "all" }, (call) => {
+    if (!stop || !call.prompt.includes("+tuned-") || !call.prompt.includes(testCluster)) return false;
+    setTimeout(() => controller.abort(), 50);
+    return true;
+  });
+  const { context } = await dueTuning(fake, repo.root, repo.folders);
+  await rejects(runEvalCommand(["tune", "auto"], { ...context, signal: controller.signal }), (error: Error) => error instanceof SetupError && error.message.includes("resume it with npm run eval -- tune auto"));
+  const stopped = readAutoTuning(context.paths.evalsFolder).current!;
+  const waiting = (error: Error) => error instanceof SetupError && error.message.includes(stopped.tuningId) && error.message.includes(stopped.branch!) && error.message.includes("has not merged them yet");
+  for (const args of [["holdout", "--candidate", "c", "--baseline", "b", "--run", "r"], ["activate", "--run", "r", "--baseline", "b", "--metric", "prediction", "--min-pass", "0.5"],
+    ["rollback", "--job", "hypothesis"], ["cycle", "--dataset", "d", "--min-pass", "0.5"], ["cycle", "--resume", "tc-1"]]) {
+    await rejects(runEvalCommand(["tune", ...args], context), waiting, args.join(" "));
+  }
+  equal(existsSync(tuningFiles(repo.tuningFolder).holdout), false);
+  stop = false;
+  // Finished and merged, the tuning no longer holds them back.
+  equal(await runEvalCommand(["tune", "auto"], { ...context, signal: new AbortController().signal }), 0, context.lines.join("\n"));
+  equal(await runEvalCommand(["tune", "rollback", "--job", "hypothesis"], context), 0, context.lines.join("\n"));
 });
 
 test("a stopped tuning whose worktree was removed meanwhile is a setup error, and writes nothing in its place", async () => {
@@ -316,6 +343,39 @@ test("a commit whose message a hook rewrote without the trailer is a setup error
     (error: Error) => error instanceof SetupError && error.message.includes("tuning/tc-2") && error.message.includes("does not carry Tuning-Cycle: tc-2") && error.message.includes("not merged"));
   equal(repo.run("rev-parse", "main"), before);
   notEqual(repo.run("rev-parse", "tuning/tc-2"), before);
+});
+
+test("a merge commit whose message a hook rewrote without the trailer is a setup error, and the branch does not move", () => {
+  const repo = tuningRepository();
+  const tuning = new TuningRepository(processBranchGit(repo.root), repo.root);
+  const workspace = tuning.open("tc-3", join(scratch(), "worktree"), { tuningFolder: repo.tuningFolder, certificatesFolder: repo.certificatesFolder });
+  write(workspace.folder, "workflow/evals/tuning/holdout.json", "{}\n");
+  tuning.commit(workspace, "tc-3", "Tune hypothesis: rejected\n\nTuning-Cycle: tc-3\n");
+  tuning.remove(workspace);
+  const moved = repo.commit("main moved", { "README.md": "moved\n" });
+  writeFileSync(join(repo.root, ".git", "hooks", "prepare-commit-msg"), "#!/bin/sh\ngrep -v '^Merged-Tuning:' \"$1\" > \"$1.new\"\nmv \"$1.new\" \"$1\"\n", { mode: 0o755 });
+  throws(() => tuning.merge(workspace, "tc-3", join(scratch(), "merge"), "Merge tuning/tc-3", []), (error: Error) => error instanceof SetupError && error.message.includes("does not carry Merged-Tuning: tc-3"));
+  equal(repo.run("rev-parse", "main"), moved);
+});
+
+test("a staged rename in the tuning folder is reported with the full paths of both files", async () => {
+  const repo = tuningRepository();
+  repo.commit("a file", { "workflow/evals/tuning/a.json": "{}\n" });
+  repo.run("mv", "workflow/evals/tuning/a.json", "workflow/evals/tuning/b.json");
+  const { context } = await dueTuning(activating(), repo.root, repo.folders);
+  await rejects(runEvalCommand(["tune", "auto"], context), (error: Error) => error instanceof SetupError && error.message.includes("workflow/evals/tuning/a.json") && error.message.includes("workflow/evals/tuning/b.json"));
+});
+
+test("tracked tuning files that an ignore pattern matches are not refused: git stages changes to tracked files", () => {
+  const repo = tuningRepository();
+  const folder = join(repo.root, "out", "tuning");
+  const certificates = join(repo.root, "out", "certificates");
+  const files = [tuningFiles(folder).holdout, ...evaluatedJobKinds.map((jobKind) => tuningFiles(folder).active(jobKind)), ...evaluatedJobKinds.map((jobKind) => certificatePath(certificates, jobKind))];
+  for (const file of files) write(file, "", "{}\n");
+  repo.run("add", "-f", ...files);
+  repo.run("commit", "-q", "-m", "tracked, although ignored");
+  const start = requireWorkspaceStart(processBranchGit(repo.root), repo.root, { tuningFolder: folder, certificatesFolder: certificates });
+  deepStrictEqual([start.branch, start.paths], ["main", ["out/tuning", "out/certificates"]]);
 });
 
 test("an automatic tuning with both folders outside the repository uses them in place and commits nothing", async () => {
