@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { compiledFolders } from "../compiled-source.js";
 import { snapshotFolders } from "../diagnosis/source-snapshot.js";
@@ -19,12 +19,47 @@ export function sourceMessage(threadId: string): string {
   return `Source captured by thread ${threadId}\n\nThe compiled source as the thread's candidate was built from it.\n`;
 }
 
+/** The attributes that convert a file's bytes between the repository and a worktree. */
+const conversionAttributes = ["text", "eol", "filter", "ident", "working-tree-encoding"];
+
+/**
+ * Fails when the repository's own `info/attributes`, the one attribute source the git runner cannot pin away, converts
+ * any file of `paths` in `folder`: the worktrees would then hold other bytes than the snapshot the candidate was built from.
+ */
+function requireUnconvertedBytes(git: BranchGit, folder: string, paths: readonly string[]): void {
+  const files: string[] = [];
+  const walk = (relative: string) => {
+    for (const entry of readdirSync(join(folder, relative), { withFileTypes: true })) {
+      const path = `${relative}/${entry.name}`;
+      if (entry.isDirectory()) walk(path);
+      else files.push(path);
+    }
+  };
+  for (const path of paths.filter((item) => existsSync(join(folder, item)))) {
+    if (statSync(join(folder, path)).isDirectory()) walk(path);
+    else files.push(path);
+  }
+  if (files.length === 0) return;
+  const fields = git(["check-attr", "-z", "--stdin", ...conversionAttributes], { input: files.map((file) => `${file}\0`).join("") }).split("\0");
+  const converted = new Set<string>();
+  for (let index = 0; index + 2 < fields.length; index += 3) {
+    const [path, attribute, value] = [fields[index]!, fields[index + 1]!, fields[index + 2]!];
+    // `-text` switches the conversion off.
+    if (value !== "unspecified" && !(attribute === "text" && value === "unset")) converted.add(path);
+  }
+  if (converted.size > 0) {
+    const names = [...converted].sort();
+    throw new SetupError(`The repository's info/attributes converts the bytes of ${names.slice(0, 5).join(", ")}${names.length > 5 ? ", ..." : ""}, so a worktree would not hold the sealed snapshot's bytes. Remove those attributes from info/attributes.`);
+  }
+}
+
 /**
  * The tree of `parent` with its `paths` replaced by those of `folder`, staged as `git add` would with a private index.
  * `then` may use the index before it is removed. The repository's working tree, index and branches do not change.
  */
 function stageFolders<T>(git: BranchGit, indexFile: string, parent: string, folder: string, paths: readonly string[], then: (tree: string, env: { GIT_INDEX_FILE: string }) => T): T {
   const env = { GIT_INDEX_FILE: indexFile };
+  requireUnconvertedBytes(git, folder, paths);
   mkdirSync(dirname(indexFile), { recursive: true });
   try {
     git(["read-tree", parent], { env });

@@ -46,7 +46,7 @@ export function processBranchGit(repositoryRoot: string): BranchGit {
     try {
       const attributes = args.some((arg) => treeAttributesKept.has(arg)) ? [] : [`--attr-source=${emptyTree}`];
       return execFileSync("git", [...pinned, ...attributes, ...args], {
-        cwd: options.cwd ?? repositoryRoot, env: { ...process.env, ...options.env }, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, windowsHide: true,
+        cwd: options.cwd ?? repositoryRoot, env: { ...process.env, GIT_ATTR_NOSYSTEM: "1", ...options.env }, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, windowsHide: true,
         stdio: ["pipe", "pipe", "pipe"], ...(options.input === undefined ? {} : { input: options.input }),
       });
     } catch (error) {

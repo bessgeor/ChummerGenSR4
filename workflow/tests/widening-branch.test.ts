@@ -1,7 +1,7 @@
 import { deepStrictEqual, equal, notEqual, ok, throws } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { createSourceSnapshot, processGit } from "../src/diagnosis/source-snapshot.js";
 import { processBranchGit } from "../src/git/branch-git.js";
@@ -107,6 +107,22 @@ test("line-ending settings and attributes of the machine and the repository do n
   const worktree = join(scratch(), "source");
   new Worktrees(branchGit, repo).add(worktree, threadBranches.widening("wf-14", "d-1", 1), source);
   ok(readFileSync(join(worktree, "Chummer", "frmCreate.cs")).equals(bytes));
+});
+
+test("attributes in the repository's info/attributes that convert a compiled file are a setup error, and ones that do not are no obstacle", async () => {
+  const repo = repository();
+  const attributes = join(repo, ".git", "info", "attributes");
+  mkdirSync(dirname(attributes), { recursive: true });
+  writeFileSync(attributes, "*.cs text eol=crlf\n");
+  write(repo, "Chummer/frmCreate.cs", "class frmCreate\n{\n}\n");
+  const snapshot = await createSourceSnapshot(repo, join(scratch(), "source"), processGit(repo));
+  const branchGit = processBranchGit(repo);
+  throws(() => threadSource(branchGit, "wf-16", snapshot.commit, snapshot.folder, join(scratch(), "source.index")),
+    (error) => error instanceof SetupError && /info\/attributes converts the bytes of Chummer\/frmCreate\.cs/.test(error.message));
+  equal(git(repo, "for-each-ref", "refs/heads/workflow/wf-16"), "");
+  // An attribute that converts nothing stays harmless.
+  writeFileSync(attributes, "*.cs diff=csharp\n*.md -text\n");
+  ok(threadSource(branchGit, "wf-16", snapshot.commit, snapshot.folder, join(scratch(), "source.index")).length > 0);
 });
 
 test("a snapshot equal to its commit is the source commit itself, and a snapshot without Core/ is a setup error", async () => {
