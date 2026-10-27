@@ -134,14 +134,19 @@ export function variantChecks(check: ClusterCheck): readonly VariantCheck[] {
   return check.variants ?? [{ variant: 1, outcome: check.outcome, hypothesis: check.hypothesis, alternative: check.alternative }];
 }
 
+/** A confirmed hypothesis of a cluster: its number and the cluster as that hypothesis shows it. */
+export type ConfirmedHypothesis = { readonly variant: number; readonly diagnosis: ClusterDiagnosis };
+
 /**
- * The cluster as its first confirmed hypothesis shows it: that hypothesis's status, answers and failure in the
- * cluster's first-hypothesis fields. A cluster without a confirmed hypothesis is a bug of the caller.
+ * The cluster's confirmed hypotheses in order, each with the cluster as it shows it: that hypothesis's status, answers
+ * and failure in the cluster's first-hypothesis fields. A cluster without a confirmed hypothesis is a bug of the caller.
  */
-export function confirmedHypothesis(cluster: ClusterDiagnosis, check: CheckResult): ClusterDiagnosis {
+export function confirmedHypotheses(cluster: ClusterDiagnosis, check: CheckResult): ConfirmedHypothesis[] {
   const judged = check.clusters[cluster.clusterId];
-  const confirmed = judged === undefined ? undefined : variantChecks(judged).find((item) => item.outcome === "confirmed");
-  if (confirmed === undefined) throw new Error(`Cluster ${cluster.clusterId} has no confirmed hypothesis.`);
-  const variant = variantOf(cluster, confirmed.variant);
-  return { ...cluster, status: variant.status, hypothesis: variant.hypothesis, challenge: variant.challenge, failure: variant.failure };
+  const confirmed = judged === undefined ? [] : variantChecks(judged).filter((item) => item.outcome === "confirmed");
+  if (confirmed.length === 0) throw new Error(`Cluster ${cluster.clusterId} has no confirmed hypothesis.`);
+  return confirmed.map((item) => {
+    const variant = variantOf(cluster, item.variant);
+    return { variant: item.variant, diagnosis: { ...cluster, status: variant.status, hypothesis: variant.hypothesis, challenge: variant.challenge, failure: variant.failure } };
+  });
 }

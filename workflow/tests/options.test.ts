@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { SetupError } from "../src/host/setup-error.js";
 import { parseArguments, type Arguments } from "../src/options/arguments.js";
 import { loadProfile } from "../src/options/profile.js";
-import { hypothesesOf, resolveRunOptions, usesFixChanges } from "../src/options/run-options.js";
+import { hypothesesOf, resolveRunOptions, triesOf, usesFixChanges } from "../src/options/run-options.js";
 
 function start(args: string[]): Arguments {
   const command = parseArguments(args);
@@ -74,8 +74,8 @@ test("--no-repair ends the run after diagnosis; the profile sets the repair dead
   const env = { LOCALAPPDATA: root };
   equal(start(["--no-repair"]).noRepair, true);
   equal(resolveRunOptions(start(["--no-repair"]), { repair: { deadlineMinutes: 5 } }, env, root).repair, null);
-  deepStrictEqual(resolveRunOptions(start([]), {}, env, root).repair, { deadlineMinutes: 60, maxAttempts: 2 });
-  deepStrictEqual(resolveRunOptions(start([]), { repair: { deadlineMinutes: 5, maxAttempts: 3 } }, env, root).repair, { deadlineMinutes: 5, maxAttempts: 3 });
+  deepStrictEqual(resolveRunOptions(start([]), {}, env, root).repair, { deadlineMinutes: 60, maxAttempts: 2, tries: 1 });
+  deepStrictEqual(resolveRunOptions(start([]), { repair: { deadlineMinutes: 5, maxAttempts: 3, tries: 2 } }, env, root).repair, { deadlineMinutes: 5, maxAttempts: 3, tries: 2 });
 });
 
 test("--no-widening ends the run after repair, and --no-repair turns widening off too", () => {
@@ -84,7 +84,7 @@ test("--no-widening ends the run after repair, and --no-repair turns widening of
   equal(start(["--no-widening"]).noWidening, true);
   equal(resolveRunOptions(start([]), {}, env, root).widening, true);
   equal(resolveRunOptions(start(["--no-widening"]), {}, env, root).widening, false);
-  deepStrictEqual(resolveRunOptions(start(["--no-widening"]), {}, env, root).repair, { deadlineMinutes: 60, maxAttempts: 2 });
+  deepStrictEqual(resolveRunOptions(start(["--no-widening"]), {}, env, root).repair, { deadlineMinutes: 60, maxAttempts: 2, tries: 1 });
   equal(resolveRunOptions(start(["--no-repair"]), {}, env, root).widening, false);
 });
 
@@ -179,5 +179,21 @@ test("the profile's diagnosis.hypotheses is 1 to 3, stored with the thread, and 
   for (const diagnosis of [{ hypotheses: 0 }, { hypotheses: 4 }, { hypotheses: 1.5 }, { variants: 2 }]) {
     writeFileSync(path, JSON.stringify({ diagnosis }));
     throws(() => loadProfile({ PARITY_WORKFLOW_PROFILE: path }), (error: Error) => error instanceof SetupError && error.message.includes(path), JSON.stringify(diagnosis));
+  }
+});
+
+test("the profile's repair.tries is 1 to 3, stored with the thread, and 1 by default and in a thread stored without it", () => {
+  const root = scratch();
+  const path = join(root, "profile.json");
+  writeFileSync(path, JSON.stringify({ repair: { tries: 3 } }));
+  const profile = loadProfile({ PARITY_WORKFLOW_PROFILE: path });
+  equal(resolveRunOptions(start([]), profile, { LOCALAPPDATA: root }, root).repair?.tries, 3);
+  const stored = resolveRunOptions(start([]), {}, { LOCALAPPDATA: root }, root).repair!;
+  equal(triesOf(stored), 1);
+  const { tries: _, ...older } = stored;
+  equal(triesOf(older), 1);
+  for (const repair of [{ tries: 0 }, { tries: 4 }, { tries: 1.5 }]) {
+    writeFileSync(path, JSON.stringify({ repair }));
+    throws(() => loadProfile({ PARITY_WORKFLOW_PROFILE: path }), (error: Error) => error instanceof SetupError && error.message.includes(path), JSON.stringify(repair));
   }
 });

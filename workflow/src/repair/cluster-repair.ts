@@ -1,5 +1,6 @@
 import type { QuotaWaitMark } from "../diagnosis/cluster-diagnosis.js";
 import type { RepairStage } from "../evals/eval-record.js";
+import type { TrySummary } from "./attempt-archive.js";
 
 /** The narrow check's execution outcome, apart from its visual result. */
 export type CheckExecution = {
@@ -25,6 +26,11 @@ export type AttemptSummary = {
   /** The attempt's branch and commit; absent in a thread stored before attempts had them. */
   readonly branch?: string;
   readonly commit?: string | null;
+  /**
+   * Every try of an attempt that made several; the fields above are those of the selected try, or of the try that
+   * stands for a rejected attempt. Absent for an attempt of one try.
+   */
+  readonly tries?: readonly TrySummary[];
 };
 
 export type RepairStatus =

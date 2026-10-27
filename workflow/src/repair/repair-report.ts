@@ -27,7 +27,8 @@ export function writeRepairDocument(path: string, document: RepairDocument): voi
 export function repairStatus(repairs: Readonly<Record<string, ClusterRepair>>): 0 | 2 {
   const all = Object.values(repairs);
   const failed = all.some((repair) => repair.status === "failed");
-  const lost = all.some((repair) => repair.attempt?.check != null && (repair.attempt.check.status === 2 || !repair.attempt.check.coverageValid));
+  const checks = all.flatMap((repair) => [repair.attempt?.check ?? null, ...(repair.attempt?.tries ?? []).map((item) => item.check)]);
+  const lost = checks.some((check) => check !== null && (check.status === 2 || !check.coverageValid));
   return failed || lost ? 2 : 0;
 }
 

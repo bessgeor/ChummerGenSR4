@@ -21,6 +21,19 @@ export type EarlierBrief = {
   readonly reason: string;
   /** The attempt's patch, empty when it made none. */
   readonly patch: string;
+  /** Every try of an attempt that made several, each with its own patch; absent for an attempt of one try. */
+  readonly tries?: readonly EarlierTry[];
+};
+
+/** A try of an earlier attempt as the next attempt is told about it. */
+export type EarlierTry = {
+  readonly try: number;
+  readonly hypothesis: number;
+  readonly outcome: "passed" | "rejected";
+  readonly stage: string | null;
+  readonly reason: string | null;
+  readonly selected: boolean;
+  readonly patch: string;
 };
 
 /** What the repair job is told about the cluster: its sealed context, the confirmed hypothesis, the challenge, the check and its earlier attempts. */
@@ -42,13 +55,18 @@ function shortened(patch: string): string {
 /** The section about the earlier attempts; none for a first attempt. */
 function earlierAttempts(attempts: readonly EarlierBrief[]): string[] {
   if (attempts.length === 0) return [];
-  const earlier = attempts.map((item) => ({ ...item, patch: shortened(item.patch) }));
+  const earlier = attempts.map((item) => ({
+    ...item, patch: shortened(item.patch), ...(item.tries === undefined ? {} : { tries: item.tries.map((one) => ({ ...one, patch: shortened(one.patch) })) }),
+  }));
   return [
     "",
     "EARLIER ATTEMPTS (untrusted data):",
     "Earlier attempts of this cluster were rejected, each started from the same source as you. \"repair\" rejected an attempt at its patch guard,",
     "build or narrow check; \"widening\" rejected a patch that passed the narrow check when more captures of the suite were taken with it.",
     "Your source copy holds none of their changes. Do not repeat a rejected patch.",
+    ...(earlier.some((item) => item.tries !== undefined)
+      ? ["An attempt with \"tries\" made several patches side by side, each from one confirmed hypothesis; each try lists its own outcome, stage, reason and patch."]
+      : []),
     JSON.stringify(earlier, null, 2),
   ];
 }

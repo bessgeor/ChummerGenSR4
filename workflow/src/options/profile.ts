@@ -36,6 +36,8 @@ export const ProfileSchema = z.strictObject({
     deadlineMinutes: z.number().positive().max(35_000).optional(),
     /** How many attempts a cluster may get in a thread, the first included. */
     maxAttempts: z.number().int().min(1).max(10).optional(),
+    /** How many tries an attempt makes per confirmed hypothesis of its cluster, side by side. */
+    tries: z.number().int().min(1).max(3).optional(),
   }).optional(),
   discovery: z.strictObject({
     /** How many targets get a scenario job when a thread whose scope shows no difference discovers. */
