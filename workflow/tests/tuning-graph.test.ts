@@ -10,59 +10,18 @@ import { SetupError } from "../src/host/setup-error.js";
 import { workflowPaths } from "../src/paths.js";
 import { readDocument } from "../src/steps/read-document.js";
 import { readActiveFile } from "../src/tuning/active-configuration.js";
-import { autoTuningPath, newHypothesisRecords, readAutoTuning, recordAutoTuning, resolveAutoTuning, startAutoTuning, withAutoTuningRun } from "../src/tuning/auto-tuning.js";
+import { autoTuningPath, readAutoTuning, recordAutoTuning, startAutoTuning, withAutoTuningRun } from "../src/tuning/auto-tuning.js";
 import { readCycle } from "../src/tuning/cycle.js";
 import { readLedger } from "../src/tuning/holdout.js";
-import type { TuningSteps } from "../src/tuning/tuning-graph.js";
 import { compileTuningGraph, tuningCheckpoints, tuningThread } from "../src/tuning/tuning-runner.js";
 import { autoCycleId } from "../src/tuning/tuning-steps.js";
-import { tuningId } from "../src/tuning/tuning.js";
-import { FakeAgents, hypothesisAnswer, type JobCall, type Reply } from "./diagnosis-harness.js";
+import type { JobCall } from "./diagnosis-harness.js";
 import { scratch } from "./diagnosis-fixtures.js";
 import { holdLocks } from "./lock-holder.js";
-import { evalContext, record } from "./eval-fixtures.js";
-import { twoThreads } from "./eval-threads.js";
-import { tuning } from "./tuning-fixtures.js";
-
-// With the automatic dataset's seed `auto` and a 50 % test share, the cluster at x 100 lies in test and the one at x 600 in development.
-const testCluster = "d-0000000000000100";
-const developmentCluster = "d-0000000000000600";
-const spots = [{ case: "build-alpha", capture: "skills", x: 100 }, { case: "career-beta", capture: "common", x: 600 }];
-
-const proposal = (guidance: string) => ({ outcome: "candidate", reason: `Try: ${guidance}`, guidance: [guidance], context: "inline" });
-const idOf = (guidance: string) => tuningId(tuning({ jobKind: "hypothesis", guidance: [guidance], context: "inline" }));
+import { record } from "./eval-fixtures.js";
+import { agents, developmentCluster, dueTuning, proposal, refusingSteps, testCluster } from "./tuning-auto-fixtures.js";
 
 const readDataset = (folder: string): Dataset => readDocument(join(folder, "dataset.json"), DatasetSchema);
-
-type Behaviour = "all" | "development" | "test" | "none";
-
-/**
- * Agents whose tune job answers the next of `proposals`, and whose hypothesis jobs answer right on the clusters a
- * configuration's behaviour names: the code's prompt by `base`, a guidance line by `behaviours`.
- */
-function agents(proposals: unknown[], base: Behaviour, behaviours: Readonly<Record<string, Behaviour>>, hang?: (call: JobCall) => boolean) {
-  let next = 0;
-  return new FakeAgents((call): Reply => {
-    if (call.kind === "tune") return { answer: proposals[next++] ?? { outcome: "abstain", reason: "Nothing left.", guidance: null, context: null } };
-    if (hang?.(call) === true) return { hang: true };
-    const configuration = /^PROMPT_VERSION=\S+?(?:\+(tuned-[0-9a-f]{12}))?\n/.exec(call.prompt)![1];
-    const behaviour = configuration === undefined ? base : Object.entries(behaviours).find(([guidance]) => idOf(guidance) === configuration)?.[1] ?? "none";
-    const development = call.prompt.includes(developmentCluster);
-    const right = behaviour === "all" || (behaviour === "development" && development) || (behaviour === "test" && !development);
-    return right ? { answer: hypothesisAnswer() } : { answer: { outcome: "abstain", reason: "No idea.", explanation: null } };
-  });
-}
-
-/** Two diagnosed threads' records in a store, and an evaluation context over them whose tuning is due with exactly those records. */
-async function dueTuning(fake: FakeAgents) {
-  const threads = await twoThreads({ spots });
-  const records = await newHypothesisRecords(threads.store, new Set());
-  const paths = { ...workflowPaths(scratch("workflow-auto-")), threadFolder: (id: string) => join(threads.root, "threads", id) };
-  const context = evalContext({
-    store: threads.store, paths, agents: () => fake, autoTuning: () => ({ ...resolveAutoTuning(undefined), every: records.length, minPass: 0.3 }),
-  });
-  return { context, records };
-}
 
 /** The finished tuning of `auto.json`, its dataset version and its cycle. */
 function finishedTuning(evalsFolder: string) {
@@ -127,14 +86,6 @@ test("an automatic tuning whose tune job fails ends failed with exit status 2", 
   equal(await runEvalCommand(["tune", "auto"], context), 2, context.lines.join("\n"));
   deepStrictEqual(finishedTuning(context.paths.evalsFolder).entry.outcome, "failed");
 });
-
-/** Steps that refuse to run: a graph compiled from them only reads its checkpoints. */
-function refusingSteps(): TuningSteps {
-  const refuse = () => {
-    throw new Error("a step ran");
-  };
-  return { count: refuse, freeze: refuse, baseline: refuse, propose: refuse, holdout: refuse, testBaseline: refuse, activate: refuse, conclude: refuse };
-}
 
 /**
  * Starts a due tuning on SQLite checkpoints whose hypothesis jobs hang where `stop` says, and stops it there; returns
@@ -388,17 +339,6 @@ test("the tuning graph compiles from steps that do nothing until a node runs", a
   const graph = compileTuningGraph(refusingSteps(), SqliteSaver.fromConnString(":memory:"));
   const drawn = await graph.getGraphAsync();
   deepStrictEqual(Object.keys(drawn.nodes).filter((node) => !node.startsWith("__")).sort(),
-    ["activate", "baseline", "conclude", "count", "freeze", "holdout", "propose", "test_baseline"]);
+    ["activate", "baseline", "commit", "conclude", "count", "freeze", "holdout", "merge", "propose", "test_baseline", "worktree"]);
   equal(await tuningThread(graph, "tune-none"), "absent");
-});
-
-test("a due automatic tuning whose tuning or certificates folder lies inside the repository is a setup error that counts nothing", async () => {
-  const { context } = await dueTuning(agents([], "test", {}));
-  const inside = { ...context, tuningFolder: () => join(context.paths.repositoryRoot, "workflow", "evals", "tuning") };
-  await rejects(runEvalCommand(["tune", "auto"], inside), (error: Error) => error instanceof SetupError && error.message.includes(join("workflow", "evals", "tuning")) && error.message.includes("outside the repository"));
-  equal(existsSync(autoTuningPath(context.paths.evalsFolder)), false);
-  equal(existsSync(join(context.paths.evalsFolder, "datasets")), false);
-  const certificates = join(context.paths.repositoryRoot, "workflow", "evals", "certificates");
-  await rejects(runEvalCommand(["tune", "auto"], { ...context, certificatesFolder: () => certificates }), (error: Error) => error instanceof SetupError && error.message.includes(certificates) && !error.message.includes(join("workflow", "evals", "tuning")) && error.message.includes("outside the repository"));
-  equal(existsSync(autoTuningPath(context.paths.evalsFolder)), false);
 });

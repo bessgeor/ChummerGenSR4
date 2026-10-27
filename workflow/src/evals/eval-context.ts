@@ -4,6 +4,7 @@ import type { AgentRunners } from "../agents/agent-runners.js";
 import type { AgentSettings } from "../agents/agent-settings.js";
 import type { QuotaWaiter } from "../diagnosis/quota-waiter.js";
 import type { Git } from "../diagnosis/source-snapshot.js";
+import type { BranchGit } from "../git/branch-git.js";
 import type { ScratchFolder } from "../host/scratch-folder.js";
 import type { WorkflowPaths } from "../paths.js";
 import type { AutoTuningSettings } from "../tuning/auto-tuning.js";
@@ -14,6 +15,8 @@ export type EvalContext = {
   readonly paths: WorkflowPaths;
   readonly store: BaseStore;
   readonly git: Git;
+  /** The repository's git for worktrees, commits and merges. */
+  readonly branchGit: BranchGit;
   readonly now: () => Date;
   readonly log: (line: string) => void;
   /** The agent settings of the local profile, read when a command needs them. */

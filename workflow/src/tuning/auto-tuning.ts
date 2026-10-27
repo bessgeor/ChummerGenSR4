@@ -176,8 +176,8 @@ export function currentTuning(evalsFolder: string, state: AutoTuningState, tunin
   return state.current;
 }
 
-/** Records the dataset or the cycle of the tuning in progress, under the state's lock. */
-export function recordAutoTuning(evalsFolder: string, tuningId: string, fields: Partial<Pick<AutoTuningEntry, "dataset" | "cycle" | "settings">>): AutoTuningEntry {
+/** Records the dataset, the cycle, the branch, the commit or the merge of the tuning in progress, under the state's lock. */
+export function recordAutoTuning(evalsFolder: string, tuningId: string, fields: Partial<Pick<AutoTuningEntry, "dataset" | "cycle" | "settings" | "branch" | "commit" | "merge">>): AutoTuningEntry {
   return withAutoTuningLock(evalsFolder, () => {
     const state = readAutoTuning(evalsFolder);
     const tuning = { ...currentTuning(evalsFolder, state, tuningId), ...fields };
