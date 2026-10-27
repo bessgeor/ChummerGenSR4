@@ -391,7 +391,8 @@ test("a fast-forward refused for a local edit of a merged file is a setup error,
   const outcome = outcomeOf(run.root, threadId);
   deepStrictEqual([outcome.clusters[0]!.disposition, outcome.merge?.before, outcome.merge?.after], ["fixed", edited, git("rev-parse", "master")]);
   deepStrictEqual(trailersOn(root, "Merged-Fix"), [`${threadId}/${first}`]);
-  equal(readFileSync(join(root, "Chummer", "frmCreate.cs"), "utf8"), lines("restored", "local edit"));
+  // The checkout gets its line endings from the machine's git settings.
+  equal(readFileSync(join(root, "Chummer", "frmCreate.cs"), "utf8").replace(/\r\n/g, "\n"), lines("restored", "local edit"));
   equal(git("status", "--porcelain=v1"), "");
 });
 

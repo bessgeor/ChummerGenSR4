@@ -139,7 +139,8 @@ export function integrate(git: BranchGit, worktrees: Worktrees, request: Integra
   const holder = worktrees.list().find((item) => item.branch === request.branch);
   try {
     if (holder === undefined) git(["update-ref", "-m", `workflow: merges into ${request.branch}`, ref, tip, before]);
-    else git(["merge", "--quiet", "--ff-only", tip], { worktree: holder.folder });
+    // The checkout is a person's: its files are written with their line-ending settings and attributes.
+    else git(["merge", "--quiet", "--ff-only", tip], { worktree: holder.folder, userSettings: true });
   } catch (error) {
     if (!(error instanceof GitCommandError)) throw error;
     throw new SetupError(`${request.branch} could not be advanced to the merges kept on ${request.integrationBranch}: ${error.message}. Commit or stash the local changes, then resume.`);
@@ -154,7 +155,10 @@ export type HeadBranch = { readonly branch: string | null; readonly commit: stri
 export function headBranch(git: BranchGit): HeadBranch {
   const commit = git(["rev-parse", "HEAD"]).trim();
   try {
-    return { branch: git(["symbolic-ref", "--quiet", "--short", "HEAD"]).trim(), commit };
+    // The full name: a short one is ambiguous (`heads/main`) when a tag has the branch's name.
+    const ref = git(["symbolic-ref", "--quiet", "HEAD"]).trim();
+    if (!ref.startsWith("refs/heads/")) throw new SetupError(`HEAD names ${ref}, which is not a branch.`);
+    return { branch: ref.slice("refs/heads/".length), commit };
   } catch (error) {
     if (error instanceof GitCommandError && error.status === 1) return { branch: null, commit };
     throw error;

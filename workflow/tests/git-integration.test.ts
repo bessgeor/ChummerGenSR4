@@ -1,6 +1,6 @@
 import { deepStrictEqual, equal, ok, throws } from "node:assert/strict";
 import { execFileSync, execSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { GitCommandError, processBranchGit, type BranchGit } from "../src/git/branch-git.js";
@@ -148,8 +148,21 @@ test("a fast-forward git refuses for local changes is a setup error naming the i
   equal(repo.run("rev-parse", "main"), result.after);
 });
 
+test("the checked-out branch's files are written with the repository's line-ending settings when it is fast-forwarded", () => {
+  const repo = repositoryOnMain();
+  repo.run("config", "core.autocrlf", "true");
+  const fix = repo.commitOn(repo.start, "Fix d-1", { "Chummer/frmCreate.cs": "create\nfixed\n" });
+  const result = integrate(repo.git, repo.worktrees, repo.request([repo.item("d-1", fix)]));
+  equal(repo.run("rev-parse", "main"), result.after);
+  equal(readFileSync(join(repo.root, "Chummer/frmCreate.cs"), "utf8"), "create\r\nfixed\r\n");
+  equal(repo.run("status", "--porcelain"), "");
+});
+
 test("headBranch names the checked-out branch, or none when HEAD is detached", () => {
   const repo = repositoryOnMain();
+  deepStrictEqual(headBranch(repo.git), { branch: "main", commit: repo.start });
+  // A tag of the same name makes git's short name `heads/main`.
+  repo.run("tag", "main");
   deepStrictEqual(headBranch(repo.git), { branch: "main", commit: repo.start });
   repo.run("checkout", "-q", "--detach");
   deepStrictEqual(headBranch(repo.git), { branch: null, commit: repo.start });
