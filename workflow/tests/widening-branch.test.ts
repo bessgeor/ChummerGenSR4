@@ -109,22 +109,22 @@ test("line-ending settings and attributes of the machine and the repository do n
   ok(readFileSync(join(worktree, "Chummer", "frmCreate.cs")).equals(bytes));
 });
 
-test("attributes in the repository's info/attributes that convert a compiled file are a setup error, and ones that do not are no obstacle", async () => {
+test("attributes in the repository's info/attributes that convert bytes are a setup error, also for files added later, and ones that convert nothing are no obstacle", async () => {
   const repo = repository();
   const attributes = join(repo, ".git", "info", "attributes");
   mkdirSync(dirname(attributes), { recursive: true });
-  writeFileSync(attributes, "*.cs text eol=crlf\n");
-  write(repo, "Chummer/frmCreate.cs", "class frmCreate\n{\n}\n");
   const snapshot = await createSourceSnapshot(repo, join(scratch(), "source"), processGit(repo));
   const branchGit = processBranchGit(repo);
-  throws(() => threadSource(branchGit, "wf-16", snapshot.commit, snapshot.folder, join(scratch(), "source.index")),
-    (error) => error instanceof SetupError && /info\/attributes converts the bytes of Chummer\/frmCreate\.cs/.test(error.message));
-  equal(git(repo, "for-each-ref", "refs/heads/workflow/wf-16"), "");
-  // An attribute that converts nothing stays harmless.
-  writeFileSync(attributes, "*.cs diff=csharp\n*.md -text\n");
-  ok(threadSource(branchGit, "wf-16", snapshot.commit, snapshot.folder, join(scratch(), "source.index")).length > 0);
+  const source = () => threadSource(branchGit, "wf-16", snapshot.commit, snapshot.folder, join(scratch(), "source.index"));
+  for (const converting of ["*.cs text eol=crlf\n", "Chummer/NewFeature.cs text eol=crlf\n", "*.cs crlf\n", "*.cs filter=lfs\n", "\"Chummer/New Feature.cs\" ident\n", "[attr]mine text\n", "*.cs diff=csharp working-tree-encoding=utf-16\n"]) {
+    writeFileSync(attributes, converting);
+    throws(() => source(), (error) => error instanceof SetupError && /info\/attributes sets attributes that convert bytes/.test(error.message), converting);
+    equal(git(repo, "for-each-ref", "refs/heads/workflow/wf-16"), "");
+  }
+  // Attributes that unset, reset or do not convert stay harmless.
+  writeFileSync(attributes, "# comment\n\n*.cs diff=csharp -filter -ident -working-tree-encoding -text -eol\n*.md !text !eol binary\n*.png -crlf\n");
+  ok(source().length > 0);
 });
-
 test("a snapshot equal to its commit is the source commit itself, and a snapshot without Core/ is a setup error", async () => {
   const run = await thread("wf-2", true);
   equal(run.source, run.snapshot.commit);
