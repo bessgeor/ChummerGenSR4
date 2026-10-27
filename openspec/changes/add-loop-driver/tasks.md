@@ -4,7 +4,7 @@ Each task names the tasks it builds on as `(after: …)`, by number in this list
 
 ## 1. Shared composition
 
-- [ ] 1.1 (after: add-automatic-discovery#4.1, add-repair-worktrees#2.1) Move the workflow's composition out of `main.ts` into a function that runs or resumes a thread, and let a start take the thread ID chosen before it. Evidence: the existing workflow tests and a test of a start with a given ID and with an ID that exists.
+- [x] 1.1 (after: add-automatic-discovery#4.1, add-repair-worktrees#2.1) Move the workflow's composition out of `main.ts` into a function that runs or resumes a thread, and let a start take the thread ID chosen before it. Evidence: the existing workflow tests and a test of a start with a given ID and with an ID that exists.
 
 ## 2. The driver
 
