@@ -15,8 +15,11 @@ export const threadBranches = {
   integration: (threadId: string) => `workflow/${threadId}/integration`,
 };
 
+/** The start of the subject of a source commit that holds edits the repository's own commits lack. */
+export const sourceSubjectPrefix = "Source captured by thread ";
+
 export function sourceMessage(threadId: string): string {
-  return `Source captured by thread ${threadId}\n\nThe compiled source as the thread's candidate was built from it.\n`;
+  return `${sourceSubjectPrefix}${threadId}\n\nThe compiled source as the thread's candidate was built from it.\n`;
 }
 
 /** The attributes that convert a file's bytes between the repository and a worktree (`crlf` is the old name of `text`). */

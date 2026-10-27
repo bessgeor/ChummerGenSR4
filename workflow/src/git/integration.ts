@@ -1,5 +1,6 @@
 import { SetupError } from "../host/setup-error.js";
 import { GitCommandError, type BranchGit } from "./branch-git.js";
+import { sourceSubjectPrefix } from "./thread-source.js";
 import type { Worktrees } from "./worktrees.js";
 
 /** One commit to merge: rebased from its parent onto the branch's tip as `branch`, then merged with a merge commit. */
@@ -20,7 +21,7 @@ export type ItemMerge = {
   readonly name: string;
   readonly status: "merged" | "conflict" | "blocked";
   readonly branch: string;
-  /** The merge commit, or null when nothing was merged (or the change was on the branch already). */
+  /** The merge commit, or null when nothing was merged (or the fix commit is part of the branch's history already). */
   readonly mergeCommit: string | null;
   /** Why it was not merged, or what made a merge unnecessary. */
   readonly reason: string | null;
@@ -62,6 +63,25 @@ function reachableTrailers(git: BranchGit, tip: string, key: string): Map<string
   return found;
 }
 
+/** The files the thread's source commit changed on its parent when it captured working-tree edits; none for a commit of the repository's own. */
+function sourceEdits(git: BranchGit, source: string): string[] {
+  const subject = git(["log", "-1", "--format=%s", source]).trim();
+  if (!subject.startsWith(sourceSubjectPrefix)) return [];
+  return git(["diff-tree", "-r", "--no-renames", "--name-only", `${source}^`, source]).split(/\r?\n/).filter((path) => path.length > 0);
+}
+
+/**
+ * The files the thread's source commit changed that `tip` holds in another state than `verified` does: the fixes were
+ * verified on top of those edits, so `verified` is the source or the last fix merged before.
+ */
+function missingEdits(git: BranchGit, source: string, verified: string, tip: string): string[] {
+  return sourceEdits(git, source).filter((path) => {
+    const wanted = git(["ls-tree", verified, "--", path]).trim().split(/\s+/)[2] ?? null;
+    const held = git(["ls-tree", tip, "--", path]).trim().split(/\s+/)[2] ?? null;
+    return wanted !== held;
+  });
+}
+
 function message(item: MergeItem): string[] {
   const trailers = [...item.trailers, item.trailer].map((trailer) => `${trailer.key}: ${trailer.value}`).join("\n");
   return ["-m", item.subject, "-m", trailers];
@@ -87,6 +107,16 @@ export function integrate(git: BranchGit, worktrees: Worktrees, request: Integra
   const items: ItemMerge[] = [];
   let tip = before;
   let blocked: string | null = null;
+  // The first fix was made on the thread's source. When that captured edits the repository's commits lack, the fixes
+  // cannot be merged until the branch has them: the merged branch would not be the state the fixes were verified on.
+  // A resumed merge checks it again, against the state its last merged fix was verified on, since that fix may have changed an edited file.
+  const lastMerged = request.items.map((item) => mergedBefore(item) !== null).lastIndexOf(true);
+  const unmergedEdits = request.items.every((item) => mergedBefore(item) !== null)
+    ? []
+    : missingEdits(git, worktrees.parent(request.items[0]!.commit), request.items[lastMerged]?.commit ?? worktrees.parent(request.items[0]!.commit), before);
+  if (unmergedEdits.length > 0) {
+    blocked = `the thread's source held edits of ${unmergedEdits.join(", ")} that ${request.branch} lacks`;
+  }
   worktrees.remove(request.worktree);
   worktrees.addDetached(request.worktree, before);
   const inWorktree = (args: readonly string[]) => git(args, { worktree: request.worktree });
@@ -98,7 +128,10 @@ export function integrate(git: BranchGit, worktrees: Worktrees, request: Integra
         continue;
       }
       if (blocked !== null) {
-        items.push({ name: item.name, status: "blocked", branch: item.branch, mergeCommit: null, reason: `${blocked} did not merge, and this change was verified on top of it`, files: [] });
+        items.push({
+          name: item.name, status: "blocked", branch: item.branch, mergeCommit: null, files: [],
+          reason: unmergedEdits.length > 0 ? `${blocked}; commit them first (the fixes were verified on top of them)` : `${blocked} did not merge, and this change was verified on top of it`,
+        });
         continue;
       }
       const parent = worktrees.parent(item.commit);
@@ -120,7 +153,13 @@ export function integrate(git: BranchGit, worktrees: Worktrees, request: Integra
       const rebased = worktrees.head(request.worktree);
       inWorktree(["checkout", "--quiet", "--detach", tip]);
       if (rebased === tip) {
-        items.push({ name: item.name, status: "merged", branch: item.branch, mergeCommit: null, reason: `${request.branch} has the change already`, files: [] });
+        // The replay was dropped: the branch has the change. The fix still gets a merge commit of its own with the
+        // branch's tree, so that the trailer marks the merge. Its second parent is the fix commit, or the commit the
+        // fix was made on when the branch is at the fix commit itself (a merge needs two parents that differ).
+        const recorded = inWorktree(["commit-tree", `${tip}^{tree}`, "-p", tip, "-p", item.commit === tip ? parent : item.commit, ...message(item)]).trim();
+        inWorktree(["checkout", "--quiet", "--detach", recorded]);
+        tip = recorded;
+        items.push({ name: item.name, status: "merged", branch: item.branch, mergeCommit: recorded, reason: `${request.branch} has the change already; the merge commit records the fix without changing the tree`, files: [] });
         continue;
       }
       inWorktree(["merge", "--quiet", "--no-ff", "--no-edit", ...message(item), item.branch]);
@@ -139,7 +178,8 @@ export function integrate(git: BranchGit, worktrees: Worktrees, request: Integra
   const holder = worktrees.list().find((item) => item.branch === request.branch);
   try {
     if (holder === undefined) git(["update-ref", "-m", `workflow: merges into ${request.branch}`, ref, tip, before]);
-    else git(["merge", "--quiet", "--ff-only", tip], { worktree: holder.folder });
+    // The checkout is a person's: its files are written with their line-ending settings and attributes.
+    else git(["merge", "--quiet", "--ff-only", tip], { worktree: holder.folder, userSettings: true });
   } catch (error) {
     if (!(error instanceof GitCommandError)) throw error;
     throw new SetupError(`${request.branch} could not be advanced to the merges kept on ${request.integrationBranch}: ${error.message}. Commit or stash the local changes, then resume.`);
@@ -147,11 +187,17 @@ export function integrate(git: BranchGit, worktrees: Worktrees, request: Integra
   return { branch: request.branch, before, after: tip, integrationBranch: request.integrationBranch, items };
 }
 
+/** The branch `HEAD` names (null when `HEAD` is detached) and its commit. */
+export type HeadBranch = { readonly branch: string | null; readonly commit: string };
+
 /** The branch `HEAD` names and its commit; the branch is null when `HEAD` is detached. */
-export function headBranch(git: BranchGit): { branch: string | null; commit: string } {
+export function headBranch(git: BranchGit): HeadBranch {
   const commit = git(["rev-parse", "HEAD"]).trim();
   try {
-    return { branch: git(["symbolic-ref", "--quiet", "--short", "HEAD"]).trim(), commit };
+    // The full name: a short one is ambiguous (`heads/main`) when a tag has the branch's name.
+    const ref = git(["symbolic-ref", "--quiet", "HEAD"]).trim();
+    if (!ref.startsWith("refs/heads/")) throw new SetupError(`HEAD names ${ref}, which is not a branch.`);
+    return { branch: ref.slice("refs/heads/".length), commit };
   } catch (error) {
     if (error instanceof GitCommandError && error.status === 1) return { branch: null, commit };
     throw error;

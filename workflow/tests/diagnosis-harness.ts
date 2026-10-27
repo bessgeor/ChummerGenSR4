@@ -28,6 +28,7 @@ import { FakeWideningHost } from "./widening-fixtures.js";
 import { captureNames } from "../src/cases/case-plan.js";
 import { processBranchGit, type BranchGit } from "../src/git/branch-git.js";
 import { Worktrees } from "../src/git/worktrees.js";
+import { headBranch, integrate } from "../src/git/integration.js";
 import { WideningService, type WideningDependencies } from "../src/widening/widening-service.js";
 import { LoopService } from "../src/loop/loop-service.js";
 import { fixesRootOf, openSpecArchiver, processOpenSpecCli, type FixChangeArchiver } from "../src/fixes/fix-archiver.js";
@@ -189,6 +190,8 @@ export type HarnessOptions = {
     /** The fix change archiver; by default the real OpenSpec CLI with this checkout's fixes root. */
     readonly archive?: FixChangeArchiver;
   };
+  /** Runs when the thread concludes, before its fixes are merged, with the fixture repository's folder. */
+  readonly beforeMerge?: (repository: string) => void;
 };
 
 /** A workflow whose host steps are fakes over fixture run folders, with the real diagnosis service and fake agents. */
@@ -201,6 +204,8 @@ export function diagnosisHarness(options: HarnessOptions) {
   const agents = options.agents ?? new FakeAgents();
   const sleeps: number[] = [];
   const lines: string[] = [];
+  /** The threads whose start got as far as writing what the thread needs. */
+  const prepared: string[] = [];
   const log = (line: string) => lines.push(line);
   const steps: WorkflowSteps = {
     captureLanes: 1,
@@ -274,7 +279,14 @@ export function diagnosisHarness(options: HarnessOptions) {
   });
   const checkpointer = options.checkpointer ?? new MemorySaver();
   const store = options.store ?? new InMemoryStore();
-  const graph = buildWorkflowGraph(steps, diagnosis, repair, widening, new LoopService({ threadFolder: (threadId) => join(root, "threads", threadId), now: () => new Date("2026-10-01T14:00:00Z") }), noDiscovery).compile({ checkpointer, store });
+  const loop = new LoopService({
+    threadFolder: (threadId) => join(root, "threads", threadId), now: () => new Date("2026-10-01T14:00:00Z"),
+    integrate: (request) => {
+      options.beforeMerge?.(sourceRepository);
+      return integrate(branchGit, worktrees, request);
+    },
+  });
+  const graph = buildWorkflowGraph(steps, diagnosis, repair, widening, loop, noDiscovery).compile({ checkpointer, store });
   const settings = resolveAgentSettings({ ...(options.budgetMinutes === undefined ? {} : { runBudgetMinutes: options.budgetMinutes }) });
   const dependencies: RunDependencies = {
     graph,
@@ -286,15 +298,20 @@ export function diagnosisHarness(options: HarnessOptions) {
       widening: options.repair !== undefined && options.widening !== undefined && !command.arguments.noRepair && !command.arguments.noWidening,
       fixChanges: command.arguments.fixChanges, ...(options.tuning === undefined ? {} : { tuning: options.tuning }),
     }),
+    prepareThread: (_command, resolved, threadId) => {
+      prepared.push(threadId);
+      return resolved;
+    },
     planCases: () => ({ cases: cases.filter((item) => folders[item.name] !== undefined), excluded: [] }),
     readCase: () => details,
     certificateProblems: unattendedProblems,
+    head: () => headBranch(plainGit),
     log,
     now: () => new Date("2026-10-01T12:00:00Z"),
     ...(options.signal === undefined ? {} : { signal: options.signal }),
   };
   return {
-    root, agents, sleeps, checks, reportReads, lines, store, checkpointer, graph, repairHost, wideningHost, sourceRepository,
+    root, agents, sleeps, checks, reportReads, lines, prepared, store, checkpointer, graph, repairHost, wideningHost, sourceRepository,
     start: (overrides: Partial<Arguments> = {}) => runWorkflow({ kind: "start", arguments: { ...baseArguments, ...overrides } }, dependencies),
     resume: (threadId: string) => runWorkflow({ kind: "resume", threadId }, dependencies),
     threadId: () => /Thread (wf-\S+):/.exec(lines.join("\n"))?.[1] ?? "",

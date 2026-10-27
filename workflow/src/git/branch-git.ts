@@ -8,6 +8,11 @@ export type GitOptions = {
   readonly input?: string;
   /** Runs the command in this worktree of the repository instead of with the repository's own git folder. */
   readonly worktree?: string;
+  /**
+   * Runs the command with the machine's and the repository's line-ending settings and attributes instead of the pinned
+   * ones: for a command that writes files into a person's own checkout, which must get them as git always gives them.
+   */
+  readonly userSettings?: boolean;
 };
 
 /** Runs git and returns its standard output; a non-zero exit throws `GitCommandError`. */
@@ -44,9 +49,10 @@ export function processBranchGit(repositoryRoot: string): BranchGit {
   let gitFolder: string | null = null;
   const run = (args: readonly string[], options: GitOptions = {}) => {
     try {
-      const attributes = args.some((arg) => treeAttributesKept.has(arg)) ? [] : [`--attr-source=${emptyTree}`];
-      return execFileSync("git", [...pinned, ...attributes, ...args], {
-        cwd: options.cwd ?? repositoryRoot, env: { ...process.env, GIT_ATTR_NOSYSTEM: "1", ...options.env }, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, windowsHide: true,
+      const user = options.userSettings === true;
+      const attributes = user || args.some((arg) => treeAttributesKept.has(arg)) ? [] : [`--attr-source=${emptyTree}`];
+      return execFileSync("git", [...(user ? ["-c", "core.quotepath=false"] : pinned), ...attributes, ...args], {
+        cwd: options.cwd ?? repositoryRoot, env: { ...process.env, ...(user ? {} : { GIT_ATTR_NOSYSTEM: "1" }), ...options.env }, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, windowsHide: true,
         stdio: ["pipe", "pipe", "pipe"], ...(options.input === undefined ? {} : { input: options.input }),
       });
     } catch (error) {

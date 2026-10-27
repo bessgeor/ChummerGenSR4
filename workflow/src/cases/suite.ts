@@ -54,7 +54,11 @@ export function writeSuite(fixtureFile: string, registry: RegistryPaths, suitePa
 
 /** A new thread's options: without --case-file its case file is the suite, written into the thread's folder. */
 export function startOptions(args: Arguments, profile: Profile, env: Environment, repositoryRoot: string, threadFolder: string): RunOptions {
-  const options = resolveRunOptions(args, profile, env, repositoryRoot);
+  return threadSuite(args, resolveRunOptions(args, profile, env, repositoryRoot), repositoryRoot, threadFolder);
+}
+
+/** Without --case-file, writes the thread's suite into its folder and makes it the options' case file. */
+export function threadSuite(args: Arguments, options: RunOptions, repositoryRoot: string, threadFolder: string): RunOptions {
   if (args.caseFile !== null) return options;
   const suite = join(threadFolder, suiteFileName);
   writeSuite(fixtureCaseFile(repositoryRoot), registryPaths(repositoryRoot), suite);

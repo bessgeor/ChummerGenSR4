@@ -79,3 +79,53 @@ None for this task. `bin/ChummerGenSR4.exe` was not run, built or touched.
 ## Unverified
 
 That a real repair job edits its worktree, that the worktree builds with the candidate build script, and that a widened worktree builds and is promoted in a live `npm start` run.
+
+## Task 2.1: merging the fixed clusters at conclude
+
+| Command | Result |
+| --- | --- |
+| `npm run workflow:typecheck` | Passed (exit 0) on the final source. |
+| `npm run workflow:test`, run 1 | Passed: 550 tests, 550 passed, 0 failed, 0 skipped (exit 0). |
+| `node --import tsx --test` on `git-integration`, `loop-graph`, `graph`, `suite` and `steps` tests, after the review fixes | Failed: 76 tests, 75 passed, 1 failed (exit 1). `not ok 51 - a fast-forward refused for a local edit of a merged file is a setup error, and once the edit is committed the resumed thread merges each fix once`: `Expected values to be strictly equal: + 'class frmCreate {\r\n  int restored;\r\n}\r\n// one\r\n// two\r\n// local edit\r\n' - 'class frmCreate {\n  int restored;\n}\n// one\n// two\n// local edit\n'` (`loop-graph.test.ts:394`). Cause: the fast-forward now writes the checkout with the machine's git settings (`core.autocrlf=true` here), and the test compared the bytes with LF line endings; it now compares the text with its line endings normalized and still requires a clean `git status`. |
+| `npm run workflow:test`, run 2 | Passed on the final source: 551 tests, 551 passed, 0 failed, 0 skipped (exit 0). |
+| `npm run workflow:test`, run 3 (after the merge of uncommitted source edits and of an already-held fix) | Passed: 553 tests, 553 passed, 0 failed, 0 skipped (exit 0). |
+| `npm run workflow:test`, run 4 | Passed before the second parent of a merge commit for a fix at the branch's tip: 555 tests, 555 passed, 0 failed, 0 skipped (exit 0). |
+| `npm run workflow:test`, run 5 | Passed on the final source, run alone: 555 tests, 555 passed, 0 failed, 0 skipped (exit 0). Two earlier runs of this source overlapped other test runs on the same machine; the log of one of them also holds the summary of an overlapping run (`# pass 554`, `# fail 1`) whose failing test the log does not name, and neither is counted as evidence. |
+| `npm run workflow:test`, runs 5 and 6 (after that change) | Failed both times (exit 1): `# tests 555`, `# pass 554`, `# fail 1`, `# skipped 0`. The TAP output of both runs holds no `not ok` line and no error text: every one of the 555 tests is printed as `ok`, so the failing test is not named in the log and the cause is unknown. The same suite with the spec reporter (555 passed, 0 failed, exit 0) and runs 7 and 8 passed (555 tests, 555 passed, 0 failed, 0 skipped, exit 0), also the two files that hold the merge tests (`git-integration` and `loop-graph`: 28 passed). The failure is not explained; it did not recur in three further runs. |
+| `npm run workflow:test`, runs 7 and 8 | Passed on the final source: 555 tests, 555 passed, 0 failed, 0 skipped (exit 0) both times. |
+| `npm run openspec:validate` | Passed strict validation: 21 passed, 0 failed (on the final source). |
+| SHA-256 of `bin/ChummerGenSR4.exe` | `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`; the executable was not built, launched or touched. |
+
+Every test below runs on temporary git repositories made by the test, with fake model jobs, builds and captures; the thread repairs, widens, promotes and concludes through the workflow graph.
+
+| Evidence named by the task | Tests |
+| --- | --- |
+| Two merged fixes | `loop-graph.test.ts`: two promoted fixes are merged into the branch the thread started on, one merge commit each, in the order of the promotions (`workflow/<thread>/fix/<cluster>` branches, `Merge fix for discrepancy <cluster>` with the `Workflow-Thread` and `Merged-Fix` trailers, the branch's working tree holding both fixes, `merge` in `outcome.json` and the `Merge:` line). |
+| A conflicting fix and the one after it | `loop-graph.test.ts`: a fix that does not rebase onto the moved branch is not merged, nor the fix promoted after it (both `merge_failed` at stage `merge`, the first naming `Chummer/frmCreate.cs`, the second naming the first; the branch keeps its commit). |
+| A moved base branch | `loop-graph.test.ts`: a branch that moves while the fixes are merged is a setup error naming the integration branch, and the resumed thread merges onto its new tip. |
+| A refused fast-forward with a resume | `loop-graph.test.ts`: a fast-forward refused for a local edit of a merged file is a setup error naming `workflow/<thread>/integration`; once the edit is committed the resumed thread merges each fix once. |
+| A branch that is not checked out | `loop-graph.test.ts`: a branch no worktree has checked out when the thread concludes is advanced by a ref update, and the checkout stays as it is. |
+| A detached `HEAD` at start | `loop-graph.test.ts`: a thread that repairs and widens refuses a detached `HEAD` before the build and stores nothing (no checkpoint, no thread folder prepared, no job); one without widening records it. |
+
+Also covered:
+
+- A thread stored before its start branch was recorded concludes its promoted fix as `fixed` without merging and says why in `merge.skipped`: `loop-graph.test.ts`.
+- `fixed` only with a merge, `merge_failed` with stage `merge`, the reason and the fix's commit, and `merge_failed` keeping the outcome at `findings_remaining`: `loop-rules.test.ts`.
+- The branch `HEAD` names is read by its full ref, so a tag with the branch's name does not make it ambiguous: `git-integration.test.ts`, headBranch names the checked-out branch, or none when HEAD is detached.
+- Fixes verified on a source that held uncommitted edits are not merged (all end `blocked`, then `merge_failed`, naming the edited files) into a branch that lacks them, and are merged once the branch has them: `git-integration.test.ts`.
+- A resumed merge checks the source edits against the last fix merged before (a fix that changed an edited file itself does not block the next one; an edit the branch lost since blocks it): `git-integration.test.ts`.
+- A fix whose commit the branch holds in its history already (the branch was advanced to it, with or without later commits) gets a merge commit with the branch's tree, the `Merged-Fix` trailer and two parents (the tip and the fix commit, or the commit the fix was made on when the tip is the fix commit): `git-integration.test.ts`.
+- A fix whose change the branch has already (the rebase drops it) gets a merge commit of its own with the branch's tree and the `Merged-Fix` trailer, and is skipped as merged before when asked again: `git-integration.test.ts`.
+- The fast-forward writes the person's checkout with the repository's line-ending settings (`core.autocrlf=true` gives CRLF) and leaves `git status` clean: `git-integration.test.ts`.
+
+## Fixture-tested scope
+
+All of the above runs on temporary repositories with fake model jobs, builds, narrow checks and level captures. No model job, build or capture ran.
+
+## Live evidence
+
+None for this task. `bin/ChummerGenSR4.exe` was not run, built or touched.
+
+## Unverified
+
+That a live `npm start` thread merges a real promoted fix into the branch it started on and advances that branch's checkout.

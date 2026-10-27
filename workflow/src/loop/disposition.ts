@@ -5,7 +5,7 @@ import type { ClusterWidening } from "../widening/cluster-widening.js";
 import { latestRejection } from "./retry.js";
 
 export const dispositions = [
-  "fixed", "budget_exhausted", "not_diagnosed", "diagnosis_failed", "abstained", "refuted", "undecided",
+  "fixed", "merge_failed", "budget_exhausted", "not_diagnosed", "diagnosis_failed", "abstained", "refuted", "undecided",
   "not_repaired", "repair_failed", "repair_rejected", "not_widened", "widening_rejected",
 ] as const;
 export type Disposition = (typeof dispositions)[number];
@@ -21,7 +21,12 @@ export type ClusterEnd = {
   readonly reason: string | null;
   /** The accepted branch's commit of a fix. */
   readonly commit: string | null;
+  /** The merge commit of a fix on the branch the thread started on; null when it was not merged by one. */
+  readonly mergeCommit: string | null;
 };
+
+/** How a promoted fix fared when it was merged into the branch the thread started on. */
+export type ClusterMerge = { readonly merged: boolean; readonly mergeCommit: string | null; readonly reason: string | null };
 
 /** What the dispositions are decided from: the thread's stage results. */
 export type DispositionInput = {
@@ -31,6 +36,8 @@ export type DispositionInput = {
   readonly widenings: Readonly<Record<string, ClusterWidening>>;
   /** Clusters that would have had a next attempt but for the spent run budget. */
   readonly budgetBlocked: readonly string[];
+  /** The merge of each promoted fix, by cluster; null for a thread stored before its start branch was recorded, which does not merge. */
+  readonly merges: Readonly<Record<string, ClusterMerge>> | null;
 };
 
 /** A cluster's disposition from its diagnosis, check, repair and widening, in the order of the stages. */
@@ -39,10 +46,15 @@ export function clusterEnd(clusterId: string, input: DispositionInput): ClusterE
   const repair = input.repairs[clusterId];
   const widening = input.widenings[clusterId];
   const attempts = repair === undefined ? 0 : finishedAttempts(repair);
-  const end = (disposition: Disposition, stage: string | null = null, reason: string | null = null, commit: string | null = null): ClusterEnd =>
-    ({ clusterId, disposition, attempts, stage, reason, commit });
+  const end = (disposition: Disposition, stage: string | null = null, reason: string | null = null, commit: string | null = null, mergeCommit: string | null = null): ClusterEnd =>
+    ({ clusterId, disposition, attempts, stage, reason, commit, mergeCommit });
   const rejection = repair === undefined ? null : latestRejection(repair, widening);
-  if (widening?.status === "promoted") return end("fixed", null, null, widening.commit);
+  if (widening?.status === "promoted") {
+    if (input.merges === null) return end("fixed", null, null, widening.commit);
+    const merge = input.merges[clusterId];
+    if (merge === undefined) throw new Error(`Cluster ${clusterId}'s fix was promoted but not merged when the thread concludes.`);
+    return merge.merged ? end("fixed", null, null, widening.commit, merge.mergeCommit) : end("merge_failed", "merge", merge.reason, widening.commit);
+  }
   // A next attempt that could not start leaves no latest attempt: the rejection it followed is the last of the earlier ones.
   const followed = rejection ?? (repair?.earlier ?? []).at(-1) ?? null;
   // An attempt the budget stopped after some of its jobs finished is archived with its own reason.

@@ -163,7 +163,7 @@ class FakeLoop implements LoopSteps {
     this.inputs.push(input);
     const document: OutcomeDocument = {
       threadId: input.threadId, outcome: "verified_for_scope", scope: { cases: input.plan.map((item) => item.name), captures: null },
-      problems: { cases: [], otherFindings: 0 }, clusters: [], accepted: null,
+      problems: { cases: [], otherFindings: 0 }, clusters: [], accepted: null, merge: null,
       measures: { clusters: 0, fixed: 0, fixRate: null, attempts: 0, modelMilliseconds: 0, elapsedMilliseconds: null }, discovery: input.discovery,
       concludedUtc: "2026-10-01T12:00:00Z",
     };
@@ -209,8 +209,10 @@ function harness(cases: string[], steps = new FakeSteps(), checkpointer = new Me
       canonicalCacheSource: "default", noOcr: false, tessdata: null, only: command.arguments.only, recapture: false,
       diagnosis: false, agents: resolveAgentSettings(undefined), unattended: false, certificates: "certificates", repair: null, widening: false,
     } : { ...resolveRunOptions(command.arguments, discovery.profile ?? {}, { LOCALAPPDATA: discovery.root }, discovery.root), repair: null, widening: false }),
+    prepareThread: (_command, options) => options,
     planCases: () => ({ cases: cases.map(plannedCase), excluded: [] }),
     certificateProblems: () => [],
+    head: () => ({ branch: "main", commit: "c0ffee" }),
     readCase: (runFolder, compared) => {
       readCalls.push([runFolder, compared]);
       return fakeDetails(runFolder, compared);
@@ -320,7 +322,7 @@ test("a thread stored before the inventory existed skips it and its report says 
   const { inventorySummary: _absent, ...stored }: WorkflowStateValue = {
     threadId: "wf-old", options, plan: [plannedCase("a")], pendingCaseIndexes: [], fingerprints: null, captures: {}, compares: {}, triageSummary: null, inventorySummary: null,
     clusters: {}, agentMilliseconds: 0, diagnosisCheck: null, diagnosisPath: null, repairs: {}, repairPath: null, widenings: {}, earlierWidenings: [], accepted: null,
-    wideningPath: null, threadDiscovery: null, startedUtc: null, outcome: null, outcomePath: null,
+    wideningPath: null, threadDiscovery: null, startedUtc: null, base: { branch: "main", commit: "c0ffee" }, outcome: null, outcomePath: null,
   };
   const final = await graph.invoke(stored as WorkflowStateValue, { configurable: { thread_id: "wf-old" } });
   deepStrictEqual(run.steps.calls.filter((call) => !call.startsWith("capture") && !call.startsWith("compare")), ["triage"]);
@@ -422,6 +424,7 @@ test("results that cannot be read after the graph finished are a setup error wit
   const unreadable: RunDependencies = {
     ...run.dependencies,
     certificateProblems: () => [],
+    head: () => ({ branch: "main", commit: "c0ffee" }),
     readCase: () => {
       throw new SetupError("a/coverage.json cannot be read");
     },
