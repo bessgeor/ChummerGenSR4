@@ -10,6 +10,7 @@
 | `npm run workflow:test`, run 3 | Passed with the checkpoint database closed when the store cannot be opened: 580 tests, 580 passed, 0 failed, 0 skipped (exit 0). |
 | `npm run workflow:test`, run 4 | Passed on the final source, with the stricter thread ID checks and the tests of the closing: 586 tests, 586 passed, 0 failed, 0 skipped (exit 0). |
 | `npm run workflow:test`, run 5 | Passed with the existence check of a given thread ID reading one thread ID from the checkpoint table instead of listing every checkpoint: 587 tests, 587 passed, 0 failed, 0 skipped (exit 0). `checkpointed-thread.test.ts` finds a stored thread ID with and without regard to case on a real SQLite checkpointer. |
+| `npm run workflow:test`, run 6 | Passed with the lookup treating a checkpoint database without its table as holding no thread: 589 tests, 589 passed, 0 failed, 0 skipped (exit 0). Before the guard the two new tests failed with `no such table: checkpoints` (`checkpointed-thread.test.ts` on a database no saver operation touched; `compose-workflow.test.ts`: a start with a given ID on a fresh composed workflow ended in `Setup error: SqliteError: no such table: checkpoints`). |
 | `npm run openspec:validate` | Passed strict validation: 21 passed, 0 failed. |
 | SHA-256 of `bin/ChummerGenSR4.exe` | `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`; the executable was not built, launched or touched. |
 

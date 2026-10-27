@@ -21,3 +21,12 @@ test("the stored thread whose ID matches without regard to case is found, and no
     checkpointer.db.close();
   }
 });
+
+test("a checkpoint database that holds no checkpoint table yet holds no thread", () => {
+  const checkpointer = SqliteSaver.fromConnString(":memory:");
+  try {
+    equal(sqliteCheckpointedThread(checkpointer, "wf-new"), null);
+  } finally {
+    checkpointer.db.close();
+  }
+});
