@@ -4,10 +4,10 @@ import type { JobInput, JobStep } from "../../diagnosis/diagnosis-service.js";
 import { hypothesesOf, usesFixChanges } from "../../options/run-options.js";
 import type { DiagnosisSteps } from "../workflow-graph.js";
 import { WorkflowState, type ClusterTask, type WorkflowStateValue } from "../workflow-state.js";
+import { requireStore } from "./stage-support.js";
 
 /** The payload `Send` gives a diagnosis job node: a cluster task and the hypothesis it runs; a task stored with one hypothesis per cluster has none and runs the first. */
 type VariantTask = ClusterTask & { readonly variant?: number };
-import { requireStore } from "./stage-support.js";
 
 function jobInput(state: VariantTask, config: LangGraphRunnableConfig): JobInput {
   const cluster = state.clusters[state.clusterId];
