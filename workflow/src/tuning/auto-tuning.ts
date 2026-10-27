@@ -146,6 +146,8 @@ function removeAbandonedLock(lock: string, judged: LockOwner): boolean {
   // The lock was replaced by a live owner between the judgement and the move: put it back.
   try {
     linkSync(aside, lock);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
   } finally {
     rmSync(aside, { force: true });
   }
