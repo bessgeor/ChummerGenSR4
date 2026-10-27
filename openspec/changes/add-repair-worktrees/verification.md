@@ -88,6 +88,7 @@ That a real repair job edits its worktree, that the worktree builds with the can
 | `npm run workflow:test`, run 1 | Passed: 550 tests, 550 passed, 0 failed, 0 skipped (exit 0). |
 | `node --import tsx --test` on `git-integration`, `loop-graph`, `graph`, `suite` and `steps` tests, after the review fixes | Failed: 76 tests, 75 passed, 1 failed (exit 1). `not ok 51 - a fast-forward refused for a local edit of a merged file is a setup error, and once the edit is committed the resumed thread merges each fix once`: `Expected values to be strictly equal: + 'class frmCreate {\r\n  int restored;\r\n}\r\n// one\r\n// two\r\n// local edit\r\n' - 'class frmCreate {\n  int restored;\n}\n// one\n// two\n// local edit\n'` (`loop-graph.test.ts:394`). Cause: the fast-forward now writes the checkout with the machine's git settings (`core.autocrlf=true` here), and the test compared the bytes with LF line endings; it now compares the text with its line endings normalized and still requires a clean `git status`. |
 | `npm run workflow:test`, run 2 | Passed on the final source: 551 tests, 551 passed, 0 failed, 0 skipped (exit 0). |
+| `npm run workflow:test`, run 3 (after the merge of uncommitted source edits and of an already-held fix) | Passed on the final source: 553 tests, 553 passed, 0 failed, 0 skipped (exit 0). |
 | `npm run openspec:validate` | Passed strict validation: 21 passed, 0 failed. |
 | SHA-256 of `bin/ChummerGenSR4.exe` | `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`; the executable was not built, launched or touched. |
 
