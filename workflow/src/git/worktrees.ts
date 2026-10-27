@@ -36,19 +36,26 @@ export class Worktrees {
     this.git(["worktree", "add", "--quiet", "--force", "--detach", folder, start]);
   }
 
-  /** Removes the worktree at `folder` and its registration; nothing happens when there is none. Its branch stays. */
+  /**
+   * Removes the worktree at `folder` and its registration; nothing happens when there is none. Its branch stays. Fails when
+   * the registration is still there afterwards, with git's own error when git refused to remove the worktree.
+   */
   remove(folder: string): void {
-    const registered = this.list().some((item) => samePath(item.folder, folder));
-    if (registered) {
+    let refused: GitCommandError | null = null;
+    if (this.list().some((item) => samePath(item.folder, folder))) {
       try {
         this.git(["worktree", "remove", "--force", "--force", folder]);
       } catch (error) {
-        // A process a job left behind may still hold a file (Windows): the folder is removed below and the registration pruned.
         if (!(error instanceof GitCommandError)) throw error;
+        // A process a job left behind may still hold a file (Windows): the folder is removed below and the registration pruned.
+        refused = error;
       }
     }
     rmSync(folder, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     this.git(["worktree", "prune"]);
+    if (this.list().some((item) => samePath(item.folder, folder))) {
+      throw refused ?? new SetupError(`The worktree ${folder} is still registered after its removal.`);
+    }
   }
 
   /** The repository's worktrees with the branch each has checked out (null when detached) and its HEAD commit. */

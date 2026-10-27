@@ -257,3 +257,23 @@ test("an attempt commit applies only where the accepted commit still has what it
   notEqual(elsewhere, accepted);
   deepStrictEqual(staleFiles(run.worktrees, commit, elsewhere), []);
 });
+
+test("an attempt that adds a file where the accepted commit has a folder, or a file inside where it has a file, does not apply", async () => {
+  const run = await thread("wf-10");
+  const made = (name: string, edits: Readonly<Record<string, string>>) => {
+    const attempt = join(scratch(), "source");
+    run.worktrees.add(attempt, threadBranches.attempt("wf-10", name, 1), run.source);
+    for (const [path, text] of Object.entries(edits)) write(attempt, path, text);
+    const commit = run.worktrees.commitAll(attempt, `Repair attempt 1 of discrepancy ${name}\n`)!;
+    run.worktrees.remove(attempt);
+    return commit;
+  };
+  const asFile = made("d-2", { "Chummer/New.cs": "file" });
+  const asFolder = made("d-3", { "Chummer/New.cs/Nested.cs": "nested" });
+  deepStrictEqual(staleFiles(run.worktrees, asFile, run.source), []);
+  deepStrictEqual(staleFiles(run.worktrees, asFolder, run.source), []);
+  const fileFirst = committed(run.promotion("d-2", run.widened("d-2", run.source, { "Chummer/New.cs": "file" }), null));
+  deepStrictEqual(staleFiles(run.worktrees, asFolder, fileFirst), ["Chummer/New.cs/Nested.cs"]);
+  const folderFirst = committed({ ...run.promotion("d-3", run.widened("d-3", run.source, { "Chummer/New.cs/Nested.cs": "nested" }), null), branch: new AcceptedBranch(run.branchGit, "wf-10b") });
+  deepStrictEqual(staleFiles(run.worktrees, asFile, folderFirst), ["Chummer/New.cs"]);
+});

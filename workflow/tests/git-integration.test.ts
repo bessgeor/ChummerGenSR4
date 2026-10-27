@@ -3,7 +3,7 @@ import { execFileSync, execSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { processBranchGit, type BranchGit } from "../src/git/branch-git.js";
+import { GitCommandError, processBranchGit, type BranchGit } from "../src/git/branch-git.js";
 import { headBranch, integrate, type MergeItem } from "../src/git/integration.js";
 import { Worktrees } from "../src/git/worktrees.js";
 import { SetupError } from "../src/host/setup-error.js";
@@ -165,4 +165,23 @@ test("a worktree is found by its folder whether the folder is named by its long 
   repo.worktrees.remove(short);
   equal(existsSync(folder), false);
   equal(repo.worktrees.list().length, 1);
+});
+
+test("a worktree git refuses to remove and that stays registered is an error with git's message, and one whose folder could be deleted is not", () => {
+  const repo = repositoryOnMain();
+  const refusing: BranchGit = (args, options) => {
+    if (args[0] === "worktree" && args[1] === "remove") throw new GitCommandError("git worktree remove failed: refused", 128, "", "refused");
+    return repo.git(args, options);
+  };
+  const worktrees = new Worktrees(refusing, repo.root);
+  const free = join(scratch(), "free");
+  repo.worktrees.add(free, "workflow/wf-1/free", repo.start);
+  worktrees.remove(free);
+  equal(existsSync(free), false);
+  equal(repo.worktrees.list().length, 1);
+  const locked = join(scratch(), "locked");
+  repo.worktrees.add(locked, "workflow/wf-1/locked", repo.start);
+  repo.run("worktree", "lock", locked);
+  throws(() => worktrees.remove(locked), (error) => error instanceof GitCommandError && /refused/.test(error.message));
+  equal(repo.worktrees.list().some((item) => item.branch === "workflow/wf-1/locked"), true);
 });

@@ -109,11 +109,24 @@ function acceptedCommit(accepted: AcceptedState): string {
 
 /**
  * The files an attempt commit changes whose blob in the accepted commit is not the one they had in the attempt commit's
- * parent (an added file must be absent there): the attempt cannot be applied while any is listed.
+ * parent (an added file must be absent there), and the files it adds whose path the accepted commit uses as a folder, or
+ * has a file inside: the attempt cannot be applied while any is listed.
  */
 export function staleFiles(worktrees: Worktrees, attemptCommit: string, accepted: string): string[] {
-  return worktrees.changes(worktrees.parent(attemptCommit), attemptCommit)
-    .filter((change) => worktrees.blob(accepted, change.path) !== change.before).map((change) => change.path);
+  const changes = worktrees.changes(worktrees.parent(attemptCommit), attemptCommit);
+  const stale = new Set(changes.filter((change) => worktrees.blob(accepted, change.path) !== change.before).map((change) => change.path));
+  const added = changes.filter((change) => change.before === null && change.after !== null);
+  if (added.length > 0) {
+    const deleted = new Set(changes.filter((change) => change.after === null).map((change) => change.path));
+    const kept = [...worktrees.blobs(accepted).keys()].filter((path) => !deleted.has(path));
+    const keptFiles = new Set(kept);
+    for (const { path } of added) {
+      const parts = path.split("/");
+      const insideFile = parts.slice(1).some((_, index) => keptFiles.has(parts.slice(0, index + 1).join("/")));
+      if (insideFile || kept.some((other) => other.startsWith(`${path}/`))) stale.add(path);
+    }
+  }
+  return [...stale].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
 }
 
 function readAttempt(archive: string) {
@@ -221,7 +234,7 @@ export class WideningService {
     rmSync(widening.folder, { recursive: true, force: true });
     const conflicts = staleFiles(worktrees, attempt.commit, start);
     if (conflicts.length > 0) {
-      return this.failed(widening, "apply", `the patch does not apply to the accepted source: ${conflicts.join(", ")} changed since the patch was made`, false);
+      return this.failed(widening, "apply", `the patch does not apply to the accepted source: ${conflicts.join(", ")} differ in the accepted source from what the patch was made on`, false);
     }
     worktrees.add(source, threadBranches.widening(input.threadId, widening.clusterId, widening.attempt), start);
     this.dependencies.git(["cherry-pick", "--no-commit", attempt.commit], { worktree: source });
