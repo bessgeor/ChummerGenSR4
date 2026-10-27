@@ -4,7 +4,7 @@ Each task names the tasks it builds on as `(after: …)`, by number in this list
 
 ## 1. Several hypotheses
 
-- [ ] 1.1 (after: add-repair-worktrees#2.1) Add `diagnosis.hypotheses`, the variants of a cluster's diagnosis, their challenges, the check over every variant and the labels per variant. Evidence: diagnosis graph tests for two variants with one confirmed and one refuted, an abstaining variant, a resumed thread and a thread stored with one hypothesis.
+- [x] 1.1 (after: add-repair-worktrees#2.1) Add `diagnosis.hypotheses`, the variants of a cluster's diagnosis, their challenges, the check over every variant and the labels per variant. Evidence: diagnosis graph tests for two variants with one confirmed and one refuted, an abstaining variant, a resumed thread and a thread stored with one hypothesis.
 
 ## 2. Parallel tries
 
