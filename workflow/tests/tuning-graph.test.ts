@@ -1,8 +1,6 @@
 import { deepStrictEqual, equal, ok, rejects } from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { hostname } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { test } from "node:test";
 import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
 import { DatasetSchema, freezeDataset, type Dataset } from "../src/evals/dataset.js";
@@ -12,7 +10,7 @@ import { SetupError } from "../src/host/setup-error.js";
 import { workflowPaths } from "../src/paths.js";
 import { readDocument } from "../src/steps/read-document.js";
 import { readActiveFile } from "../src/tuning/active-configuration.js";
-import { autoTuningPath, newHypothesisRecords, readAutoTuning, reclaimLock, recordAutoTuning, resolveAutoTuning, startAutoTuning, withAutoTuningRun } from "../src/tuning/auto-tuning.js";
+import { autoTuningPath, newHypothesisRecords, readAutoTuning, recordAutoTuning, resolveAutoTuning, startAutoTuning, withAutoTuningRun } from "../src/tuning/auto-tuning.js";
 import { readCycle } from "../src/tuning/cycle.js";
 import { readLedger } from "../src/tuning/holdout.js";
 import type { TuningSteps } from "../src/tuning/tuning-graph.js";
@@ -21,6 +19,7 @@ import { autoCycleId } from "../src/tuning/tuning-steps.js";
 import { tuningId } from "../src/tuning/tuning.js";
 import { FakeAgents, hypothesisAnswer, type JobCall, type Reply } from "./diagnosis-harness.js";
 import { scratch } from "./diagnosis-fixtures.js";
+import { holdLocks } from "./lock-holder.js";
 import { evalContext, record } from "./eval-fixtures.js";
 import { twoThreads } from "./eval-threads.js";
 import { tuning } from "./tuning-fixtures.js";
@@ -293,61 +292,30 @@ test("a tuning continued after the profile changed keeps the settings it started
   equal(existsSync(join(context.paths.evalsFolder, "datasets", "auto-other")), false);
 });
 
-test("a tune auto after a killed one removes the locks the dead process left and continues the tuning", async () => {
+test("a tune auto after a killed one continues the tuning: the locks end with the process that held them", async () => {
   const { context, stopped, path } = await stoppedTuning((call) => call.prompt.includes("+tuned-") && call.prompt.includes(testCluster));
-  const dead = spawnSync(process.execPath, ["-e", ""]).pid!;
-  const owner = `${JSON.stringify({ host: hostname(), processId: dead })}\n`;
   const state = autoTuningPath(context.paths.evalsFolder);
-  writeFileSync(`${state}.run.lock`, owner);
-  writeFileSync(`${state}.lock`, owner);
+  // A process that holds both locks is killed while it holds them, as a crashed tune auto would be.
+  const holder = await holdLocks(`${state}.run.lock`, `${state}.lock`);
+  await rejects(runEvalCommand(["tune", "auto"], context), (error: Error) => error instanceof SetupError && error.message.includes("Another tune auto runs an automatic tuning"));
+  await holder.kill();
   const { status } = await resume(context, path);
   equal(status, 0, context.lines.join("\n"));
   equal(finishedTuning(context.paths.evalsFolder).entry.tuningId, stopped.tuningId);
-  deepStrictEqual(readdirSync(dirname(state)).filter((name) => name.includes(".lock") || name.endsWith(".abandoned")), []);
 });
 
-test("a lock names its owner from the moment it exists, and no file of its creation stays", async () => {
+test("an auto.json lock is held by one process at a time, also against the same process, and is free again after its release", async () => {
   const folder = scratch("workflow-auto-lock-");
   const lock = `${autoTuningPath(folder)}.run.lock`;
-  const seen = await withAutoTuningRun(folder, async () => ({ owner: JSON.parse(readFileSync(lock, "utf8")) as unknown, files: readdirSync(dirname(lock)) }));
-  deepStrictEqual(seen, { owner: { host: hostname(), processId: process.pid }, files: ["auto.json.run.lock"] });
-  deepStrictEqual(readdirSync(dirname(lock)), []);
+  await withAutoTuningRun(folder, async () => {
+    await rejects(withAutoTuningRun(folder, async () => undefined), (error: Error) => error instanceof SetupError && error.message.includes(lock));
+  });
+  equal(await withAutoTuningRun(folder, async () => "again"), "again");
+  const holder = await holdLocks(lock);
+  await rejects(withAutoTuningRun(folder, async () => undefined), (error: Error) => error instanceof SetupError && error.message.includes(lock));
+  await holder.kill();
+  equal(await withAutoTuningRun(folder, async () => "after the kill"), "after the kill");
 });
-
-test("a lock taken over from a dead owner is not removed once a live owner holds it", async () => {
-  const folder = scratch("workflow-auto-lock-");
-  const lock = `${autoTuningPath(folder)}.run.lock`;
-  const dead = { host: hostname(), processId: spawnSync(process.execPath, ["-e", ""]).pid! };
-  const live = { host: hostname(), processId: process.pid };
-  mkdirSync(dirname(lock), { recursive: true });
-  // Another process took the lock over after this one judged its owner dead: the takeover finds the new owner and leaves it.
-  writeFileSync(lock, `${JSON.stringify(live)}\n`);
-  equal(reclaimLock(lock, dead), true);
-  deepStrictEqual(JSON.parse(readFileSync(lock, "utf8")), live);
-  deepStrictEqual(readdirSync(dirname(lock)), ["auto.json.run.lock"]);
-  // The owner it judged is still there: removed.
-  writeFileSync(lock, `${JSON.stringify(dead)}\n`);
-  equal(reclaimLock(lock, dead), true);
-  deepStrictEqual(readdirSync(dirname(lock)), []);
-});
-
-test("a takeover guard left by a dead process is dropped, and one held by a running process is waited out, not broken", async () => {
-  const folder = scratch("workflow-auto-lock-");
-  const lock = `${autoTuningPath(folder)}.run.lock`;
-  const dead = { host: hostname(), processId: spawnSync(process.execPath, ["-e", ""]).pid! };
-  mkdirSync(dirname(lock), { recursive: true });
-  writeFileSync(lock, `${JSON.stringify(dead)}\n`);
-  writeFileSync(`${lock}.takeover`, `${JSON.stringify(dead)}\n`);
-  deepStrictEqual(await withAutoTuningRun(folder, async () => JSON.parse(readFileSync(lock, "utf8")) as unknown), { host: hostname(), processId: process.pid });
-  deepStrictEqual(readdirSync(dirname(lock)), []);
-
-  writeFileSync(lock, `${JSON.stringify(dead)}\n`);
-  writeFileSync(`${lock}.takeover`, `${JSON.stringify({ host: hostname(), processId: process.pid })}\n`);
-  await rejects(withAutoTuningRun(folder, async () => undefined), (error: Error) => error instanceof SetupError && error.message.includes("could not be taken over"));
-  deepStrictEqual(JSON.parse(readFileSync(lock, "utf8")), dead);
-  deepStrictEqual(readdirSync(dirname(lock)).sort(), ["auto.json.run.lock", "auto.json.run.lock.takeover"]);
-});
-
 test("an auto.json recorded before tunings kept their settings is read, and its tuning in progress continues with the profile's settings, which it then keeps", async () => {
   const { context, records } = await dueTuning(agents([proposal("Cite the capture.")], "test", { "Cite the capture.": "all" }));
   const tuning = recordedTuning(context, records);
@@ -359,15 +327,6 @@ test("an auto.json recorded before tunings kept their settings is read, and its 
   equal(await runEvalCommand(["tune", "auto"], context), 0, context.lines.join("\n"));
   const { entry } = finishedTuning(context.paths.evalsFolder);
   deepStrictEqual([entry.tuningId, entry.settings, entry.outcome], [tuning.tuningId, context.autoTuning(), "activated"]);
-});
-
-test("a tune auto does not remove the lock of a process that still runs", async () => {
-  const { context } = await dueTuning(agents([], "test", {}));
-  const lock = `${autoTuningPath(context.paths.evalsFolder)}.run.lock`;
-  mkdirSync(join(context.paths.evalsFolder, "tuning"), { recursive: true });
-  writeFileSync(lock, `${JSON.stringify({ host: hostname(), processId: process.pid })}\n`);
-  await rejects(runEvalCommand(["tune", "auto"], context), (error: Error) => error instanceof SetupError && error.message.includes(`held by process ${process.pid}`));
-  equal(existsSync(lock), true);
 });
 
 test("a run whose samples are all written but whose summary is not is finished when its tuning continues", async () => {
@@ -388,11 +347,13 @@ test("a run whose samples are all written but whose summary is not is finished w
 
 test("a tune auto while another runs a tuning is a setup error that counts nothing", async () => {
   const { context } = await dueTuning(agents([], "test", {}));
-  const lock = `${autoTuningPath(context.paths.evalsFolder)}.run.lock`;
-  mkdirSync(join(context.paths.evalsFolder, "tuning"), { recursive: true });
-  writeFileSync(lock, "1\n");
-  await rejects(runEvalCommand(["tune", "auto"], context), (error: Error) => error instanceof SetupError && error.message.includes("Another tune auto runs an automatic tuning"));
-  deepStrictEqual([existsSync(autoTuningPath(context.paths.evalsFolder)), existsSync(lock)], [false, true]);
+  const holder = await holdLocks(`${autoTuningPath(context.paths.evalsFolder)}.run.lock`);
+  try {
+    await rejects(runEvalCommand(["tune", "auto"], context), (error: Error) => error instanceof SetupError && error.message.includes("Another tune auto runs an automatic tuning"));
+  } finally {
+    await holder.kill();
+  }
+  equal(existsSync(autoTuningPath(context.paths.evalsFolder)), false);
 });
 
 test("the tuning graph compiles from steps that do nothing until a node runs", async () => {

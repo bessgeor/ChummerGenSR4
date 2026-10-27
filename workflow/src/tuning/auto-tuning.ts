@@ -1,13 +1,12 @@
 import type { BaseStore } from "@langchain/langgraph-checkpoint";
+import Database from "better-sqlite3";
 import { randomBytes } from "node:crypto";
-import { existsSync, linkSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { hostname } from "node:os";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { readRecord, recordNamespace } from "../evals/eval-record.js";
 import { datasetNamePattern } from "../evals/dataset.js";
 import { isGradable } from "../evals/hindsight.js";
-import { isProcessRunning } from "../host/desktop-lane.js";
 import { SetupError } from "../host/setup-error.js";
 import type { Profile } from "../options/profile.js";
 import { readDocument } from "../steps/read-document.js";
@@ -117,88 +116,28 @@ export async function checkAutoTuning(dependencies: AutoTuningDependencies, sett
   return { kind: "due", records, every: settings.every, forced: force, settings };
 }
 
-const LockOwnerSchema = z.strictObject({ host: z.string(), processId: z.number().int() });
-export type LockOwner = z.infer<typeof LockOwnerSchema>;
-
-/** The owner a lock file names; "gone" when the file does not exist, null when it holds anything else. */
-function readLockOwner(lock: string): LockOwner | "gone" | null {
-  let text: string;
-  try {
-    text = readFileSync(lock, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return "gone";
-    throw error;
-  }
-  try {
-    return LockOwnerSchema.parse(JSON.parse(text));
-  } catch {
-    return null;
-  }
-}
-
 /**
- * Creates `path` holding this process as owner, or reports that it exists. The owner is written to a file of its own that
- * is then linked to `path`, so the file never exists empty: a process killed meanwhile leaves no lock without an owner.
- */
-function createOwnerFile(path: string): boolean {
-  const own = `${path}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
-  writeFileSync(own, `${JSON.stringify({ host: hostname(), processId: process.pid } satisfies LockOwner)}\n`, { flag: "wx" });
-  try {
-    linkSync(own, path);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
-    throw error;
-  } finally {
-    rmSync(own, { force: true });
-  }
-}
-
-function abandoned(owner: LockOwner | "gone" | null): boolean {
-  return owner !== null && owner !== "gone" && owner.host === hostname() && !isProcessRunning(owner.processId);
-}
-
-function pause(milliseconds: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
-}
-
-/**
- * Removes the lock of an owner that was killed, if it still names that owner. Only the process that holds the takeover
- * guard removes a lock it does not own, and a lock is created only where none exists, so under the guard the lock read is the
- * lock removed: a lock another process created meanwhile is never taken. A guard left by a killed process is dropped the
- * same way a lock is; the guard is held for a read and a removal only. Returns whether the guard was held.
- */
-export function reclaimLock(lock: string, judged: LockOwner): boolean {
-  const guard = `${lock}.takeover`;
-  if (!createOwnerFile(guard)) {
-    if (abandoned(readLockOwner(guard))) rmSync(guard, { force: true });
-    return false;
-  }
-  try {
-    const current = readLockOwner(lock);
-    if (current !== "gone" && current !== null && current.host === judged.host && current.processId === judged.processId) rmSync(lock, { force: true });
-  } finally {
-    rmSync(guard, { force: true });
-  }
-  return true;
-}
-
-/**
- * Creates an exclusive lock file naming this process and returns its release. A lock left by a killed process of this
- * machine is removed; any other holder is a setup error, never waited for.
+ * Takes an exclusive lock on a lock database and returns its release. The lock is held by the operating system on an
+ * open transaction, so it ends with the process that holds it, killed or not, and no file is left to judge abandoned.
+ * Another holder is a setup error, never waited for.
  */
 function acquireLock(lock: string, held: string): () => void {
   mkdirSync(dirname(lock), { recursive: true });
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (createOwnerFile(lock)) return () => rmSync(lock, { force: true });
-    const owner = readLockOwner(lock);
-    if (owner === "gone") continue;
-    if (owner === null || !abandoned(owner)) {
-      throw new SetupError(`${held}: its lock file ${lock} exists${owner === null ? "" : `, held by process ${owner.processId} on ${owner.host}`}. Remove the file if no tune auto runs.`);
-    }
-    if (!reclaimLock(lock, owner)) pause(20);
+  const database = new Database(lock, { timeout: 0 });
+  try {
+    database.exec("BEGIN EXCLUSIVE");
+  } catch (error) {
+    database.close();
+    if ((error as { code?: string }).code === "SQLITE_BUSY") throw new SetupError(`${held}: another process holds ${lock}.`);
+    throw error;
   }
-  throw new SetupError(`${held}: its lock file ${lock} could not be taken over.`);
+  return () => {
+    try {
+      database.exec("ROLLBACK");
+    } finally {
+      database.close();
+    }
+  };
 }
 /** Runs `action` holding the exclusive lock file of `auto.json`. */
 function withAutoTuningLock<T>(evalsFolder: string, action: () => T): T {

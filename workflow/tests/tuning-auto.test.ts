@@ -11,6 +11,7 @@ import { loadProfile } from "../src/options/profile.js";
 import { autoTuningPath, checkAutoTuning, finishAutoTuning, newHypothesisRecords, newTuningId, readAutoTuning, resolveAutoTuning, startAutoTuning, type AutoTuningState } from "../src/tuning/auto-tuning.js";
 import { writeDocument } from "../src/steps/write-document.js";
 import { scratch } from "./diagnosis-fixtures.js";
+import { holdLocks } from "./lock-holder.js";
 import { evalContext, record } from "./eval-fixtures.js";
 
 /** An evaluation context with `count` succeeded workflow hypothesis records, and records that never count. */
@@ -77,7 +78,8 @@ test("a due tuning is recorded as in progress with the records it counts, in a f
   ok(/^tune-20261002T090000Z-[0-9a-f]{8}$/.test(tuning.tuningId), tuning.tuningId);
   deepStrictEqual([tuning.startedUtc, tuning.forced, tuning.records, tuning.dataset, tuning.cycle, tuning.outcome], ["2026-10-02T09:00:00.000Z", false, trigger.records, null, null, null]);
   deepStrictEqual(readAutoTuning(context.paths.evalsFolder), { schemaVersion: 1, counted: trigger.records, tunings: [], current: tuning });
-  deepStrictEqual(readdirSync(dirname(autoTuningPath(context.paths.evalsFolder))), ["auto.json"]);
+  // Besides the state, only the lock database, which holds no lock any more.
+  deepStrictEqual(readdirSync(dirname(autoTuningPath(context.paths.evalsFolder))), ["auto.json", "auto.json.lock"]);
   // A second start while one is in progress is refused, and nothing changes.
   throws(() => startAutoTuning(dependencies(context), trigger), /is in progress/);
   deepStrictEqual(readAutoTuning(context.paths.evalsFolder).counted, trigger.records);
@@ -113,23 +115,23 @@ test("every hypothesis record is counted from one search, whatever the store's p
   deepStrictEqual(await newHypothesisRecords(sqlite, new Set(ids.slice(0, 5))), ids.slice(5));
 });
 
-test("of two overlapping starts one records its tuning and the other is refused, whatever the lock file shows", async () => {
+test("of two overlapping starts one records its tuning and the other is refused, whatever process holds the lock", async () => {
   const context = await withRecords(13);
   const first = await checkAutoTuning(dependencies(context), resolveAutoTuning(undefined), false);
   if (first.kind !== "due") throw new Error("expected due");
   const path = autoTuningPath(context.paths.evalsFolder);
 
-  // Another process holds the lock: nothing is written and the lock stays.
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(`${path}.lock`, "1\n");
-  throws(() => startAutoTuning(dependencies(context), first), (error: Error) => error instanceof SetupError && error.message.includes("auto.json.lock"));
-  equal(existsSync(path), false);
-  equal(existsSync(`${path}.lock`), true);
-  rmSync(`${path}.lock`);
+  // Another process holds the lock: nothing is written. Once it ends, even killed, the lock is free.
+  const holder = await holdLocks(`${path}.lock`);
+  try {
+    throws(() => startAutoTuning(dependencies(context), first), (error: Error) => error instanceof SetupError && error.message.includes("auto.json.lock"));
+    equal(existsSync(path), false);
+  } finally {
+    await holder.kill();
+  }
 
   // The lock is released after a start, and a second start from the same trigger is refused: its records are counted.
   const tuning = startAutoTuning(dependencies(context), first);
-  equal(existsSync(`${path}.lock`), false);
   throws(() => startAutoTuning(dependencies(context), first), (error: Error) => error instanceof SetupError && error.message.includes(tuning.tuningId));
   deepStrictEqual(readAutoTuning(context.paths.evalsFolder).current, tuning);
 
