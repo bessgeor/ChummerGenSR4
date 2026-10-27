@@ -1,0 +1,201 @@
+{
+  "schemaVersion": 1,
+  "startupDelaySeconds": 3,
+  "settleMilliseconds": 300,
+  "entries": [
+    {
+      "case": "build-facemage_Sam@skillcontrol-ef9d2872",
+      "fixtureCase": "build-facemage_Sam",
+      "mode": "build",
+      "scenario": "skillcontrol-ef9d2872",
+      "fixture": "../fixtures/characters/facemage_Sam.chum",
+      "actions": [
+        {
+          "type": "selectTab",
+          "name": "Skills"
+        },
+        {
+          "type": "waitFor",
+          "label": "Free Knowledge Skill Points Remaining:"
+        },
+        {
+          "type": "wait",
+          "milliseconds": 1500
+        },
+        {
+          "type": "capture",
+          "name": "skills-controls"
+        }
+      ],
+      "actionsSha256": "de38d96bd64e83732b7ed70a0e91ecccabd3803f42d4145606d654e5435bc191",
+      "target": "SkillControl/-",
+      "sourceSha256": "5db47d9d1cde8c704efcb644c14bef01280dc4f79a2fa0c3d61304ccbce24a6a",
+      "proofs": {
+        "controls": [
+          "SkillControl.nudSkill",
+          "SkillControl.cboSpec",
+          "SkillControl.cmdDelete",
+          "SkillControl.lblModifiedRating",
+          "SkillControl.cboKnowledgeSkillCategory",
+          "SkillControl.cboSkillName",
+          "SkillControl.lblSkillName",
+          "SkillControl.lblAttribute",
+          "SkillGroupControl.nudSkill",
+          "SkillGroupControl.txtGroupName",
+          "frmCreate.tabSkills",
+          "frmCreate.panSkillGroups",
+          "frmCreate.lblSkillGroups",
+          "frmCreate.lblKnowledgeSkillPoints",
+          "frmCreate.lblKnowledgeSkillPointsTitle",
+          "frmCreate.cmdAddKnowledgeSkill",
+          "frmCreate.panKnowledgeSkills",
+          "frmCreate.lblKnowledgeSkills",
+          "frmCreate.lblActiveSkills",
+          "frmCreate.cmdAddExoticSkill",
+          "frmCreate.splitSkills",
+          "frmCreate.cboSkillFilter",
+          "frmCreate.panActiveSkills"
+        ],
+        "interactions": []
+      },
+      "visual": {
+        "outcome": "clear",
+        "differing": []
+      },
+      "provenance": {
+        "thread": "disc-wf-20261027T123423Z-fe2aa4f4",
+        "runId": "20261027T124120Z-c196aaa4",
+        "records": [
+          "disc-wf-20261027T123423Z-fe2aa4f4/rank/1",
+          "disc-wf-20261027T123423Z-fe2aa4f4/SkillControl/-/scenario/1"
+        ]
+      },
+      "admittedUtc": "2026-10-27T12:48:53.323Z"
+    },
+    {
+      "case": "career-facemage_Sam_career@frmcareer-tabcharactertabs-selection-455ce0c2",
+      "fixtureCase": "career-facemage_Sam_career",
+      "mode": "career",
+      "scenario": "frmcareer-tabcharactertabs-selection-455ce0c2",
+      "fixture": "../fixtures/characters/facemage_Sam_career.chum",
+      "actions": [
+        {
+          "type": "capture",
+          "name": "common"
+        },
+        {
+          "type": "selectTab",
+          "name": "Skills"
+        },
+        {
+          "type": "waitFor",
+          "label": "Active Skills"
+        },
+        {
+          "type": "capture",
+          "name": "skills"
+        },
+        {
+          "type": "selectTab",
+          "name": "Character Info"
+        },
+        {
+          "type": "waitFor",
+          "label": "Description:"
+        },
+        {
+          "type": "capture",
+          "name": "character-info"
+        }
+      ],
+      "actionsSha256": "a95896590340c516be06288d7ec6a5ffd64321d3de956d6d267b06090f40a497",
+      "target": "frmCareer.tabCharacterTabs#selection",
+      "sourceSha256": "5db47d9d1cde8c704efcb644c14bef01280dc4f79a2fa0c3d61304ccbce24a6a",
+      "proofs": {
+        "controls": [
+          "SkillControl.cboSpec",
+          "SkillControl.cmdDelete",
+          "SkillControl.lblModifiedRating",
+          "SkillControl.cboKnowledgeSkillCategory",
+          "SkillControl.cboSkillName",
+          "SkillControl.lblSkillName",
+          "SkillControl.lblAttribute",
+          "SkillControl.cmdImproveSkill",
+          "SkillControl.lblSkillRating",
+          "SkillControl.cmdChangeSpec",
+          "SkillGroupControl.txtGroupName",
+          "SkillGroupControl.cmdImproveSkill",
+          "SkillGroupControl.lblGroupRating",
+          "frmCareer.tabSkills",
+          "frmCareer.panSkillGroups",
+          "frmCareer.lblSkillGroups",
+          "frmCareer.cmdAddKnowledgeSkill",
+          "frmCareer.panKnowledgeSkills",
+          "frmCareer.lblKnowledgeSkills",
+          "frmCareer.lblActiveSkills",
+          "frmCareer.tabCharacterInfo",
+          "frmCareer.txtConcept",
+          "frmCareer.lblConcept",
+          "frmCareer.txtBackground",
+          "frmCareer.lblBackground",
+          "frmCareer.txtDescription",
+          "frmCareer.lblDescription",
+          "frmCareer.txtSkin",
+          "frmCareer.lblSkin",
+          "frmCareer.txtWeight",
+          "frmCareer.lblWeight",
+          "frmCareer.txtHeight",
+          "frmCareer.lblHeight",
+          "frmCareer.txtHair",
+          "frmCareer.lblHair",
+          "frmCareer.txtEyes",
+          "frmCareer.lblEyes",
+          "frmCareer.txtAge",
+          "frmCareer.lblAge",
+          "frmCareer.txtSex",
+          "frmCareer.lblSex",
+          "frmCareer.lblMugshot",
+          "frmCareer.picMugshot",
+          "frmCareer.cmdDeleteMugshot",
+          "frmCareer.cmdAddMugshot",
+          "frmCareer.txtNotes",
+          "frmCareer.lblNotes",
+          "frmCareer.cmdAddExoticSkill",
+          "frmCareer.txtPlayerName",
+          "frmCareer.lblPlayerName",
+          "frmCareer.nudPublicAware",
+          "frmCareer.lblPublicAware",
+          "frmCareer.nudNotoriety",
+          "frmCareer.lblNotoriety",
+          "frmCareer.nudStreetCred",
+          "frmCareer.lblStreetCred",
+          "frmCareer.splitSkills",
+          "frmCareer.panActiveSkills",
+          "frmCareer.cboSkillFilter",
+          "frmCareer.lblCharacterName",
+          "frmCareer.txtCharacterName",
+          "frmCareer.lblPublicAwareTotal",
+          "frmCareer.lblNotorietyTotal",
+          "frmCareer.lblStreetCredTotal",
+          "frmCareer.cmdBurnStreetCred"
+        ],
+        "interactions": [
+          "frmCareer.tabCharacterTabs.SelectedIndexChanged"
+        ]
+      },
+      "visual": {
+        "outcome": "clear",
+        "differing": []
+      },
+      "provenance": {
+        "thread": "disc-wf-20261027T123423Z-fe2aa4f4",
+        "runId": "20261027T124120Z-c196aaa4",
+        "records": [
+          "disc-wf-20261027T123423Z-fe2aa4f4/rank/1",
+          "disc-wf-20261027T123423Z-fe2aa4f4/frmCareer.tabCharacterTabs#selection/scenario/1"
+        ]
+      },
+      "admittedUtc": "2026-10-27T12:48:53.323Z"
+    }
+  ]
+}
