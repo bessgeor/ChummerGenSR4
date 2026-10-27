@@ -87,26 +87,28 @@ function thresholds(options: CycleOptions) {
   return { metric: options.metric, minPass: options.minPass, maxMeanCostUsd: options.maxMeanCostUsd };
 }
 
-/** Starts a cycle: records its options and the active configuration, then runs it. */
-export async function startCycle(dependencies: CycleDependencies, cycleId: string, options: Omit<CycleOptions, "metric"> & { metric: Metric | null }): Promise<Cycle> {
-  const jobKind = datasetJobKind(options.dataset);
-  const metric = options.metric ?? metricsOfJobKind[jobKind][0];
+/** A cycle's options as a command gives them: without a metric, the job kind's first. */
+export type CycleRequest = Omit<CycleOptions, "metric"> & { metric: Metric | null };
+
+/** The options of a new cycle, with the metric resolved and checked against the dataset's job kind. */
+export function cycleOptions(request: CycleRequest): CycleOptions {
+  const jobKind = datasetJobKind(request.dataset);
+  const metric = request.metric ?? metricsOfJobKind[jobKind][0];
   requireMetric(jobKind, metric);
+  return { ...request, metric };
+}
+
+/** Records a new cycle with its options and the active configuration; a cycle already recorded under the ID is kept as it is. */
+export function ensureCycle(dependencies: CycleDependencies, cycleId: string, options: CycleOptions): Cycle {
+  if (existsSync(cyclePath(dependencies.evalsFolder, cycleId))) return readCycle(dependencies.evalsFolder, cycleId);
+  const jobKind = datasetJobKind(options.dataset);
   const cycle = save(dependencies.evalsFolder, {
-    schemaVersion: 1, cycleId, options: { ...options, metric }, jobKind, active: activeOf(dependencies.tuningFolder, jobKind),
+    schemaVersion: 1, cycleId, options, jobKind, active: activeOf(dependencies.tuningFolder, jobKind),
     startedUtc: dependencies.run.now().toISOString(), baseline: null, proposals: [], selected: null, holdout: null, testBaseline: null, activation: null,
     outcome: "running", reasons: [], finishedUtc: null,
   });
-  dependencies.run.log(`Tuning cycle ${cycleId}: ${jobKind} on ${options.dataset}, metric ${metric}, up to ${options.candidates} candidates; active: ${cycle.active}.`);
-  return continueCycle(dependencies, cycle);
-}
-
-/** Continues a stopped cycle with its stored options; finished steps are not repeated. */
-export async function resumeCycle(dependencies: CycleDependencies, cycleId: string): Promise<Cycle> {
-  const cycle = readCycle(dependencies.evalsFolder, cycleId);
-  if (cycle.outcome !== "running") return cycle;
-  dependencies.run.log(`Tuning cycle ${cycleId}: resumed.`);
-  return continueCycle(dependencies, cycle);
+  dependencies.run.log(`Tuning cycle ${cycleId}: ${jobKind} on ${options.dataset}, metric ${options.metric}, up to ${options.candidates} candidates; active: ${cycle.active}.`);
+  return cycle;
 }
 
 /**
@@ -116,7 +118,8 @@ export async function resumeCycle(dependencies: CycleDependencies, cycleId: stri
 async function ensureRun(dependencies: CycleDependencies, runId: string, start: () => Parameters<typeof startEvalRun>[1]): Promise<void> {
   const folder = join(dependencies.run.runsFolder, runId);
   if (existsSync(runFolders(folder).settings)) {
-    if (!runState(folder).complete) await resumeEvalRun(dependencies.run, runId);
+    // A run whose samples are all written but whose summary is not was stopped before it ended; resuming writes the summary.
+    if (!runState(folder).complete || !existsSync(runFolders(folder).summary)) await resumeEvalRun(dependencies.run, runId);
     return;
   }
   await startEvalRun({ ...dependencies.run, newRunId: () => runId }, start());
@@ -127,74 +130,117 @@ function finish(dependencies: CycleDependencies, cycle: Cycle, outcome: Cycle["o
   return save(dependencies.evalsFolder, { ...cycle, outcome, reasons, finishedUtc: dependencies.run.now().toISOString() });
 }
 
-async function continueCycle(dependencies: CycleDependencies, start: Cycle): Promise<Cycle> {
-  let cycle = start;
-  const { options, jobKind } = cycle;
-  const active = activeTuning(dependencies.tuningFolder, jobKind);
-  // A cycle stopped after its activation was written, before it was recorded, finds the activation by its holdout run, also
-  // when it has been rolled back or replaced since: it is never activated a second time.
-  const file = readActiveFile(dependencies.tuningFolder, jobKind);
+/**
+ * Before a stopped cycle continues: a cycle stopped after its activation was written, before it was recorded, finds the
+ * activation by its holdout run, also when it has been rolled back or replaced since, and is finished `activated`: it is
+ * never activated a second time. A cycle that is not running, or not stopped so, is returned as it is.
+ */
+export function recoverCycle(dependencies: CycleDependencies, cycleId: string): Cycle {
+  const cycle = readCycle(dependencies.evalsFolder, cycleId);
+  if (cycle.outcome !== "running") return cycle;
+  const file = readActiveFile(dependencies.tuningFolder, cycle.jobKind);
   const activatedRun = cycle.holdout?.run;
   const activatedBy = (entry: { readonly evidence: { readonly test: { readonly candidate: string } } | null }) => entry.evidence?.test.candidate === activatedRun;
-  if (file !== null && activatedRun !== undefined && [file.active, ...file.history, ...file.rolledBack].some(activatedBy)) {
-    if (activatedBy(file.active)) {
-      activate(folders(dependencies), { run: activatedRun, baseline: cycle.testBaseline!, thresholds: thresholds(options) }, dependencies.run.now());
-      return finish(dependencies, cycle, "activated", []);
-    }
-    return finish(dependencies, cycle, "activated", [file.rolledBack.some(activatedBy) ? "it has been rolled back since" : "it has been replaced since"]);
+  if (file === null || activatedRun === undefined || ![file.active, ...file.history, ...file.rolledBack].some(activatedBy)) return cycle;
+  if (activatedBy(file.active)) {
+    activate(folders(dependencies), { run: activatedRun, baseline: cycle.testBaseline!, thresholds: thresholds(cycle.options) }, dependencies.run.now());
+    return finish(dependencies, cycle, "activated", []);
   }
+  return finish(dependencies, cycle, "activated", [file.rolledBack.some(activatedBy) ? "it has been rolled back since" : "it has been replaced since"]);
+}
+
+/**
+ * Reads a cycle before one of its steps. A finished cycle is returned as it is; a running one needs the active
+ * configuration it started with.
+ */
+function openCycle(dependencies: CycleDependencies, cycleId: string): Cycle {
+  const cycle = readCycle(dependencies.evalsFolder, cycleId);
+  if (cycle.outcome !== "running") return cycle;
+  const { jobKind } = cycle;
   const activeNow = activeOf(dependencies.tuningFolder, jobKind);
   if (activeNow !== cycle.active) throw new SetupError(`The active ${jobKind} configuration changed from ${cycle.active} to ${activeNow} during tuning cycle ${cycle.cycleId}.`);
-  const runs = dependencies.run.runsFolder;
-  // Every run after the baseline uses the agent choice, pool and executables the baseline ran with.
-  const settings = () => (cycle.baseline !== null && existsSync(runFolders(join(runs, cycle.baseline)).settings)
-    ? agentSettingsOf(runState(join(runs, cycle.baseline)).settings) : dependencies.tune.settings);
-  const runStart = (partition: "development" | "test", tuning: Tuning | null, name: string, on?: ReturnType<typeof onExposureOf>) => () => ({
-    datasetFolder: on?.datasetFolder ?? options.dataset, partition, repeat: on?.repeat ?? options.repeat, name, settings: on?.settings ?? settings(), tuning,
+  return cycle;
+}
+
+/** Every run after the baseline uses the agent choice, pool and executables the baseline ran with. */
+function runSettings(dependencies: CycleDependencies, cycle: Cycle) {
+  const baseline = cycle.baseline === null ? null : join(dependencies.run.runsFolder, cycle.baseline);
+  return baseline !== null && existsSync(runFolders(baseline).settings) ? agentSettingsOf(runState(baseline).settings) : dependencies.tune.settings;
+}
+
+/** The dataset, repetitions and agent choice of an exposure's test run: those of its own development runs. */
+function onExposureOf(dependencies: CycleDependencies, held: Exposure) {
+  const development = runState(join(dependencies.run.runsFolder, held.development.candidate)).settings;
+  return { datasetFolder: development.dataset.folder, repeat: development.repeat, settings: agentSettingsOf(development) };
+}
+
+function runStart(dependencies: CycleDependencies, cycle: Cycle, partition: "development" | "test", tuning: Tuning | null, name: string, on?: ReturnType<typeof onExposureOf>) {
+  return () => ({
+    datasetFolder: on?.datasetFolder ?? cycle.options.dataset, partition, repeat: on?.repeat ?? cycle.options.repeat, name,
+    settings: on?.settings ?? runSettings(dependencies, cycle), tuning,
   });
-  // The dataset, repetitions and agent choice of an exposure's test run: those of its own development runs.
-  const onExposureOf = (held: Exposure) => {
-    const development = runState(join(runs, held.development.candidate)).settings;
-    return { datasetFolder: development.dataset.folder, repeat: development.repeat, settings: agentSettingsOf(development) };
-  };
+}
 
-  // 1. The development baseline of the active configuration.
+/** Whether the cycle still has a proposal to make or a candidate to measure on development. */
+export function proposalsPending(cycle: Cycle): boolean {
+  if (cycle.proposals.some((item) => item.outcome === "candidate" && item.development === null)) return true;
+  return cycle.proposals.length < cycle.options.candidates && cycle.proposals.every((item) => item.outcome === "candidate");
+}
+
+/** Step 1: the development baseline of the active configuration. */
+export async function cycleBaseline(dependencies: CycleDependencies, cycleId: string): Promise<Cycle> {
+  let cycle = openCycle(dependencies, cycleId);
+  if (cycle.outcome !== "running") return cycle;
   if (cycle.baseline === null) cycle = save(dependencies.evalsFolder, { ...cycle, baseline: dependencies.newRunId() });
-  await ensureRun(dependencies, cycle.baseline!, runStart("development", active, `${cycle.cycleId} development baseline`));
+  await ensureRun(dependencies, cycle.baseline!, runStart(dependencies, cycle, "development", activeTuning(dependencies.tuningFolder, cycle.jobKind), `${cycle.cycleId} development baseline`));
+  return cycle;
+}
 
-  // 2. Proposals, each with its development run and comparison; an abstention ends them, a failed tune job the cycle.
-  for (;;) {
-    const index = cycle.proposals.findIndex((item) => item.outcome === "candidate" && item.development === null);
-    if (index < 0) {
-      if (cycle.proposals.length >= options.candidates || cycle.proposals.some((item) => item.outcome !== "candidate")) break;
-      const answer = await proposeCandidate(dependencies.tune, cycle.baseline!, options.metric);
-      const proposal: z.infer<typeof ProposalSchema> = answer.outcome === "candidate"
-        ? { outcome: "candidate", record: answer.record, reason: answer.candidate.rationale ?? "", candidate: answer.candidate.id, run: null, development: null }
-        : { outcome: answer.outcome, record: answer.record, reason: answer.outcome === "abstain" ? answer.reason : `${answer.kind}: ${answer.message}`, candidate: null, run: null, development: null };
-      cycle = save(dependencies.evalsFolder, { ...cycle, proposals: [...cycle.proposals, proposal] });
-      dependencies.run.log(`Tuning cycle ${cycle.cycleId}: proposal ${cycle.proposals.length}: ${proposal.outcome}${proposal.candidate === null ? "" : ` ${proposal.candidate}`}: ${proposal.reason}`);
-      if (proposal.outcome === "failed") return finish(dependencies, cycle, "failed", [`the tune job failed: ${proposal.reason} (record ${proposal.record})`]);
-      continue;
-    }
-    const proposal = cycle.proposals[index]!;
-    const measuredBefore = cycle.proposals.find((item) => item !== proposal && item.candidate === proposal.candidate && item.development !== null);
-    const update = (fields: Partial<z.infer<typeof ProposalSchema>>) => {
-      cycle = save(dependencies.evalsFolder, { ...cycle, proposals: cycle.proposals.map((item, position) => (position === index ? { ...item, ...fields } : item)) });
-    };
-    if (measuredBefore !== undefined) {
-      update({ run: measuredBefore.run, development: measuredBefore.development });
-      continue;
-    }
-    if (proposal.run === null) update({ run: dependencies.newRunId() });
-    const candidate = readCandidate(candidatesFolder(dependencies.evalsFolder), proposal.candidate!);
-    const run = cycle.proposals[index]!.run!;
-    await ensureRun(dependencies, run, runStart("development", candidate.tuning, `${cycle.cycleId} development ${candidate.id}`));
-    const development = comparisonSummary(compareRuns(join(runs, cycle.baseline!), join(runs, run), options.metric, dependencies.run.now()));
-    dependencies.run.log(`Tuning cycle ${cycle.cycleId}: ${candidate.id} on development: mean difference ${development.meanDifference ?? "n/a"} over ${development.pairs} pairs, ${development.verdict}.`);
-    update({ development });
+/**
+ * Step 2, one pass: a proposal when none waits for its measurement, then the development run and comparison of the
+ * candidate that waits. An abstention ends the proposals, a failed tune job the cycle.
+ */
+export async function cycleProposal(dependencies: CycleDependencies, cycleId: string): Promise<Cycle> {
+  let cycle = openCycle(dependencies, cycleId);
+  if (cycle.outcome !== "running" || !proposalsPending(cycle)) return cycle;
+  const { options } = cycle;
+  let index = cycle.proposals.findIndex((item) => item.outcome === "candidate" && item.development === null);
+  if (index < 0) {
+    const answer = await proposeCandidate(dependencies.tune, cycle.baseline!, options.metric);
+    const proposal: z.infer<typeof ProposalSchema> = answer.outcome === "candidate"
+      ? { outcome: "candidate", record: answer.record, reason: answer.candidate.rationale ?? "", candidate: answer.candidate.id, run: null, development: null }
+      : { outcome: answer.outcome, record: answer.record, reason: answer.outcome === "abstain" ? answer.reason : `${answer.kind}: ${answer.message}`, candidate: null, run: null, development: null };
+    cycle = save(dependencies.evalsFolder, { ...cycle, proposals: [...cycle.proposals, proposal] });
+    dependencies.run.log(`Tuning cycle ${cycle.cycleId}: proposal ${cycle.proposals.length}: ${proposal.outcome}${proposal.candidate === null ? "" : ` ${proposal.candidate}`}: ${proposal.reason}`);
+    if (proposal.outcome === "failed") return finish(dependencies, cycle, "failed", [`the tune job failed: ${proposal.reason} (record ${proposal.record})`]);
+    if (proposal.outcome !== "candidate") return cycle;
+    index = cycle.proposals.length - 1;
   }
+  const proposal = cycle.proposals[index]!;
+  const update = (fields: Partial<z.infer<typeof ProposalSchema>>) => {
+    cycle = save(dependencies.evalsFolder, { ...cycle, proposals: cycle.proposals.map((item, position) => (position === index ? { ...item, ...fields } : item)) });
+  };
+  const measuredBefore = cycle.proposals.find((item) => item !== proposal && item.candidate === proposal.candidate && item.development !== null);
+  if (measuredBefore !== undefined) {
+    update({ run: measuredBefore.run, development: measuredBefore.development });
+    return cycle;
+  }
+  if (proposal.run === null) update({ run: dependencies.newRunId() });
+  const candidate = readCandidate(candidatesFolder(dependencies.evalsFolder), proposal.candidate!);
+  const run = cycle.proposals[index]!.run!;
+  const runs = dependencies.run.runsFolder;
+  await ensureRun(dependencies, run, runStart(dependencies, cycle, "development", candidate.tuning, `${cycle.cycleId} development ${candidate.id}`));
+  const development = comparisonSummary(compareRuns(join(runs, cycle.baseline!), join(runs, run), options.metric, dependencies.run.now()));
+  dependencies.run.log(`Tuning cycle ${cycle.cycleId}: ${candidate.id} on development: mean difference ${development.meanDifference ?? "n/a"} over ${development.pairs} pairs, ${development.verdict}.`);
+  update({ development });
+  return cycle;
+}
 
-  // 3. The best candidate that passed the development gate sees the holdout.
+/** Step 3: the best candidate that passed the development gate sees the holdout; without one the cycle ends `no_improvement`. */
+export async function cycleHoldout(dependencies: CycleDependencies, cycleId: string): Promise<Cycle> {
+  let cycle = openCycle(dependencies, cycleId);
+  if (cycle.outcome !== "running") return cycle;
+  const { options } = cycle;
   if (cycle.selected === null) {
     const passed = cycle.proposals.filter((item) => item.development !== null && passesDevelopmentGate(item.development))
       .sort((left, right) => compareCandidates(left.development!, right.development!));
@@ -220,15 +266,29 @@ async function continueCycle(dependencies: CycleDependencies, start: Cycle): Pro
     }
   } else {
     const candidate = readCandidate(candidatesFolder(dependencies.evalsFolder), exposure.candidate);
-    await ensureRun(dependencies, holdoutRun, runStart("test", candidate.tuning, `holdout ${candidate.id}`, onExposureOf(exposure)));
+    await ensureRun(dependencies, holdoutRun, runStart(dependencies, cycle, "test", candidate.tuning, `holdout ${candidate.id}`, onExposureOf(dependencies, exposure)));
   }
+  return cycle;
+}
 
-  // 4. The active configuration on the same test items, then the certified activation. An exposure the ledger already held
-  // (a dataset version with the same test items, other repetitions or agent choice) decides the dataset, repetitions and agent choice of both test runs.
+/**
+ * Step 4: the active configuration on the holdout's test items. An exposure the ledger already held (a dataset version
+ * with the same test items, other repetitions or agent choice) decides the dataset, repetitions and agent choice of both test runs.
+ */
+export async function cycleTestBaseline(dependencies: CycleDependencies, cycleId: string): Promise<Cycle> {
+  let cycle = openCycle(dependencies, cycleId);
+  if (cycle.outcome !== "running") return cycle;
   if (cycle.testBaseline === null) cycle = save(dependencies.evalsFolder, { ...cycle, testBaseline: dependencies.newRunId() });
-  const held = exposureOf(readLedger(dependencies.tuningFolder), holdoutRun)!;
-  await ensureRun(dependencies, cycle.testBaseline!, runStart("test", active, `${cycle.cycleId} test baseline`, onExposureOf(held)));
-  const outcome = activate(folders(dependencies), { run: holdoutRun, baseline: cycle.testBaseline!, thresholds: thresholds(options) }, dependencies.run.now());
+  const held = exposureOf(readLedger(dependencies.tuningFolder), cycle.holdout!.run)!;
+  await ensureRun(dependencies, cycle.testBaseline!, runStart(dependencies, cycle, "test", activeTuning(dependencies.tuningFolder, cycle.jobKind), `${cycle.cycleId} test baseline`, onExposureOf(dependencies, held)));
+  return cycle;
+}
+
+/** Step 5: the certified activation of the held-out candidate, or its refusal (`rejected`). */
+export function cycleActivation(dependencies: CycleDependencies, cycleId: string): Cycle {
+  let cycle = openCycle(dependencies, cycleId);
+  if (cycle.outcome !== "running") return cycle;
+  const outcome = activate(folders(dependencies), { run: cycle.holdout!.run, baseline: cycle.testBaseline!, thresholds: thresholds(cycle.options) }, dependencies.run.now());
   if ("refused" in outcome) {
     cycle = save(dependencies.evalsFolder, { ...cycle, activation: { refused: [...outcome.refused], comparison: outcome.comparison } });
     return finish(dependencies, cycle, "rejected", [...outcome.refused]);

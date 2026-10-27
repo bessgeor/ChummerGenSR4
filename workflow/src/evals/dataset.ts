@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { ContextManifestSchema, canonicalJson, contextHash, type ContextManifest } from "../diagnosis/context.js";
 import { ExplanationSchema, mechanisms, type Explanation } from "../diagnosis/job-schemas.js";
+import { acquireExclusiveLock } from "../host/exclusive-lock.js";
 import { SetupError } from "../host/setup-error.js";
 import { fingerprintFolder, sha256File, sha256Text } from "../steps/fingerprint.js";
 import { readDocument } from "../steps/read-document.js";
@@ -120,6 +121,8 @@ export type FreezeInput = {
   readonly snapshotBase: BaseCheck;
   readonly now: () => Date;
   readonly log: (line: string) => void;
+  /** Called with the folder of the version about to be frozen, once it is chosen and before the freeze starts, under the freeze's lock. */
+  readonly onVersion?: (folder: string) => void;
 };
 
 /** The root cause a correct review verdict on a record confirms, or null. */
@@ -135,6 +138,13 @@ function reviewedRootCause(record: EvalRecord, records: readonly EvalRecord[]): 
 }
 
 type Draft = { clusterId: string; contextHash: string; sourceIdentity: string; hypothesis: Explanation | null; records: EvalRecord[]; contextFolder: string; sourceFolder: string };
+
+/** The highest frozen version of a dataset name, 0 when none is frozen. */
+export function latestDatasetVersion(datasetsFolder: string, name: string): number {
+  const nameFolder = join(datasetsFolder, name);
+  const versions = existsSync(nameFolder) ? readdirSync(nameFolder).map((entry) => /^v(\d+)$/.exec(entry)).flatMap((match) => (match === null ? [] : [Number(match[1])])) : [];
+  return versions.length === 0 ? 0 : Math.max(...versions);
+}
 
 /** Freezes the next version of a dataset from the job kind's workflow records; an existing version is never changed. */
 export async function freezeDataset(input: FreezeInput): Promise<{ folder: string; dataset: Dataset }> {
@@ -162,8 +172,17 @@ export async function freezeDataset(input: FreezeInput): Promise<{ folder: strin
   if (drafts.size === 0) throw new SetupError(`No succeeded workflow ${input.jobKind} record has its context in its thread folder; there is nothing to freeze.`);
 
   const nameFolder = join(input.datasetsFolder, input.name);
-  const versions = existsSync(nameFolder) ? readdirSync(nameFolder).map((entry) => /^v(\d+)$/.exec(entry)).flatMap((match) => (match === null ? [] : [Number(match[1])])) : [];
-  const previous = versions.length === 0 ? 0 : Math.max(...versions);
+  // Two freezes through this function never choose the same version of a name: the version is chosen, announced and put in place under one lock.
+  const release = acquireExclusiveLock(join(input.datasetsFolder, `${input.name}.freeze.lock`), `Another freeze of dataset ${input.name} is running`);
+  try {
+    return await freezeVersion(input, drafts, nameFolder);
+  } finally {
+    release();
+  }
+}
+
+async function freezeVersion(input: FreezeInput, drafts: ReadonlyMap<string, Draft>, nameFolder: string): Promise<{ folder: string; dataset: Dataset }> {
+  const previous = latestDatasetVersion(input.datasetsFolder, input.name);
   const before = previous === 0 ? null : readDocument(join(nameFolder, `v${previous}`, "dataset.json"), DatasetSchema);
   // A cluster keeps its partition across versions only while the seed and the share stay: a prompt tuned on the development partition of
   // one version must never meet its clusters in the test partition of the next.
@@ -173,6 +192,8 @@ export async function freezeDataset(input: FreezeInput): Promise<{ folder: strin
   }
   const previousHash = before === null ? null : before.datasetHash;
   const version = previous + 1;
+  const folder = join(nameFolder, `v${version}`);
+  input.onVersion?.(folder);
   const partial = join(nameFolder, `v${version}.partial`);
   rmSync(partial, { recursive: true, force: true });
   const copies = datasetFolders(partial);
@@ -214,7 +235,6 @@ export async function freezeDataset(input: FreezeInput): Promise<{ folder: strin
   const dataset = DatasetSchema.parse({ ...content, datasetHash: datasetHash(content) });
   mkdirSync(partial, { recursive: true });
   writeFileSync(join(partial, "dataset.json"), `${JSON.stringify(dataset, null, 2)}\n`);
-  const folder = join(nameFolder, `v${version}`);
   renameWithRetry(partial, folder);
   return { folder, dataset };
 }

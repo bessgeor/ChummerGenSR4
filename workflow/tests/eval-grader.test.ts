@@ -2,7 +2,7 @@ import { deepStrictEqual, equal, match, ok, rejects } from "node:assert/strict";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { InMemoryStore } from "@langchain/langgraph";
+import { InMemoryStore, MemorySaver } from "@langchain/langgraph";
 import { resolveAgentSettings } from "../src/agents/agent-settings.js";
 import { QuotaWaiter } from "../src/diagnosis/quota-waiter.js";
 import { runEvalCommand, type EvalContext } from "../src/evals/eval-commands.js";
@@ -27,7 +27,7 @@ async function gradedThread(reply: (attempt: number) => Reply) {
   const context: EvalContext = {
     paths, store: harness.store, git: () => "", now: () => new Date("2026-10-02T09:00:00Z"), log: (line) => lines.push(line),
     agentSettings: () => resolveAgentSettings(undefined), agents: () => grader, certificatesFolder: () => join(harness.root, "certificates"), tuningFolder: () => join(harness.root, "tuning"),
-    autoTuning: () => resolveAutoTuning(undefined),
+    autoTuning: () => resolveAutoTuning(undefined), tuningCheckpointer: () => new MemorySaver(),
     quota: new QuotaWaiter("p", async (milliseconds) => {
       sleeps.push(milliseconds);
     }), createScratchFolder,

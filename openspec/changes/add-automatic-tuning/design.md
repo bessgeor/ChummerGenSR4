@@ -25,7 +25,7 @@ A record counts when it is of job kind `hypothesis`, origin `workflow`, its resu
 
 ### Freezing
 
-The dataset is frozen with the name `autoTuning.dataset`, seed `auto` and a test share of 50 %, and the reason `automatic tuning after <n> new hypothesis records`. A freeze with nothing to freeze is a setup error, as with `eval freeze`. The dataset's folder is recorded in `auto.json` before the cycle starts, so a resumed tuning does not freeze again.
+The dataset is frozen with the name `autoTuning.dataset`, seed `auto` and a test share of 50 %, and the reason `automatic tuning <tuning ID> after <n> new hypothesis records`, which names the tuning so that its version can be told from one another freeze took. A freeze with nothing to freeze is a setup error, as with `eval freeze`. The dataset's folder is recorded in `auto.json` before the cycle starts, so a resumed tuning does not freeze again.
 
 ### The worktree
 
@@ -37,7 +37,7 @@ The automatic tuning is a checkpointed LangGraph graph, `buildTuningGraph` in `w
 
 ### State and resumption
 
-`auto.json` (written to a temporary file and renamed) holds `counted`, `tunings` (each with its start, the records it counted, the dataset, the cycle, the branch, the commit, the merge commit and the outcome) and `current`. `tune auto` resumes `current` first: the freeze when its dataset is not recorded, the cycle with `resumeCycle`, then the commit and merge. Exit status: 0 for not due, `activated` or `no_improvement`; 1 for `rejected`; 2 for `failed`; 3 for a setup error.
+`auto.json` (written to a temporary file and renamed) holds `counted`, `tunings` (each with its start, the records it counted, the dataset, the cycle, the branch, the commit, the merge commit and the outcome) and `current`. `tune auto` resumes `current` first: the freeze when its dataset is not recorded, the cycle from its graph checkpoint, then the commit and merge. Exit status: 0 for not due, `activated` or `no_improvement`; 1 for `rejected`; 2 for `failed`; 3 for a setup error.
 
 ## Risks / Trade-offs
 

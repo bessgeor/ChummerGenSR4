@@ -1,4 +1,4 @@
-import type { BaseStore } from "@langchain/langgraph-checkpoint";
+import type { BaseCheckpointSaver, BaseStore } from "@langchain/langgraph-checkpoint";
 import { join } from "node:path";
 import type { AgentRunners } from "../agents/agent-runners.js";
 import type { AgentSettings } from "../agents/agent-settings.js";
@@ -24,6 +24,8 @@ export type EvalContext = {
   readonly tuningFolder: () => string;
   /** The local profile's `autoTuning` with its defaults. */
   readonly autoTuning: () => AutoTuningSettings;
+  /** The tuning threads' checkpointer, opened when a tuning runs. */
+  readonly tuningCheckpointer: () => BaseCheckpointSaver;
   readonly agents: AgentRunners;
   readonly quota: QuotaWaiter;
   readonly createScratchFolder: (prefix: string) => ScratchFolder;

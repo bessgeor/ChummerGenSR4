@@ -92,6 +92,26 @@ test("versions are added, never changed, and a changed copy is refused on load",
   await rejects(loadDataset(second.folder), (error: unknown) => error instanceof SetupError && /snapshot copy/.test(error.message));
 });
 
+test("a freeze announces the version it chose under a lock, so no other freeze of the name takes that version meanwhile", async () => {
+  const fixture = await twoThreads();
+  const announced: string[] = [];
+  let other: Promise<unknown> | undefined;
+  const first = await freezeDataset(await fixture.input({
+    onVersion: (folder) => {
+      announced.push(folder);
+      // Started once the version is chosen, while the freeze still holds the lock.
+      other = fixture.input().then((input) => freezeDataset(input)).then(() => null, (error: unknown) => error);
+    },
+  }));
+  deepStrictEqual(announced, [first.folder]);
+  equal(first.dataset.version, 1);
+  const refused = await other;
+  ok(refused instanceof SetupError && refused.message.includes("Another freeze of dataset diag is running"), String(refused));
+  deepStrictEqual(readdirSync(join(fixture.root, "datasets", "diag")), ["v1"]);
+  // The lock is released with the freeze: the next freeze takes the next version.
+  equal((await freezeDataset(await fixture.input())).dataset.version, 2);
+});
+
 test("records without their context are left out, and nothing to freeze is a setup error", async () => {
   const fixture = await twoThreads();
   rmSync(join(fixture.root, "threads", fixture.threads[0]!), { recursive: true, force: true });

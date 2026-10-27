@@ -7,6 +7,7 @@ import type { FreezeInput } from "../src/evals/dataset.js";
 import { listRecords } from "../src/evals/eval-record.js";
 import { runFolders, type RunSettings, type Sample } from "../src/evals/eval-run.js";
 import { diagnosisHarness, twoClusters } from "./diagnosis-harness.js";
+import type { Spot } from "./diagnosis-fixtures.js";
 import { scratch } from "./diagnosis-fixtures.js";
 import { archivedFix, fixRecord } from "./fix-fixtures.js";
 export function benchmarkItem(clusterId: string, committedUtc: string): BenchmarkItem {
@@ -19,8 +20,8 @@ export function benchmarkItem(clusterId: string, committedUtc: string): Benchmar
   };
 }
 
-/** Two finished threads over the same fixture runs in one store: both diagnosed the same two clusters. */
-export async function twoThreads(options: { priors?: boolean } = {}) {
+/** Two finished threads over the same fixture runs in one store: both diagnosed the same two clusters (by default those of `twoClusters`). */
+export async function twoThreads(options: { priors?: boolean; spots?: Spot[] } = {}) {
   const root = scratch();
   const store = new InMemoryStore();
   // The fake triage step writes triage.json beside the threads; the real one writes it into the thread folder.
@@ -30,7 +31,7 @@ export async function twoThreads(options: { priors?: boolean } = {}) {
     process.env["GIT_COMMITTER_DATE"] = date;
     let harness;
     try {
-      harness = diagnosisHarness({ spots: twoClusters, root, store });
+      harness = diagnosisHarness({ spots: options.spots ?? twoClusters, root, store });
     } finally {
       delete process.env["GIT_AUTHOR_DATE"];
       delete process.env["GIT_COMMITTER_DATE"];
