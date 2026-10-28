@@ -16,13 +16,27 @@ export function openLoopCheckpointer(paths: LoopPaths): SqliteSaver {
   return SqliteSaver.fromConnString(paths.checkpoints);
 }
 
-/** The steps of a loop on this machine: threads of the composed workflow, the eval CLI's automatic tuning and `loop.json` in the loop's folder. */
-export function hostLoopSteps(loopId: string, paths: LoopPaths, workflow: ComposedWorkflow, threadFolder: (threadId: string) => string,
-  evalContext: EvalContext, now: () => Date, log: (line: string) => void): LoopSteps {
+export type LoopHost = {
+  readonly paths: LoopPaths;
+  readonly workflow: ComposedWorkflow;
+  readonly threadFolder: (threadId: string) => string;
+  /** The evaluation context the automatic tuning runs in; its git is the repository's. */
+  readonly evalContext: EvalContext;
+  readonly now: () => Date;
+  readonly log: (line: string) => void;
+};
+
+/**
+ * The steps of a loop on this machine: threads of the composed workflow, the eval CLI's automatic tuning, the trees of
+ * the commits of a thread's merges from the repository, and `loop.json` in the loop's folder.
+ */
+export function hostLoopSteps(loopId: string, host: LoopHost): LoopSteps {
+  const { paths, workflow, evalContext, now, log } = host;
+  const treeOf = (commit: string) => evalContext.branchGit(["rev-parse", "--verify", `${commit}^{tree}`]).trim();
   return {
     newThreadId: () => newThreadId(now()),
     runThread: (threadId, args) => workflow.run({ kind: "start", arguments: args }, { threadId }),
-    threadSummary: (threadId) => readThreadSummary(threadId, threadFolder(threadId)),
+    threadSummary: (threadId) => readThreadSummary(threadId, host.threadFolder(threadId), treeOf),
     tune: (onStart) => runAutoTuning(evalContext, false, onStart),
     writeLoop: (document) => writeLoopDocument(paths.document(loopId), document),
     now,

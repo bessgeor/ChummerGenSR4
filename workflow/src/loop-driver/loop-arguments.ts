@@ -1,5 +1,5 @@
 import { SetupError } from "../host/setup-error.js";
-import { parseArguments, usage as startUsage, type Arguments } from "../options/arguments.js";
+import { parseArguments, type Arguments } from "../options/arguments.js";
 
 /** `npm run loop`: the options every thread is started with, and the most threads the loop runs (null: no limit). */
 export type LoopCommand =
@@ -7,13 +7,10 @@ export type LoopCommand =
   | { readonly kind: "start"; readonly options: readonly string[]; readonly arguments: Arguments; readonly maxRuns: number | null };
 
 /** Options of `npm start` a loop does not take: every thread runs the whole workflow, and the loop starts its threads itself. */
-const excluded: Readonly<Record<string, string>> = {
-  "--only": "every thread of a loop runs the whole workflow",
-  "--resume": "a loop starts its threads itself",
-};
-
-const startOptions = startUsage.slice(startUsage.indexOf("\n\n") + 2, startUsage.lastIndexOf("\n\nExit status:"))
-  .split("\n").filter((line) => !/^\s*--(only|resume|help)\b/.test(line) && !/^\s+\(--only/.test(line)).join("\n");
+const excluded = new Map([
+  ["--only", "every thread of a loop runs the whole workflow"],
+  ["--resume", "a loop starts its threads itself"],
+]);
 
 export const loopUsage = `Usage: npm run loop -- [options]
 
@@ -22,11 +19,10 @@ an automatic tuning (npm run eval -- tune auto), which tunes only when it is due
 one merged a fix or admitted a scenario, or the tuning activated a configuration. The loop is recorded in
 out/loop/<loop>/loop.json and checkpointed in out/loop/checkpoints.sqlite.
 
-  Loop:
-    --max-runs <n>             run at most n threads (default: no limit)
-    --help
-  Every option of npm start except --only and --resume, given to every thread:
-${startOptions}
+  --max-runs <n>               run at most n threads (default: no limit)
+  --help
+  Every other option is an option of npm start (see npm start -- --help) and is given to every thread; --only and
+  --resume are not taken.
 
 Exit status: 0 converged (a thread and the tuning after it changed nothing) or limit, 2 failed (a thread exited with 2),
 3 setup error.`;
@@ -44,7 +40,7 @@ export function parseLoopArguments(args: readonly string[]): LoopCommand {
   let runs: number | null = null;
   for (let index = 0; index < args.length; index++) {
     const option = args[index]!;
-    const reason = excluded[option];
+    const reason = excluded.get(option);
     if (reason !== undefined) throw new SetupError(`npm run loop does not take ${option}: ${reason}.`);
     if (option === "--max-runs") {
       runs = maxRuns(args[++index]);

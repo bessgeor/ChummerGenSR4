@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { ComposedWorkflow } from "../src/compose-workflow.js";
 import { SetupError } from "../src/host/setup-error.js";
+import type { ClusterEnd } from "../src/loop/disposition.js";
+import type { MergeDocument, MergedFix, OutcomeDocument } from "../src/loop/outcome.js";
 import { parseArguments, type Arguments } from "../src/options/arguments.js";
 import { parseLoopArguments } from "../src/loop-driver/loop-arguments.js";
 import { loopPaths, readLoopDocument, readThreadSummary, writeLoopDocument, type LoopDocument, type ThreadSummary } from "../src/loop-driver/loop-document.js";
@@ -56,7 +58,7 @@ function fakeLoop(threads: readonly ThreadScript[], tunings: readonly TuneScript
     },
     threadSummary: (threadId) => {
       const index = runs.findIndex((run) => run.threadId === threadId);
-      return { outcome: "findings_remaining", fixed: [], merged: [], admitted: [], ...threads[index]!.summary };
+      return { outcome: "findings_remaining", fixed: [], merged: [], sourceChanged: false, admitted: [], ...threads[index]!.summary };
     },
     tune: async (onStart) => {
       const script = tunings[tuneCalls++];
@@ -87,7 +89,7 @@ function fakeLoop(threads: readonly ThreadScript[], tunings: readonly TuneScript
 const decisions = (document: LoopDocument) => document.iterations.map((iteration) => iteration.decision?.next ?? null);
 
 test("a fix, then nothing new: two threads and converged with exit status 0", async () => {
-  const loop = fakeLoop([{ status: 1, summary: { fixed: ["d-1"], merged: ["d-1"] } }, { status: 0, summary: { outcome: "verified_for_scope" } }], [notDue, notDue]);
+  const loop = fakeLoop([{ status: 1, summary: { fixed: ["d-1"], merged: ["d-1"], sourceChanged: true } }, { status: 0, summary: { outcome: "verified_for_scope" } }], [notDue, notDue]);
   equal(await loop.run([]), 0, loop.lines.join("\n"));
   const document = loop.document();
   deepStrictEqual([document.loopId, document.status, document.options], [loopId, "converged", { arguments: [], maxRuns: null }]);
@@ -104,7 +106,7 @@ test("a fix, then nothing new: two threads and converged with exit status 0", as
 });
 
 test("a thread that exits with 2 ends the loop failed with exit status 2, without a tuning or another thread", async () => {
-  const loop = fakeLoop([{ status: 2, summary: { merged: ["d-1"] } }], []);
+  const loop = fakeLoop([{ status: 2, summary: { merged: ["d-1"], sourceChanged: true } }], []);
   equal(await loop.run([]), 2, loop.lines.join("\n"));
   const document = loop.document();
   equal(document.status, "failed");
@@ -115,7 +117,7 @@ test("a thread that exits with 2 ends the loop failed with exit status 2, withou
 });
 
 test("--max-runs 1 with a merged fix ends limit after the tuning step with exit status 0", async () => {
-  const loop = fakeLoop([{ status: 0, summary: { fixed: ["d-1"], merged: ["d-1"] } }], [notDue]);
+  const loop = fakeLoop([{ status: 0, summary: { fixed: ["d-1"], merged: ["d-1"], sourceChanged: true } }], [notDue]);
   equal(await loop.run(["--max-runs", "1"]), 0, loop.lines.join("\n"));
   const document = loop.document();
   deepStrictEqual([document.status, document.options.maxRuns, loop.tuneCalls(), decisions(document)], ["limit", 1, 1, ["limit"]]);
@@ -128,13 +130,22 @@ test("a thread that changed nothing ends the loop converged, also with --max-run
   const document = loop.document();
   deepStrictEqual([document.status, decisions(document)], ["converged", ["converged"]]);
   // Fixed but not merged: the next thread would build the same source.
-  deepStrictEqual(document.iterations[0]!.summary, { outcome: "findings_remaining", fixed: ["d-1"], merged: [], admitted: [] });
+  deepStrictEqual(document.iterations[0]!.summary, { outcome: "findings_remaining", fixed: ["d-1"], merged: [], sourceChanged: false, admitted: [] });
   deepStrictEqual(document.iterations[0]!.tuning, { kind: "tuning", tuningId: "tune-1", cycle: "tc-1", outcome: "no_improvement", exitStatus: 0 });
+});
+
+test("a fix merged without changing the branch's tree and a failed tuning change nothing: converged, with the failed tuning named", async () => {
+  const loop = fakeLoop([{ status: 0, summary: { fixed: ["d-1"], merged: ["d-1"], sourceChanged: false } }], [tuned("failed")]);
+  equal(await loop.run([]), 0, loop.lines.join("\n"));
+  const document = loop.document();
+  deepStrictEqual([document.status, loop.runs.length], ["converged", 1]);
+  deepStrictEqual(document.iterations[0]!.tuning, { kind: "tuning", tuningId: "tune-1", cycle: "tc-1", outcome: "failed", exitStatus: 2 });
+  deepStrictEqual(document.iterations[0]!.decision, { next: "converged", reasons: ["the thread and the tuning after it changed nothing", "tuning tune-1 failed with exit status 2"] });
 });
 
 test("a merged fix, an admitted scenario and an activated tuning each start the next thread", async () => {
   const loop = fakeLoop([
-    { status: 1, summary: { fixed: ["d-1"], merged: ["d-1"] } },
+    { status: 1, summary: { fixed: ["d-1"], merged: ["d-1"], sourceChanged: true } },
     { status: 0, summary: { admitted: ["build-a@s1"] } },
     { status: 0 },
     { status: 0 },
@@ -150,7 +161,7 @@ test("a merged fix, an admitted scenario and an activated tuning each start the 
 
 test("every thread is started with the loop's options under the ID recorded before it starts, and every tuning is recorded before it runs", async () => {
   const options = ["--case", "a,b", "--no-ocr", "--settings-overlay", "o", "--fix-changes"];
-  const loop = fakeLoop([{ status: 0, summary: { merged: ["d-1"] } }, { status: 1, summary: { admitted: ["c"] } }, { status: 0 }], [tuned("no_improvement", 1), notDue, tuned("rejected", 2)]);
+  const loop = fakeLoop([{ status: 0, summary: { merged: ["d-1"], sourceChanged: true } }, { status: 1, summary: { admitted: ["c"] } }, { status: 0 }], [tuned("no_improvement", 1), notDue, tuned("rejected", 2)]);
   equal(await loop.run(["--max-runs", "3", ...options]), 0, loop.lines.join("\n"));
   const expected = argumentsOf(options);
   deepStrictEqual(loop.runs, [
@@ -169,7 +180,7 @@ test("a setup error in a thread or a tuning ends the process with 3 and leaves t
   ok(thread.lines.some((line) => line.startsWith("Setup error: Thread wf-1 of loop") && line.includes("stopped with exit status 3")), thread.lines.join("\n"));
   ok(thread.lines.includes(`Loop ${loopId} stopped; it stays running.`), thread.lines.join("\n"));
 
-  const tuning = fakeLoop([{ status: 0, summary: { merged: ["d-1"] } }], ["setup-error"]);
+  const tuning = fakeLoop([{ status: 0, summary: { merged: ["d-1"], sourceChanged: true } }], ["setup-error"]);
   equal(await tuning.run([]), 3);
   deepStrictEqual([tuning.document().status, tuning.document().iterations[0]!.exitStatus, tuning.document().iterations[0]!.tuning], ["running", 0, null]);
   ok(tuning.lines.includes("Setup error: The tuning stopped."), tuning.lines.join("\n"));
@@ -195,6 +206,7 @@ test("npm run loop takes npm start's options except --only and --resume, and --m
   const command = startOf(["--case", "a", "--max-runs", "2", "--no-repair"]);
   deepStrictEqual([command.options, command.maxRuns, command.arguments], [["--case", "a", "--no-repair"], 2, argumentsOf(["--case", "a", "--no-repair"])]);
   equal(startOf([]).maxRuns, null);
+  deepStrictEqual(startOf(["--case", "constructor,toString"]).arguments.cases, ["constructor", "toString"]);
   for (const args of [["--only", "capture"], ["--resume", "wf-1"], ["--max-runs"], ["--max-runs", "0"], ["--max-runs", "-1"], ["--max-runs", "1.5"], ["--max-runs", "x"],
     ["--max-runs", "--case"], ["--bogus"], ["--case"], ["--canonical-exe", "x"], ["--live-canonical", "--canonical-cache", "c"]]) {
     throws(() => parseLoopArguments(args), SetupError, args.join(" "));
@@ -203,25 +215,44 @@ test("npm run loop takes npm start's options except --only and --resume, and --m
   throws(() => parseLoopArguments(["--only", "capture"]), (error: Error) => error.message === "npm run loop does not take --only: every thread of a loop runs the whole workflow.");
 });
 
-function writeOutcome(folder: string, outcome: object) {
+function writeOutcome(folder: string, outcome: OutcomeDocument) {
   mkdirSync(folder, { recursive: true });
   writeFileSync(join(folder, "outcome.json"), JSON.stringify(outcome));
 }
 
-test("a thread's summary reads its outcome.json: merges that made a commit, its fixed clusters and the cases its discovery admitted", () => {
+const end = (clusterId: string, disposition: ClusterEnd["disposition"]): ClusterEnd => ({ clusterId, disposition, attempts: 1, stage: null, reason: null, commit: null, mergeCommit: null });
+const fix = (clusterId: string, status: MergedFix["status"], mergeCommit: string | null): MergedFix => ({
+  clusterId, commit: `c-${clusterId}`, fixBranch: `workflow/wf-1/fix/${clusterId}`, status, mergeCommit, reason: null, files: [],
+});
+
+/** A thread's `outcome.json` as the workflow writes it, with these clusters, merges and discovery. */
+function outcomeDocument(threadId: string, clusters: ClusterEnd[], merge: Pick<MergeDocument, "before" | "after" | "fixes"> | null, admitted: string[] | null): OutcomeDocument {
+  return {
+    threadId, outcome: clusters.every((cluster) => cluster.disposition === "fixed") ? "verified_for_scope" : "findings_remaining",
+    scope: { cases: ["build-a"], captures: null }, problems: { cases: [], otherFindings: 0 }, clusters, accepted: null,
+    merge: merge === null ? null : { branch: "master", integrationBranch: null, skipped: null, ...merge },
+    measures: { clusters: clusters.length, fixed: 0, fixRate: null, attempts: 0, modelMilliseconds: 0, elapsedMilliseconds: null },
+    discovery: admitted === null ? null : { threadId: `disc-${threadId}`, exitStatus: 0, admitted, differing: [], documentPath: "discovery.json" },
+    concludedUtc: "2026-10-29T09:00:00.000Z",
+  };
+}
+
+test("a thread's summary reads its outcome.json: its fixed and merged clusters, whether the merges changed the branch's tree, and the cases its discovery admitted", () => {
   const folder = join(scratch("workflow-loop-"), "wf-1");
-  throws(() => readThreadSummary("wf-1", folder), (error: Error) => error instanceof SetupError && error.message.includes("finished without its outcome.json"));
-  writeOutcome(folder, {
-    threadId: "wf-1", outcome: "findings_remaining",
-    clusters: [{ clusterId: "d-1", disposition: "fixed" }, { clusterId: "d-2", disposition: "fixed" }, { clusterId: "d-3", disposition: "fixed" }, { clusterId: "d-4", disposition: "refuted" }],
-    merge: { fixes: [
-      { clusterId: "d-1", status: "merged", mergeCommit: "abc" }, { clusterId: "d-2", status: "merged", mergeCommit: null }, { clusterId: "d-3", status: "conflict", mergeCommit: null },
-    ] },
-    discovery: { threadId: "disc-wf-1", admitted: ["build-a@s1"] },
+  const trees: Record<string, string> = { b0: "t0", b1: "t1", b2: "t0" };
+  const treeOf = (commit: string) => trees[commit]!;
+  throws(() => readThreadSummary("wf-1", folder, treeOf), (error: Error) => error instanceof SetupError && error.message.includes("finished without its outcome.json"));
+  const clusters = [end("d-1", "fixed"), end("d-2", "fixed"), end("d-3", "fixed"), end("d-4", "refuted")];
+  const fixes = [fix("d-1", "merged", "m1"), fix("d-2", "merged", "m2"), fix("d-3", "conflict", null)];
+  writeOutcome(folder, outcomeDocument("wf-1", clusters, { before: "b0", after: "b1", fixes }, ["build-a@s1"]));
+  deepStrictEqual(readThreadSummary("wf-1", folder, treeOf), {
+    outcome: "findings_remaining", fixed: ["d-1", "d-2", "d-3"], merged: ["d-1", "d-2"], sourceChanged: true, admitted: ["build-a@s1"],
   });
-  deepStrictEqual(readThreadSummary("wf-1", folder), { outcome: "findings_remaining", fixed: ["d-1", "d-2", "d-3"], merged: ["d-1"], admitted: ["build-a@s1"] });
-  writeOutcome(folder, { outcome: "verified_for_scope", clusters: [], merge: null, discovery: null });
-  deepStrictEqual(readThreadSummary("wf-1", folder), { outcome: "verified_for_scope", fixed: [], merged: [], admitted: [] });
+  // Merge commits that left the tree as it was (the branch had the changes already) changed nothing.
+  writeOutcome(folder, outcomeDocument("wf-1", clusters, { before: "b0", after: "b2", fixes }, []));
+  deepStrictEqual(readThreadSummary("wf-1", folder, treeOf), { outcome: "findings_remaining", fixed: ["d-1", "d-2", "d-3"], merged: ["d-1", "d-2"], sourceChanged: false, admitted: [] });
+  writeOutcome(folder, outcomeDocument("wf-1", [], null, null));
+  deepStrictEqual(readThreadSummary("wf-1", folder, treeOf), { outcome: "verified_for_scope", fixed: [], merged: [], sourceChanged: false, admitted: [] });
 });
 
 test("on this machine's steps, threads start through the composed workflow with a given ID and the automatic tuning runs in process", async () => {
@@ -236,7 +267,7 @@ test("on this machine's steps, threads start through the composed workflow with 
       const threadId = request!.threadId!;
       // A start given an ID that exists is refused, so the loop's thread is new when it starts.
       runs.push({ command, request, outcome: existsSync(join(threadFolder(threadId), "outcome.json")) });
-      writeOutcome(threadFolder(threadId), { outcome: "findings_remaining", clusters: [], merge: null, discovery: null });
+      writeOutcome(threadFolder(threadId), outcomeDocument(threadId, [end("d-1", "refuted")], null, null));
       return 1;
     },
     close: () => {},
@@ -247,7 +278,7 @@ test("on this machine's steps, threads start through the composed workflow with 
   try {
     status = await runLoop(startOf(["--case", "a", "--no-repair"]), {
       paths, checkpointer, now, newLoopId: () => loopId, log: (line) => lines.push(line),
-      steps: (id) => hostLoopSteps(id, paths, workflow, threadFolder, context, now, (line) => lines.push(line)),
+      steps: (id) => hostLoopSteps(id, { paths, workflow, threadFolder, evalContext: context, now, log: (line) => lines.push(line) }),
     });
   } finally {
     checkpointer.db.close();

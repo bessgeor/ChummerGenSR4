@@ -1,7 +1,7 @@
-import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
+import { newThreadId } from "../graph/run-workflow.js";
 import { SetupError } from "../host/setup-error.js";
 import { threadOutcomes } from "../loop/outcome.js";
 import { readDocument } from "../steps/read-document.js";
@@ -27,8 +27,7 @@ export function loopPaths(repositoryRoot: string): LoopPaths {
 
 /** `loop-<time>-<suffix>`. */
 export function newLoopId(now: Date): string {
-  const stamp = now.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
-  return `loop-${stamp}-${randomBytes(4).toString("hex")}`;
+  return newThreadId(now, "loop");
 }
 
 export const loopStatuses = ["running", "converged", "limit", "stopped", "failed"] as const;
@@ -39,8 +38,10 @@ const ThreadSummarySchema = z.strictObject({
   outcome: z.enum(threadOutcomes),
   /** The clusters it fixed (promoted). */
   fixed: z.array(z.string()),
-  /** The clusters whose fix it merged into the branch it started on with a merge commit. */
+  /** The clusters whose fix it merged into the branch it started on. */
   merged: z.array(z.string()),
+  /** Whether the merges changed the branch's tree: a fix the branch had already is merged without changing it. */
+  sourceChanged: z.boolean(),
   /** The cases its discovery admitted. */
   admitted: z.array(z.string()),
 });
@@ -102,24 +103,28 @@ const OutcomeSchema = z.looseObject({
   outcome: z.enum(threadOutcomes),
   clusters: z.array(z.looseObject({ clusterId: z.string(), disposition: z.string() })),
   merge: z.looseObject({
+    before: z.string().nullable(),
+    after: z.string().nullable(),
     fixes: z.array(z.looseObject({ clusterId: z.string(), status: z.string(), mergeCommit: z.string().nullable() })),
   }).nullable(),
   discovery: z.looseObject({ admitted: z.array(z.string()) }).nullable(),
 });
 
 /**
- * What a finished thread changed, from its `outcome.json`: a merged fix counts when its merge made a commit, as the
- * branch had the change otherwise. A thread run without `--only` always concludes, so a thread that finished without
- * its `outcome.json` is a setup error.
+ * What a finished thread changed, from its `outcome.json`, with `treeOf` giving a commit's tree: the merges changed the
+ * source when the branch's tree after them differs from the one before. A thread run without `--only` always concludes,
+ * so a thread that finished without its `outcome.json` is a setup error.
  */
-export function readThreadSummary(threadId: string, threadFolder: string): ThreadSummary {
+export function readThreadSummary(threadId: string, threadFolder: string, treeOf: (commit: string) => string): ThreadSummary {
   const path = join(threadFolder, "outcome.json");
   if (!existsSync(path)) throw new SetupError(`Thread ${threadId} finished without its outcome.json (${path}).`);
   const document = readDocument(path, OutcomeSchema);
+  const merge = document.merge;
   return {
     outcome: document.outcome,
     fixed: document.clusters.filter((end) => end.disposition === "fixed").map((end) => end.clusterId),
-    merged: (document.merge?.fixes ?? []).filter((fix) => fix.status === "merged" && fix.mergeCommit !== null).map((fix) => fix.clusterId),
+    merged: (merge?.fixes ?? []).filter((fix) => fix.status === "merged").map((fix) => fix.clusterId),
+    sourceChanged: merge?.before != null && merge.after != null && merge.before !== merge.after && treeOf(merge.before) !== treeOf(merge.after),
     admitted: [...(document.discovery?.admitted ?? [])],
   };
 }

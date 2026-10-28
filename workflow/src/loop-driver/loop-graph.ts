@@ -13,7 +13,7 @@ export interface LoopSteps {
   newThreadId(): string;
   /** Starts the workflow thread `threadId` as `npm start` would with `args`, and returns its exit status. */
   runThread(threadId: string, args: Arguments): Promise<number>;
-  /** What the finished thread changed, from its `outcome.json`. */
+  /** What the finished thread changed, from its `outcome.json` and the commits of its merges. */
   threadSummary(threadId: string): ThreadSummary;
   /** Runs an automatic tuning, which tunes only when it is due; `onStart` learns the tuning before it runs. */
   tune(onStart: (start: AutoTuningStart) => void): Promise<AutoTuningResult>;
@@ -55,7 +55,7 @@ function recordIteration(steps: LoopSteps, document: LoopDocument, change: Parti
 export function changes(iteration: Iteration): string[] {
   const summary = iteration.summary;
   return [
-    ...(summary === null || summary.merged.length === 0 ? [] : [`thread ${iteration.thread} merged ${summary.merged.join(", ")}`]),
+    ...(summary === null || !summary.sourceChanged ? [] : [`thread ${iteration.thread} merged ${summary.merged.join(", ")}`]),
     ...(summary === null || summary.admitted.length === 0 ? [] : [`thread ${iteration.thread} admitted ${summary.admitted.join(", ")}`]),
     ...(iteration.tuning?.kind === "tuning" && iteration.tuning.outcome === "activated" ? [`tuning ${iteration.tuning.tuningId} activated a configuration`] : []),
   ];
@@ -63,8 +63,13 @@ export function changes(iteration: Iteration): string[] {
 
 /** After the tuning: the next thread when the iteration changed something and the limit is not reached. */
 export function decide(document: LoopDocument): Decision {
-  const changed = changes(current(document));
-  if (changed.length === 0) return { next: "converged", reasons: ["the thread and the tuning after it changed nothing"] };
+  const iteration = current(document);
+  const changed = changes(iteration);
+  if (changed.length === 0) {
+    const tuning = iteration.tuning;
+    const failed = tuning?.kind === "tuning" && tuning.outcome === "failed" ? [`tuning ${tuning.tuningId} failed with exit status ${tuning.exitStatus ?? "none"}`] : [];
+    return { next: "converged", reasons: ["the thread and the tuning after it changed nothing", ...failed] };
+  }
   const runs = document.options.maxRuns;
   if (runs !== null && document.iterations.length >= runs) return { next: "limit", reasons: [...changed, `${runs} of --max-runs ${runs} threads ran`] };
   return { next: "thread", reasons: changed };

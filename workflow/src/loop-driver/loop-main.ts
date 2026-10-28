@@ -41,16 +41,23 @@ async function main(): Promise<number> {
   const signal = interruptSignal(log);
   const paths = loopPaths(repositoryRoot);
   const workflow = composeWorkflow(repositoryRoot, profile, log, signal);
-  const checkpointer = openLoopCheckpointer(paths);
-  const evals = composeEvalContext(repositoryRoot, log, signal);
   try {
-    return await runLoop(command, {
-      paths, checkpointer, now, log, signal, newLoopId,
-      steps: (loopId) => hostLoopSteps(loopId, paths, workflow, workflowPaths(repositoryRoot).threadFolder, evals.context, now, log),
-    });
+    const checkpointer = openLoopCheckpointer(paths);
+    try {
+      const evals = composeEvalContext(repositoryRoot, log, signal);
+      try {
+        const threadFolder = workflowPaths(repositoryRoot).threadFolder;
+        return await runLoop(command, {
+          paths, checkpointer, now, log, signal, newLoopId,
+          steps: (loopId) => hostLoopSteps(loopId, { paths, workflow, threadFolder, evalContext: evals.context, now, log }),
+        });
+      } finally {
+        evals.close();
+      }
+    } finally {
+      checkpointer.db.close();
+    }
   } finally {
-    evals.close();
-    checkpointer.db.close();
     workflow.close();
   }
 }
