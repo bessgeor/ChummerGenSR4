@@ -21,4 +21,4 @@ Each task names the tasks it builds on as `(after: …)`, by number in this list
 ## 5. Verification and archive
 
 - [x] 5.1 (after: 4.1) [desktop] Run `npm start` live with two hypotheses and two tries on a confirmed cluster; record in `verification.md` the canonical hash before and after, each try's execution outcome apart from its visual result, the selection, fixture-tested scope apart from live evidence, and what remains unverified.
-- [ ] 5.2 (after: 5.1) Archive the change with `openspec archive add-parallel-repair-tries`. Evidence: `npm run openspec:validate` passes after the archive.
+- [x] 5.2 (after: 5.1) Archive the change with `openspec archive add-parallel-repair-tries`. Evidence: `npm run openspec:validate` passes after the archive.

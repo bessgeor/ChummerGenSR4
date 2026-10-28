@@ -181,3 +181,14 @@ Fixture-tested only (tasks 1.1 to 3.1):
 - A live promotion of a selected try on `accepted/<thread>`: the `mode` level of thread 2 failed to execute, so the `suite` level, the promotion and the fix commit did not run live.
 - A live selection decided by patch size: every live try made the same one-line change.
 - A live hypothesis that is refuted or abstains beside another, a live usage limit, budget stop or deadline across tries, and a live resume of a thread with several tries.
+
+## Task 5.2: archive
+
+| Command | Result |
+| --- | --- |
+| `npx openspec archive add-parallel-repair-tries --yes` | Archived as `2026-10-28-add-parallel-repair-tries`; specs updated: `deterministic-widening` + 1 added, `discrepancy-diagnosis` + 1 added, `isolated-repair` + 1 added and ~ 1 modified (totals + 3, ~ 1, - 0). |
+| `npm run openspec:validate` | Passed strict validation after the archive: 20 passed, 0 failed. |
+| `npm run workflow:test`, run 1 | Failed before the dependencies were installed in the checkout: 66 tests, 0 passed, 66 failed (exit 1), each with `Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'tsx'`. Cause: no `node_modules`; `npm ci` installed them. |
+| `npm run workflow:typecheck` | Passed (exit 0) after `npm ci`. |
+| `npm run workflow:test`, run 2 | Passed after `npm ci`: 624 tests, 624 passed, 0 failed, 0 skipped (exit 0). |
+| SHA-256 of `bin/ChummerGenSR4.exe` | `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`; the executable was not built, launched or touched. |
