@@ -46,6 +46,9 @@ type Setup = {
   readonly failing?: (tryNumber: number) => readonly string[];
   readonly poolSize?: number;
   readonly durationMs?: number;
+  readonly deadlineMinutes?: number;
+  /** The service's clock. */
+  readonly now?: () => Date;
 };
 
 /** A thread whose diagnosis confirmed the cluster (with one or two hypotheses), and a repair service with fake agents and a fake host. */
@@ -82,11 +85,11 @@ async function diagnosed(setup: Setup) {
       scratches.push(folder.path);
       return folder;
     },
-    git, worktrees: new Worktrees(git, harness.sourceRepository), now: () => new Date(), log: (line) => logged.push(line),
+    git, worktrees: new Worktrees(git, harness.sourceRepository), now: setup.now ?? (() => new Date()), log: (line) => logged.push(line),
   });
   const repairs = service.prepare(threadId, state.clusters, state.diagnosisCheck);
   const input = (repair: ClusterRepair, overrides: Partial<RepairInput> = {}): RepairInput => ({
-    threadId, options: { ...state.options, repair: { deadlineMinutes: 60, ...(setup.tries === undefined ? {} : { tries: setup.tries }) } }, repair, diagnosis: state.clusters[repair.clusterId]!,
+    threadId, options: { ...state.options, repair: { deadlineMinutes: setup.deadlineMinutes ?? 60, ...(setup.tries === undefined ? {} : { tries: setup.tries }) } }, repair, diagnosis: state.clusters[repair.clusterId]!,
     check: state.diagnosisCheck!, spentMs: state.agentMilliseconds, ...overrides,
   });
   return { harness, agents, host, service, lines: logged, scratches, repairs, input, threadId, git, store: harness.store as BaseStore, folder: threadFolder(threadId) };
@@ -309,4 +312,59 @@ test("an earlier attempt whose try lost its patch is a setup error before any tr
   const made = setup.scratches.length;
   await rejects(setup.service.repair(setup.input(next), setup.store), (error: Error) => error instanceof SetupError && /lost its patch/.test(error.message));
   equal(setup.scratches.length, made);
+});
+
+test("a try is built and checked as soon as its own jobs end, while a sibling's job still runs", async () => {
+  const stop = new AbortController();
+  const setup = await diagnosed({
+    tries: 2,
+    reply: (call, number) => (number === 2 ? { hang: true } : patchedReply({ "Chummer/frmCreate.cs": "class frmCreate { int early; }" })(call)),
+    // Try 1's build starts while try 2's job is hanging; stopping the run then ends try 2.
+    build: (number) => {
+      if (number === 1) stop.abort();
+      return 0;
+    },
+  });
+  await rejects(setup.service.repair(setup.input(setup.repairs[cluster]!, { signal: stop.signal }), setup.store), (error: Error) => error instanceof SetupError && /stopped/.test(error.message));
+  deepStrictEqual([setup.host.builds.length, setup.host.checks.length], [1, 1]);
+  equal(setup.agents.calls.filter((call) => call.kind === "repair").length, 2);
+  // No workspace of either try is left behind.
+  for (const call of setup.agents.calls.filter((item) => item.kind === "repair")) ok(!existsSync(call.workspace.folder));
+});
+
+test("the tries share the attempt's deadline: a try that waited for its place gets what is left, not a fresh deadline", async () => {
+  const minute = 60_000;
+  // One job at a time; each repair job takes 4 minutes of the clock, and the attempt's deadline is 10.
+  let clock = Date.UTC(2026, 0, 1);
+  const setup = await diagnosed({
+    tries: 2, poolSize: 1, deadlineMinutes: 10, now: () => new Date(clock),
+    reply: (call, number) => {
+      clock += 4 * minute;
+      return patchedReply({ "Chummer/frmCreate.cs": `class frmCreate { int t${number}; }` })(call);
+    },
+  });
+  const step = await setup.service.repair(setup.input(setup.repairs[cluster]!), setup.store);
+  const calls = setup.agents.calls.filter((call) => call.kind === "repair");
+  deepStrictEqual(calls.map((call) => call.timeoutMinutes), [10, 6]);
+  deepStrictEqual([step.update.status, setup.host.builds.length], ["passed", 2]);
+});
+
+test("a try whose place came after the attempt's deadline does not start, and a try past it is rejected before its build", async () => {
+  const minute = 60_000;
+  let clock = Date.UTC(2026, 0, 1);
+  const setup = await diagnosed({
+    tries: 2, poolSize: 1, deadlineMinutes: 10, now: () => new Date(clock),
+    reply: (call) => {
+      clock += 11 * minute;
+      return patchedReply({ "Chummer/frmCreate.cs": "class frmCreate { int late; }" })(call);
+    },
+  });
+  const step = await setup.service.repair(setup.input(setup.repairs[cluster]!), setup.store);
+  equal(setup.agents.calls.filter((call) => call.kind === "repair").length, 1);
+  deepStrictEqual([setup.host.builds.length, setup.host.checks.length], [0, 0]);
+  deepStrictEqual([step.update.status, step.update.attempt?.outcome, step.update.attempt?.stage], ["rejected", "rejected", "deadline"]);
+  deepStrictEqual(step.update.attempt?.tries?.map((item) => [item.try, item.outcome, item.stage]), [[1, "rejected", "deadline"], [2, "rejected", "deadline"]]);
+  ok(/try 1 \(hypothesis 1\) at deadline: the deadline passed before the build could start; try 2 \(hypothesis 1\) at deadline: the attempt's deadline passed before the try's job could start/
+    .test(step.update.attempt!.reason!), step.update.attempt!.reason!);
+  deepStrictEqual(step.update.records, [`${setup.threadId}/${cluster}/repair/1/try-1`]);
 });

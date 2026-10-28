@@ -17,6 +17,7 @@ import type { ScratchFolder } from "../host/scratch-folder.js";
 import { SetupError } from "../host/setup-error.js";
 import { maximumTries, triesOf, usesFixChanges, type RunOptions } from "../options/run-options.js";
 import { readDocument } from "../steps/read-document.js";
+import { AttemptDeadline } from "./attempt-deadline.js";
 import { attemptFolder, tryFolderName, writeArchive, type AttemptDocument, type TryDocument, type TrySummary } from "./attempt-archive.js";
 import { judgeNarrowCheck, type AttemptBuild, type CheckRow, type NarrowCheck } from "./attempt-host.js";
 import type { AttemptSummary, CheckExecution, ClusterRepair, EarlierAttempt, RepairStatus, RepairUpdate } from "./cluster-repair.js";
@@ -234,7 +235,8 @@ export class RepairService {
     const threadFolder = this.dependencies.threadFolder(input.threadId);
     const { recordId, attempt, unlisted } = await nextAttemptRecord(store, `${input.threadId}/${clusterId}/repair`, repair.records);
     const before = [...repair.records, ...unlisted];
-    const deadlineMs = settings.deadlineMinutes * 60_000;
+    // One deadline for the attempt: it starts with the first model job and bounds every try, whenever its job got its place.
+    const deadline = new AttemptDeadline(settings.deadlineMinutes * 60_000, this.dependencies.now);
     const source = this.sourceCommit(input.threadId, input.diagnosis);
     const jobs: AttemptJobs = {
       runner: this.dependencies.agents(options.agents), store, threadId: input.threadId, clusterId, contextHash: input.diagnosis.contextHash, choice,
@@ -266,7 +268,18 @@ export class RepairService {
       }
       this.dependencies.log(`${label}: running ${several ? `${plan.length} tries side by side (hypotheses ${plan.map((item) => item.hypothesis.variant).join(", ")}), each ` : ""}`
         + `${planned ? "a plan and its subtasks " : ""}on ${choice.provider} (${choice.model ?? "default model"}, effort ${choice.effort}), deadline ${settings.deadlineMinutes} min.`);
-      const outcomes = await settled(tries.map((item) => this.runJobs(item, jobs, manifest, input.diagnosis.contextFolder, source, deadlineMs, settings.deadlineMinutes, planned)));
+      // Each try goes on to its commit, guard, build and narrow check as soon as its own jobs end; a usage limit anywhere stops the tries not yet judged.
+      let usageLimit = false;
+      const runs = await settled(tries.map(async (item) => {
+        const outcome = await this.runJobs(item, jobs, manifest, input.diagnosis.contextFolder, source, deadline, planned);
+        if (outcome.kind === "quota") {
+          usageLimit = true;
+          return { outcome, judged: null };
+        }
+        if (usageLimit) return { outcome, judged: null };
+        return { outcome, judged: await this.finishTry(input, item, outcome, manifest, attempt, source, deadline, several) };
+      }));
+      const outcomes = runs.map((run) => run.outcome);
       const parked = outcomes.find((outcome) => outcome.kind === "quota");
       if (parked !== undefined && parked.kind === "quota") {
         // A usage limit in any try parks the whole attempt; the jobs the tries finished are charged.
@@ -276,7 +289,7 @@ export class RepairService {
       }
       if (outcomes.every((outcome) => outcome.kind === "not-started" && outcome.records.length === 0)) return this.budgetExhausted(label, clusterId, options.agents.runBudgetMinutes);
       if (outcomes.some((outcome) => outcome.kind === "finished" && outcome.failure === null)) this.dependencies.quota.reset();
-      const judged = await settled(tries.map((item, index) => this.finishTry(input, item, outcomes[index] as Exclude<JobsOutcome, { kind: "quota" }>, manifest, attempt, source, deadlineMs, several)));
+      const judged = runs.map((run) => run.judged!);
       return await this.conclude(input, store, judged, { attempt, label, folder: attemptFolder(threadFolder, clusterId, attempt), before, several });
     } catch (error) {
       failing = true;
@@ -306,22 +319,21 @@ export class RepairService {
   }
 
   /** A try's model jobs: one repair job, or with fix changes a plan and its subtasks, in the try's own worktree. */
-  private runJobs(item: Try, jobs: AttemptJobs, manifest: ContextManifest, contextFolder: string, source: string, deadlineMs: number,
-    deadlineMinutes: number, planned: boolean): Promise<JobsOutcome> {
+  private runJobs(item: Try, jobs: AttemptJobs, manifest: ContextManifest, contextFolder: string, source: string, deadline: AttemptDeadline, planned: boolean): Promise<JobsOutcome> {
     if (planned) {
       return new PlannedAttempt({
-        label: item.label, jobs, recordId: item.recordId, brief: item.brief, manifest, workspace: item.workspace, contextFolder, logFile: item.logFile, deadlineMs,
+        label: item.label, jobs, recordId: item.recordId, brief: item.brief, manifest, workspace: item.workspace, contextFolder, logFile: item.logFile, deadline,
         git: { worktrees: this.dependencies.worktrees, source, branch: item.branch, subtaskBranch: item.subtaskBranch },
         createScratchFolder: this.dependencies.createScratchFolder, log: this.dependencies.log,
       }).run();
     }
     return this.singleJob(item.label, jobs, item.recordId, item.brief, item.workspace, contextFolder, (folder) => this.dependencies.worktrees.add(folder, item.branch, source),
-      item.logFile(""), deadlineMinutes, new WorktreeGuard(this.dependencies.worktrees));
+      item.logFile(""), deadline, new WorktreeGuard(this.dependencies.worktrees));
   }
 
   /** A try once its jobs ended without a usage limit: its commit, judged by the guard, the build and the narrow check, and its document. */
   private async finishTry(input: RepairInput, item: Try, outcome: Exclude<JobsOutcome, { kind: "quota" }>, manifest: ContextManifest, attempt: number,
-    source: string, deadlineMs: number, several: boolean): Promise<FinishedTry> {
+    source: string, deadline: AttemptDeadline, several: boolean): Promise<FinishedTry> {
     const { clusterId } = input.repair;
     const budgetMinutes = input.options.agents.runBudgetMinutes;
     const diagnosis = item.hypothesis.diagnosis;
@@ -344,7 +356,7 @@ export class RepairService {
       ? this.dependencies.worktrees.commitAll(item.workspace.source,
         attemptMessage(input.threadId, clusterId, attempt, several ? item.tryNumber : null, item.recordId, finished.answer?.summary ?? null))
       : null;
-    const ending = await this.judge(item.label, { ...input, diagnosis }, item.workspace, finished, finished.started.getTime() + deadlineMs, source, commit);
+    const ending = await this.judge(item.label, { ...input, diagnosis }, item.workspace, finished, deadline.at, source, commit);
     const document = this.document(input, diagnosis, manifest, attempt, item, finished, ending, commit);
     const draft = finished.planned !== null && document.outcome === "passed"
       ? draftFiles(draftFixRecord({
@@ -413,21 +425,33 @@ export class RepairService {
 
   /** The single repair job of a try in a thread without fix changes, in the try's writable worktree. */
   private async singleJob(label: string, jobs: AttemptJobs, recordId: string, brief: RepairBrief, workspace: AttemptWorkspace,
-    contextFolder: string, checkout: (folder: string) => void, logFile: string, deadlineMinutes: number, guard: WorktreeGuard): Promise<JobsOutcome> {
+    contextFolder: string, checkout: (folder: string) => void, logFile: string, deadline: AttemptDeadline, guard: WorktreeGuard): Promise<JobsOutcome> {
     const ran = await runRecordedJob<RepairOutput>(jobs, {
       label, recordId, promptVersion: repairPromptVersion, prompt: repairPrompt(brief, { sourceFolder: workspace.source, contextFolder: workspace.context }),
       images: brief.manifest.members.flatMap((member) => [join(workspace.context, member.canonicalCrop), join(workspace.context, member.candidateCrop)]),
       schema: RepairOutputSchema, validate: validateRepair,
       workspace: { folder: workspace.source, readOnly: [workspace.context], writable: true },
-      // The deadline starts with the model job, so the job may not run past it.
-      timeoutMinutes: () => Math.min(jobs.choice.timeoutMinutes, deadlineMinutes), logFile,
-      stage: () => stageWorkspace(workspace, contextFolder, (folder) => {
-        checkout(folder);
-        guard.record(folder);
-      }),
+      // The attempt's deadline starts with its first model job, so a job may not run past it.
+      timeoutMinutes: () => Math.min(jobs.choice.timeoutMinutes, Math.max(deadline.minutesLeft(), 1 / 60)), expired: () => deadline.passed, logFile,
+      stage: () => {
+        stageWorkspace(workspace, contextFolder, (folder) => {
+          checkout(folder);
+          guard.record(folder);
+        });
+        deadline.start();
+      },
       outside: () => changesOutsideSource(workspace, contextFolder, guard),
     });
-    if (ran === null) return { kind: "not-started", records: [], started: null, planned: null };
+    if (ran === null) {
+      // The deadline, not the budget, stopped a job that waited for its place while a sibling try used the time.
+      if (!jobs.budgetSpent() && deadline.passed) {
+        return {
+          kind: "finished", answer: null, failure: null, records: [], started: jobs.now(), planned: null,
+          rejection: { stage: "deadline", reason: "the attempt's deadline passed before the try's job could start" },
+        };
+      }
+      return { kind: "not-started", records: [], started: null, planned: null };
+    }
     const { record, result } = ran;
     if (!result.ok && result.failure.kind === "quota_exhausted") return { kind: "quota", failure: result.failure, records: [record.recordId], chargedMs: 0 };
     return {

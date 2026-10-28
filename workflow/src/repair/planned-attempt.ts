@@ -4,6 +4,7 @@ import type { ContextManifest } from "../diagnosis/context.js";
 import type { RepairStage } from "../evals/eval-record.js";
 import type { Worktrees } from "../git/worktrees.js";
 import type { ScratchFolder } from "../host/scratch-folder.js";
+import type { AttemptDeadline } from "./attempt-deadline.js";
 import { planPrompt, subtaskPrompt } from "./plan-prompt.js";
 import { blockerClosure, PlanOutputSchema, planPromptVersion, subtaskPromptVersion, validatePlan, type PlanOutput, type Subtask } from "./plan-schemas.js";
 import type { RepairBrief } from "./repair-prompt.js";
@@ -72,7 +73,8 @@ export type PlannedAttemptInput = {
   /** The worktrees, the thread's source commit, the attempt's branch and a subtask's branch. */
   readonly git: { readonly worktrees: Worktrees; readonly source: string; readonly branch: string; readonly subtaskBranch: (task: number) => string };
   readonly logFile: (suffix: string) => string;
-  readonly deadlineMs: number;
+  /** The attempt's deadline, shared with its sibling tries. */
+  readonly deadline: AttemptDeadline;
   readonly createScratchFolder: (prefix: string) => ScratchFolder;
   readonly log: (line: string) => void;
 };
@@ -97,8 +99,7 @@ export class PlannedAttempt {
   }
 
   private minutesLeft(): number {
-    const start = this.started ?? this.input.jobs.now();
-    return (start.getTime() + this.input.deadlineMs - this.input.jobs.now().getTime()) / 60_000;
+    return this.input.deadline.minutesLeft();
   }
 
   private work(): PlannedWork {
@@ -131,18 +132,23 @@ export class PlannedAttempt {
       label: `${input.label} plan`, recordId: input.recordId, promptVersion: planPromptVersion,
       prompt: planPrompt(input.brief, { sourceFolder: workspace.source, contextFolder: workspace.context }),
       images: crops(input.manifest, workspace.context), schema: PlanOutputSchema, validate: validatePlan,
-      workspace: { folder: workspace.source, readOnly: [workspace.context] }, timeoutMinutes: () => Math.min(jobs.choice.timeoutMinutes, input.deadlineMs / 60_000),
-      logFile: input.logFile(""),
+      workspace: { folder: workspace.source, readOnly: [workspace.context] }, timeoutMinutes: () => Math.min(jobs.choice.timeoutMinutes, Math.max(input.deadline.minutesLeft(), 1 / 60)),
+      expired: () => input.deadline.passed, logFile: input.logFile(""),
       stage: () => {
         stageWorkspace(workspace, input.contextFolder, (folder) => {
           input.git.worktrees.add(folder, input.git.branch, input.git.source);
           guard.record(folder);
         });
         this.started = jobs.now();
+        input.deadline.start();
       },
       outside: () => changesOutsideSource(workspace, input.contextFolder, guard),
     });
-    if (ran === null) return { kind: "not-started", records: [], started: null, planned: null };
+    if (ran === null) {
+      // The deadline, not the budget, stopped a plan job that waited for its place while a sibling try used the time.
+      if (!jobs.budgetSpent() && input.deadline.passed) return this.finished({ rejection: { stage: "deadline", reason: "the attempt's deadline passed before the plan job could start" } });
+      return { kind: "not-started", records: [], started: null, planned: null };
+    }
     this.records.push(ran.record);
     if (!ran.result.ok) {
       this.plan = { ...this.plan, failure: ran.result.failure };
@@ -185,7 +191,14 @@ export class PlannedAttempt {
       // The subtasks that ran are judged first: a failure or a decline among them is the attempt's end, whether or not the budget stopped another.
       const decided = this.judgeWave(runs.flatMap(({ task, run }) => (run.kind === "ran" ? [{ task, run }] : [])));
       if (decided !== null) return decided;
-      if (runs.some(({ run }) => run.kind === "not-started")) return { kind: "not-started", records: this.records, started: this.started, planned: this.work() };
+      const waiting = runs.filter(({ run }) => run.kind === "not-started");
+      if (waiting.length > 0) {
+        // The deadline, not the budget, stopped the subtasks that waited for their place.
+        if (!input.jobs.budgetSpent() && input.deadline.passed) {
+          return this.finished({ rejection: { stage: "deadline", reason: `the deadline passed before subtask ${waiting.map(({ task }) => task.id).join(", ")} could start` } });
+        }
+        return { kind: "not-started", records: this.records, started: this.started, planned: this.work() };
+      }
     }
     const joined = joinChanges(this.snapshot(), plan.tasks.map((task) => ({ id: task.id, changes: this.changes.get(task.id)! })));
     if ("conflict" in joined) return this.finished({ rejection: conflictRejection(joined.conflict) });
@@ -245,7 +258,7 @@ export class PlannedAttempt {
         prompt: subtaskPrompt(input.brief, plan, task, { sourceFolder: copy.source, contextFolder: copy.context }),
         images: crops(input.manifest, copy.context), schema: RepairOutputSchema, validate: validateRepair,
         workspace: { folder: copy.source, readOnly: [copy.context], writable: true },
-        timeoutMinutes: () => Math.max(Math.min(input.jobs.choice.timeoutMinutes, this.minutesLeft()), 1 / 60), logFile: input.logFile(`-task-${task.id}`),
+        timeoutMinutes: () => Math.max(Math.min(input.jobs.choice.timeoutMinutes, this.minutesLeft()), 1 / 60), expired: () => input.deadline.passed, logFile: input.logFile(`-task-${task.id}`),
         stage: () => stageWorkspace(copy, input.contextFolder, (folder) => {
           worktrees.add(folder, input.git.subtaskBranch(task.id), input.git.source);
           applyJoin(worktrees, start, folder);

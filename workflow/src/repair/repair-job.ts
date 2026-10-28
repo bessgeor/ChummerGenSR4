@@ -33,6 +33,8 @@ export type RecordedJobSpec<T> = {
   readonly workspace: AgentJob<T>["workspace"];
   /** The job's time limit, asked when the job gets its place in the model pool, so time spent waiting for it is not given to it. */
   readonly timeoutMinutes: () => number;
+  /** Whether the attempt's deadline passed while the job waited for its place; such a job does not start. */
+  readonly expired?: () => boolean;
   readonly logFile: string;
   /** Makes the job's folders once it got its place and the budget allows it; the job's start is taken after it. */
   readonly stage: () => void;
@@ -49,7 +51,7 @@ export function chargedMilliseconds(label: string, result: AgentResult<unknown>)
 }
 
 /**
- * Runs a repair job and stores its record, a failed one too; null when the budget did not let it start. A job that
+ * Runs a repair job and stores its record, a failed one too; null when the budget or the deadline did not let it start. A job that
  * changed what it may not is `infra`, and an `infra` result ends the run as a setup error once it is recorded.
  */
 export async function runRecordedJob<T>(jobs: AttemptJobs, spec: RecordedJobSpec<T>): Promise<RecordedJob<T> | null> {
@@ -60,7 +62,7 @@ export async function runRecordedJob<T>(jobs: AttemptJobs, spec: RecordedJobSpec
     kind: "repair", label: spec.label, prompt: spec.prompt, images: spec.images, schema: spec.schema, validate: spec.validate,
     workspace: spec.workspace, choice, logFile: spec.logFile,
     mayStart: () => {
-      if (jobs.budgetSpent()) return false;
+      if (jobs.budgetSpent() || spec.expired?.() === true) return false;
       choice.timeoutMinutes = spec.timeoutMinutes();
       spec.stage();
       started = jobs.now();
