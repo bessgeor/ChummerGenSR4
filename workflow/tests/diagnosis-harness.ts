@@ -65,7 +65,7 @@ export type JobCall = {
   readonly kind: string; readonly cluster: string;
   /** The cluster's hypothesis a diagnosis job is for, from its label: 1 unless the label names another. */
   readonly variant: number;
-  readonly prompt: string; readonly images: readonly string[]; readonly provider: string;
+  readonly prompt: string; readonly images: readonly string[]; readonly provider: string; readonly timeoutMinutes: number;
   /** The job's folders and what they held while the job ran. */
   readonly workspace: { readonly folder: string; readonly readOnly: readonly string[]; readonly contextFiles: readonly string[]; readonly snapshotFiles: readonly string[] };
 };
@@ -112,7 +112,7 @@ export class FakeAgents implements AgentRunner {
       return notStarted;
     }
     const call: JobCall = {
-      kind: job.kind, cluster: job.label.split(" ")[1]!, variant: Number(/ #(\d+)$/.exec(job.label)?.[1] ?? 1), prompt: job.prompt, images: job.images, provider: job.choice.provider,
+      kind: job.kind, cluster: job.label.split(" ")[1]!, variant: Number(/ #(\d+)$/.exec(job.label)?.[1] ?? 1), prompt: job.prompt, images: job.images, provider: job.choice.provider, timeoutMinutes: job.choice.timeoutMinutes,
       workspace: { ...job.workspace, contextFiles: readdirSync(job.workspace.folder), snapshotFiles: job.workspace.readOnly[0] === undefined ? [] : readdirSync(job.workspace.readOnly[0]) },
     };
     this.calls.push(call);

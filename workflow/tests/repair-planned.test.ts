@@ -69,7 +69,7 @@ function gitOf(repository: string, refuseRemoval = false) {
 }
 
 /** A thread whose diagnosis confirmed one cluster, with fix changes, and a repair service over it with fake agents and a fake host. */
-async function planned(replies: Replies, setup: { deadlineMinutes?: number; budgetMinutes?: number; durationMs?: number; pool?: number; refuseWorktreeRemoval?: boolean } = {}) {
+async function planned(replies: Replies, setup: { deadlineMinutes?: number; budgetMinutes?: number; durationMs?: number; pool?: number; refuseWorktreeRemoval?: boolean; tries?: number } = {}) {
   let current = replies;
   const agents = new FakeAgents((call, attempt) => {
     if (call.kind !== "repair") return { answer: call.kind === "hypothesis" ? hypothesisAnswer() : challengeAnswer() };
@@ -87,7 +87,7 @@ async function planned(replies: Replies, setup: { deadlineMinutes?: number; budg
   });
   const repairs = service.prepare(threadId, state.clusters, state.diagnosisCheck);
   const input = (repair: ClusterRepair, spentMs = state.agentMilliseconds): RepairInput => ({
-    threadId, options: { ...state.options, fixChanges: true, repair: { deadlineMinutes: setup.deadlineMinutes ?? 60 }, agents: { ...state.options.agents, runBudgetMinutes: setup.budgetMinutes ?? 120 } },
+    threadId, options: { ...state.options, fixChanges: true, repair: { deadlineMinutes: setup.deadlineMinutes ?? 60, ...(setup.tries === undefined ? {} : { tries: setup.tries }) }, agents: { ...state.options.agents, runBudgetMinutes: setup.budgetMinutes ?? 120 } },
     repair, diagnosis: state.clusters[cluster]!, check: state.diagnosisCheck!, spentMs,
   });
   return {
@@ -393,4 +393,26 @@ test("a subtask's worktree git cannot remove and that stays registered ends the 
     },
   }, { refuseWorktreeRemoval: true });
   await rejects(setup.service.repair(setup.input(setup.repairs[cluster]!), setup.store), (error: Error) => error instanceof GitCommandError && /a process holds the folder/.test(error.message));
+});
+test("each try of a planned attempt plans and implements in its own worktrees, and the selected try's draft is the attempt's", async () => {
+  // The try a job belongs to, from its worktree's branch `…/attempt-1-try-<k>` or `…/attempt-1-try-<k>-task-<j>`.
+  const tryOf = (call: JobCall) => Number(/-try-(\d+)(?:-task-\d+)?$/.exec(execFileSync("git", ["-C", call.workspace.folder, "rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8" }).trim())![1]);
+  const setup = await planned({
+    plan: () => ({ answer: plan([task(1, ["Chummer/frmCreate.cs"])]) }),
+    subtask: (_id, call) => edit(call, { "Chummer/frmCreate.cs": tryOf(call) === 1 ? "class frmCreate {\n  int restored;\n  int more;\n}" : repairedSource }),
+  }, { tries: 2 });
+  const step = await setup.service.repair(setup.input(setup.repairs[cluster]!), setup.store);
+  const { prefix } = setup;
+  equal(step.update.status, "passed");
+  deepStrictEqual([...step.update.records!].sort(), [`${prefix}/1/try-1`, `${prefix}/1/try-1/task-1`, `${prefix}/1/try-2`, `${prefix}/1/try-2/task-1`]);
+  const { git } = gitOf(setup.repository);
+  const source = git(["rev-parse", `workflow/${setup.threadId}/source`]).trim();
+  for (const number of [1, 2]) equal(git(["rev-parse", `workflow/${setup.threadId}/repair/${cluster}/attempt-1-try-${number}-task-1~1`]).trim(), source);
+  const attempt = step.update.attempt!;
+  deepStrictEqual([attempt.recordId, attempt.tries?.map((item) => item.selected)], [`${prefix}/1/try-2`, [false, true]]);
+  const top = document(attempt.folder);
+  deepStrictEqual([top.selectedTry, top.planned?.plan.recordId, top.planned?.subtasks.map((item) => item.recordId)], [2, `${prefix}/1/try-2`, [`${prefix}/1/try-2/task-1`]]);
+  const draft = FixRecordSchema.parse(JSON.parse(readFileSync(join(attempt.folder, "fix", "fix.json"), "utf8")));
+  equal(draft.plan.recordId, `${prefix}/1/try-2`);
+  equal(JSON.parse(readFileSync(join(attempt.folder, "try-1", "attempt.json"), "utf8")).planned.plan.recordId, `${prefix}/1/try-1`);
 });

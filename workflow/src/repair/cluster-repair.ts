@@ -1,5 +1,6 @@
 import type { QuotaWaitMark } from "../diagnosis/cluster-diagnosis.js";
 import type { RepairStage } from "../evals/eval-record.js";
+import type { TrySummary } from "./attempt-archive.js";
 
 /** The narrow check's execution outcome, apart from its visual result. */
 export type CheckExecution = {
@@ -13,6 +14,11 @@ export type CheckExecution = {
   readonly failed: number;
 };
 
+/** Whether a narrow check failed to execute: its capture run had status 2 or invalid coverage. */
+export function lostExecution(check: CheckExecution | null): boolean {
+  return check !== null && (check.status === 2 || !check.coverageValid);
+}
+
 /** An archived attempt, as the graph state and the report see it; `attempt.json` in `folder` has everything. */
 export type AttemptSummary = {
   readonly attempt: number;
@@ -25,7 +31,17 @@ export type AttemptSummary = {
   /** The attempt's branch and commit; absent in a thread stored before attempts had them. */
   readonly branch?: string;
   readonly commit?: string | null;
+  /**
+   * Every try of an attempt that made several; the fields above are those of the selected try, or of the try that
+   * stands for a rejected attempt. Absent for an attempt of one try.
+   */
+  readonly tries?: readonly TrySummary[];
 };
+
+/** Whether the narrow check of the attempt, or of any of its tries, failed to execute. */
+export function attemptLostExecution(attempt: AttemptSummary): boolean {
+  return lostExecution(attempt.check) || (attempt.tries ?? []).some((item) => lostExecution(item.check));
+}
 
 export type RepairStatus =
   /** No attempt has finished. */

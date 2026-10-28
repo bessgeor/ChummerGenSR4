@@ -73,6 +73,8 @@ export type RepairSettings = {
   readonly deadlineMinutes: number;
   /** How many attempts a cluster may get in a thread, the first included; absent in a thread stored before it existed, which has 1. */
   readonly maxAttempts?: number;
+  /** How many tries an attempt makes per confirmed hypothesis; absent in a thread stored before it existed, which has 1. */
+  readonly tries?: number;
 };
 
 /** The tuning folder: the profile's `tuning`, else `workflow/evals/tuning`. */
@@ -82,6 +84,14 @@ export function tuningFolder(profile: Profile, repositoryRoot: string): string {
 
 export const defaultRepairDeadlineMinutes = 60;
 export const defaultRepairMaxAttempts = 2;
+export const defaultRepairTries = 1;
+/** The most tries one attempt makes, whatever its hypotheses and `repair.tries`. */
+export const maximumTries = 6;
+
+/** How many tries an attempt makes per confirmed hypothesis of its cluster. */
+export function triesOf(settings: RepairSettings): number {
+  return settings.tries ?? defaultRepairTries;
+}
 
 function cacheFolder(args: Arguments, profile: Profile, env: Environment): Pick<RunOptions, "canonicalCache" | "canonicalCacheSource"> {
   if (args.liveCanonical) return { canonicalCache: null, canonicalCacheSource: "off" };
@@ -123,6 +133,7 @@ export function resolveRunOptions(args: Arguments, profile: Profile, env: Enviro
     repair: args.noRepair ? null : {
       deadlineMinutes: profile.repair?.deadlineMinutes ?? defaultRepairDeadlineMinutes,
       maxAttempts: profile.repair?.maxAttempts ?? defaultRepairMaxAttempts,
+      tries: profile.repair?.tries ?? defaultRepairTries,
     },
     widening: !args.noRepair && !args.noWidening,
     fixChanges: args.fixChanges,

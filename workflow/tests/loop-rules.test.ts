@@ -8,6 +8,7 @@ import { clusterEnd, type ClusterEnd, type DispositionInput } from "../src/loop/
 import { threadOutcome } from "../src/loop/outcome.js";
 import { latestRejection, nextAttempts, retryLimits, retryPlan } from "../src/loop/retry.js";
 import type { RunOptions } from "../src/options/run-options.js";
+import { repairStatus } from "../src/repair/repair-report.js";
 import { finishedAttempts, mergeRepairs, type AttemptSummary, type CheckExecution, type ClusterRepair } from "../src/repair/cluster-repair.js";
 import type { ClusterWidening, WideningStage } from "../src/widening/cluster-widening.js";
 
@@ -36,6 +37,7 @@ function widening(status: ClusterWidening["status"], stage: WideningStage | null
 }
 
 const limits = { maxAttempts: 2, budgetSpent: false };
+const repairStatusOf = (item: ClusterRepair) => repairStatus({ [item.clusterId]: item });
 
 test("a rejection by repair or by widening is followed by a next attempt unless it was an execution failure or a final widening stage", () => {
   for (const stage of ["model", "deadline", "patch", "build", "check"] as const) {
@@ -158,4 +160,26 @@ test("an execution failure of an earlier widening counts in the exit status", ()
   equal(exitStatus({ captures: {}, compares: {}, widenings: {}, earlierWidenings: [lost] }), 2);
   equal(exitStatus({ captures: {}, compares: {}, widenings: {}, earlierWidenings: [widening("rejected", "mode")] }), 0);
   equal(exitStatus({ captures: {}, compares: {}, widenings: { "d-1": lost } }), 2);
+});
+test("a narrow check that failed to execute in any try of an attempt allows no next attempt, whichever try was selected", () => {
+  const tried = (selected: number, checks: readonly CheckExecution[], latest: AttemptSummary): AttemptSummary => ({
+    ...latest,
+    tries: checks.map((check, index) => ({
+      try: index + 1, hypothesis: 1, hypothesisRecord: "h", recordId: `t/d-1/repair/1/try-${index + 1}`, branch: "b", commit: null, folder: `try-${index + 1}`,
+      outcome: "passed" as const, stage: null, reason: null, selected: index + 1 === selected, patch: null, check,
+    })),
+  });
+  const none = (repairs: Record<string, ClusterRepair>, widenings: Record<string, ClusterWidening> = {}) => deepStrictEqual(retryPlan(repairs, widenings, limits), { retry: [], budget: [] });
+  // Try 1 passed and is selected; try 2's narrow check failed to execute. A visual rejection by widening does not start another attempt.
+  const lost = tried(1, [execution(0), execution(2)], attempt(1, null, execution(0)));
+  none({ "d-1": repair("passed", lost) }, { "d-1": widening("rejected", "mode") });
+  equal(latestRejection(repair("passed", lost), widening("rejected", "mode"))?.executionFailure, true);
+  // The same attempt with every try executed is followed by a next attempt.
+  const executed = tried(1, [execution(0), execution(1)], attempt(1, null, execution(0)));
+  deepStrictEqual(retryPlan({ "d-1": repair("passed", executed) }, { "d-1": widening("rejected", "mode") }, limits).retry, ["d-1"]);
+  // A rejected attempt shown by a try that executed still has no next attempt when another try did not.
+  none({ "d-1": repair("rejected", tried(1, [execution(1), execution(2)], attempt(1, "check", execution(1)))) });
+  // The exit status of the thread keeps the failure of an unselected try, whatever happens to the cluster afterwards.
+  equal(repairStatusOf(repair("passed", lost)), 2);
+  equal(repairStatusOf(repair("passed", executed)), 0);
 });

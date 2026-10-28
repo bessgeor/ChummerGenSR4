@@ -10,6 +10,10 @@ export const threadBranches = {
   source: (threadId: string) => `workflow/${threadId}/source`,
   attempt: (threadId: string, clusterId: string, attempt: number) => `workflow/${threadId}/repair/${clusterId}/attempt-${attempt}`,
   subtask: (threadId: string, clusterId: string, attempt: number, task: number) => `workflow/${threadId}/repair/${clusterId}/attempt-${attempt}-task-${task}`,
+  /** A try of an attempt that makes several. */
+  attemptTry: (threadId: string, clusterId: string, attempt: number, tryNumber: number) => `workflow/${threadId}/repair/${clusterId}/attempt-${attempt}-try-${tryNumber}`,
+  trySubtask: (threadId: string, clusterId: string, attempt: number, tryNumber: number, task: number) =>
+    `workflow/${threadId}/repair/${clusterId}/attempt-${attempt}-try-${tryNumber}-task-${task}`,
   widening: (threadId: string, clusterId: string, attempt: number) => `workflow/${threadId}/widening/${clusterId}/attempt-${attempt}`,
   fix: (threadId: string, clusterId: string) => `workflow/${threadId}/fix/${clusterId}`,
   integration: (threadId: string) => `workflow/${threadId}/integration`,

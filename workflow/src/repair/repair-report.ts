@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import type { ClusterRepair, RepairStatus } from "./cluster-repair.js";
+import { attemptLostExecution, type ClusterRepair, type RepairStatus } from "./cluster-repair.js";
 
 /** `repair.json`: each repaired cluster's status, attempt and records, with totals. */
 export type RepairDocument = {
@@ -27,7 +27,7 @@ export function writeRepairDocument(path: string, document: RepairDocument): voi
 export function repairStatus(repairs: Readonly<Record<string, ClusterRepair>>): 0 | 2 {
   const all = Object.values(repairs);
   const failed = all.some((repair) => repair.status === "failed");
-  const lost = all.some((repair) => repair.attempt?.check != null && (repair.attempt.check.status === 2 || !repair.attempt.check.coverageValid));
+  const lost = all.some((repair) => repair.attempt !== null && attemptLostExecution(repair.attempt));
   return failed || lost ? 2 : 0;
 }
 

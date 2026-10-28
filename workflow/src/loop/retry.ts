@@ -1,5 +1,5 @@
 import type { RunOptions } from "../options/run-options.js";
-import { finishedAttempts, type ClusterRepair, type EarlierAttempt, type RepairUpdate } from "../repair/cluster-repair.js";
+import { attemptLostExecution, finishedAttempts, type ClusterRepair, type EarlierAttempt, type RepairUpdate } from "../repair/cluster-repair.js";
 import type { ClusterWidening, WideningStage } from "../widening/cluster-widening.js";
 
 /** The latest rejection of a cluster's attempt, as an earlier attempt would record it, and whether it was an execution failure. */
@@ -24,15 +24,14 @@ export function latestRejection(repair: ClusterRepair, widening: ClusterWidening
   if (attempt === null) return null;
   const common = { attempt: attempt.attempt, recordId: attempt.recordId, archive: attempt.folder };
   if (repair.status === "rejected") {
-    const check = attempt.check;
     if (attempt.stage === null || attempt.reason === null) throw new Error(`Cluster ${repair.clusterId}'s attempt ${attempt.attempt} is rejected without a stage and a reason.`);
     return {
       ...common, rejectedBy: "repair", stage: attempt.stage, reason: attempt.reason,
-      executionFailure: check !== null && (check.status === 2 || !check.coverageValid),
+      executionFailure: attemptLostExecution(attempt),
     };
   }
   if (repair.status !== "passed" || widening === undefined || widening.attempt !== attempt.attempt || widening.status !== "rejected" || widening.rejection === null) return null;
-  return { ...common, rejectedBy: "widening", stage: widening.rejection.stage, reason: widening.rejection.reason, executionFailure: widening.rejection.executionFailure };
+  return { ...common, rejectedBy: "widening", stage: widening.rejection.stage, reason: widening.rejection.reason, executionFailure: widening.rejection.executionFailure || attemptLostExecution(attempt) };
 }
 
 /** Whether a rejection allows a next attempt at all: not an execution failure, and not a widening stage a next attempt would meet again. */
