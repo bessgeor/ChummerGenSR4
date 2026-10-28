@@ -19,11 +19,11 @@ import { maximumTries, triesOf, usesFixChanges, type RunOptions } from "../optio
 import { readDocument } from "../steps/read-document.js";
 import { attemptFolder, tryFolderName, writeArchive, type AttemptDocument, type TryDocument, type TrySummary } from "./attempt-archive.js";
 import { judgeNarrowCheck, type AttemptBuild, type CheckRow, type NarrowCheck } from "./attempt-host.js";
-import type { AttemptSummary, CheckExecution, ClusterRepair, RepairStatus, RepairUpdate } from "./cluster-repair.js";
+import type { AttemptSummary, CheckExecution, ClusterRepair, EarlierAttempt, RepairStatus, RepairUpdate } from "./cluster-repair.js";
 import { commitPatch, type Patch } from "./patch.js";
 import { guardPatch } from "./patch-guard.js";
 import { PlannedAttempt, type JobsOutcome } from "./planned-attempt.js";
-import { repairPrompt, type EarlierTry, type RepairBrief } from "./repair-prompt.js";
+import { repairPrompt, type EarlierBrief, type EarlierTry, type RepairBrief } from "./repair-prompt.js";
 import { runRecordedJob, type AttemptJobs } from "./repair-job.js";
 import { repairDocument, writeRepairDocument } from "./repair-report.js";
 import { maximumSubtasks } from "./plan-schemas.js";
@@ -173,10 +173,9 @@ async function nextAttemptRecord(store: BaseStore, prefix: string, records: read
   const unlisted: string[] = [];
   for (let attempt = listed.size + 1; ; attempt++) {
     const recordId = `${prefix}/${attempt}`;
-    const stored: string[] = [];
-    for (const id of attemptRecordIds(recordId)) {
-      if ((await store.get(recordNamespace("repair"), id)) !== null) stored.push(id);
-    }
+    const ids = attemptRecordIds(recordId);
+    const found = await Promise.all(ids.map((id) => store.get(recordNamespace("repair"), id)));
+    const stored = ids.filter((_, index) => found[index] !== null);
     if (stored.length === 0) return { recordId, attempt, unlisted };
     unlisted.push(...stored);
   }
@@ -243,12 +242,16 @@ export class RepairService {
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     };
     const planned = usesFixChanges(options);
-    const plan = tryPlan(hypotheses, triesOf(settings));
+    // A thread stored before attempts had tries repairs from its first confirmed hypothesis alone, as it did.
+    const plan = settings.tries === undefined ? tryPlan(hypotheses.slice(0, 1), 1) : tryPlan(hypotheses, triesOf(settings));
     const several = plan.length > 1;
+    // The earlier attempts are read before any workspace exists, so a lost archive leaves nothing behind.
+    const earlier = (repair.earlier ?? []).map(earlierBrief);
     const tries: Try[] = [];
     let failing = false;
     try {
       for (const { tryNumber, hypothesis } of plan) {
+        const brief = this.brief(input, hypothesis.diagnosis, manifest, earlier);
         const scratch = this.dependencies.createScratchFolder("workflow-repair-");
         const name = several ? `-try-${tryNumber}` : "";
         tries.push({
@@ -258,7 +261,7 @@ export class RepairService {
           branch: several ? threadBranches.attemptTry(input.threadId, clusterId, attempt, tryNumber) : threadBranches.attempt(input.threadId, clusterId, attempt),
           subtaskBranch: (task) => (several ? threadBranches.trySubtask(input.threadId, clusterId, attempt, tryNumber, task) : threadBranches.subtask(input.threadId, clusterId, attempt, task)),
           logFile: (suffix) => join(threadFolder, "repair", "logs", `${clusterId}-repair-${attempt}${name}${suffix}.jsonl`),
-          brief: this.brief(input, hypothesis.diagnosis, manifest),
+          brief,
         });
       }
       this.dependencies.log(`${label}: running ${several ? `${plan.length} tries side by side (hypotheses ${plan.map((item) => item.hypothesis.variant).join(", ")}), each ` : ""}`
@@ -292,19 +295,13 @@ export class RepairService {
   }
 
   /** What a try's jobs are told: its hypothesis and challenge, the check's observations of their predictions, and the cluster's earlier attempts. */
-  private brief(input: RepairInput, diagnosis: ClusterDiagnosis, manifest: ContextManifest): RepairBrief {
+  private brief(input: RepairInput, diagnosis: ClusterDiagnosis, manifest: ContextManifest, earlier: readonly EarlierBrief[]): RepairBrief {
     const predicted = new Set([...(diagnosis.hypothesis?.output.explanation?.predictions ?? []), ...(diagnosis.challenge?.output.alternative?.predictions ?? [])]
       .map((prediction) => `${prediction.case}/${prediction.capture}`));
     return {
       manifest, hypothesis: diagnosis.hypothesis!.output.explanation!, challenge: diagnosis.challenge?.output ?? null,
       observations: input.check.observations.filter((item) => predicted.has(`${item.case}/${item.capture}`)),
-      earlier: (input.repair.earlier ?? []).map((item) => {
-        const tries = earlierTries(item.archive);
-        return {
-          attempt: item.attempt, rejectedBy: item.rejectedBy, stage: item.stage, reason: item.reason, patch: patchText(item.archive),
-          ...(tries === null ? {} : { tries }),
-        };
-      }),
+      earlier,
     };
   }
 
@@ -364,11 +361,12 @@ export class RepairService {
     const { clusterId } = input.repair;
     const selected = selectTry(tries);
     const failed = tries.filter((item) => item.finished.failure !== null && item.finished.failure.kind !== "timeout");
-    const status: RepairStatus = selected !== null ? "passed" : failed.length > 0 ? "failed" : tries.some((item) => item.stoppedByBudget) ? "budget_exhausted" : "rejected";
+    // The budget ends the cluster only when it stopped every try; a try that ran to its end decides the attempt otherwise.
+    const ran = tries.filter((item) => !item.stoppedByBudget);
+    const status: RepairStatus = selected !== null ? "passed" : failed.length > 0 ? "failed" : ran.length === 0 ? "budget_exhausted" : "rejected";
     // A rejected attempt is shown by the try that explains its status, an execution failure before any other rejection.
     const lost = tries.find((item) => item.ending.check !== null && (item.ending.check.execution.status === 2 || !item.ending.check.execution.coverageValid));
-    const top = selected ?? (status === "failed" ? failed[0] : undefined) ?? lost
-      ?? (status === "budget_exhausted" ? tries.find((item) => item.stoppedByBudget) : undefined) ?? tries[0]!;
+    const top = selected ?? (status === "failed" ? failed[0] : undefined) ?? lost ?? ran[0] ?? tries[0]!;
     const stage = selected === null ? top.ending.stage : null;
     const reason = selected !== null ? null
       : attempt.several ? tries.map((item) => `try ${item.item.tryNumber} (hypothesis ${item.item.hypothesis.variant}) at ${item.ending.stage}: ${item.ending.reason}`).join("; ")
@@ -518,6 +516,15 @@ function patchText(archive: string): string {
   const path = join(archive, "patch.diff");
   if (!existsSync(path)) throw new SetupError(`The archive of an earlier attempt lost its patch: ${path} does not exist; restore ${archive} or start a new thread.`);
   return readFileSync(path, "utf8");
+}
+
+/** An earlier attempt as a next attempt's jobs are told about it, with every try and its patch when it made several. */
+function earlierBrief(item: EarlierAttempt): EarlierBrief {
+  const tries = earlierTries(item.archive);
+  return {
+    attempt: item.attempt, rejectedBy: item.rejectedBy, stage: item.stage, reason: item.reason, patch: patchText(item.archive),
+    ...(tries === null ? {} : { tries }),
+  };
 }
 
 /** What a next attempt reads of an earlier attempt's tries. */

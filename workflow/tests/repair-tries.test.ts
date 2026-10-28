@@ -1,6 +1,6 @@
-import { deepStrictEqual, equal, ok } from "node:assert/strict";
+import { deepStrictEqual, equal, ok, rejects } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { BaseStore } from "@langchain/langgraph-checkpoint";
@@ -9,6 +9,7 @@ import { EvalRecordSchema, putRecord, recordNamespace } from "../src/evals/eval-
 import { processBranchGit } from "../src/git/branch-git.js";
 import { Worktrees } from "../src/git/worktrees.js";
 import { createScratchFolder } from "../src/host/scratch-folder.js";
+import { SetupError } from "../src/host/setup-error.js";
 import { nextAttempts } from "../src/loop/retry.js";
 import { resolveAgentSettings } from "../src/agents/agent-settings.js";
 import type { AttemptDocument, TryDocument } from "../src/repair/attempt-archive.js";
@@ -36,7 +37,8 @@ function lines(count: number, tag: string): string {
 type Setup = {
   /** The repair answer of each try. */
   readonly reply: (call: JobCall, tryNumber: number) => Reply;
-  readonly tries: number;
+  /** Absent like in a thread stored before attempts had tries. */
+  readonly tries: number | undefined;
   /** Both hypotheses confirmed when 2. */
   readonly hypotheses?: number;
   /** The build's exit status and the narrow check's failing captures, per try. */
@@ -59,6 +61,7 @@ async function diagnosed(setup: Setup) {
   // Which try each build output belongs to, so the narrow check of a try is told apart.
   const outputs = new Map<string, number>();
   const logged: string[] = [];
+  const scratches: string[] = [];
   const threadFolder = (id: string) => join(harness.root, "threads", id);
   const git = processBranchGit(harness.sourceRepository);
   const service = new RepairService({
@@ -74,14 +77,19 @@ async function diagnosed(setup: Setup) {
       host.checkBehaviour = { observed: Object.fromEntries((setup.failing?.(number) ?? []).map((capture) => [capture, "failed" as const])) };
       return host.narrowCheck(request);
     },
-    createScratchFolder, git, worktrees: new Worktrees(git, harness.sourceRepository), now: () => new Date(), log: (line) => logged.push(line),
+    createScratchFolder: (prefix: string) => {
+      const folder = createScratchFolder(prefix);
+      scratches.push(folder.path);
+      return folder;
+    },
+    git, worktrees: new Worktrees(git, harness.sourceRepository), now: () => new Date(), log: (line) => logged.push(line),
   });
   const repairs = service.prepare(threadId, state.clusters, state.diagnosisCheck);
   const input = (repair: ClusterRepair, overrides: Partial<RepairInput> = {}): RepairInput => ({
-    threadId, options: { ...state.options, repair: { deadlineMinutes: 60, tries: setup.tries } }, repair, diagnosis: state.clusters[repair.clusterId]!,
+    threadId, options: { ...state.options, repair: { deadlineMinutes: 60, ...(setup.tries === undefined ? {} : { tries: setup.tries }) } }, repair, diagnosis: state.clusters[repair.clusterId]!,
     check: state.diagnosisCheck!, spentMs: state.agentMilliseconds, ...overrides,
   });
-  return { harness, agents, host, service, lines: logged, repairs, input, threadId, git, store: harness.store as BaseStore, folder: threadFolder(threadId) };
+  return { harness, agents, host, service, lines: logged, scratches, repairs, input, threadId, git, store: harness.store as BaseStore, folder: threadFolder(threadId) };
 }
 
 function read<T>(path: string): T {
@@ -187,7 +195,8 @@ test("every try rejected: the attempt is rejected with each try's stage and reas
   equal(second.update.attempt?.attempt, 2);
   const prompt = setup.agents.calls.filter((call) => call.kind === "repair").at(-1)!.prompt;
   ok(prompt.includes("An attempt with \"tries\" made several patches side by side"), prompt);
-  for (const number of [1, 2]) ok(prompt.includes(`int patch${number};`), `patch ${number}`);
+  // Each try's patch once: the attempt's own patch is one of them.
+  for (const number of [1, 2]) equal(prompt.split(`+class frmCreate { int patch${number}; }`).length, 2, `patch ${number}`);
   ok(prompt.includes("\"stage\": \"check\"") && prompt.includes("\"stage\": \"build\""));
 });
 
@@ -215,7 +224,7 @@ test("a usage limit in one try parks the whole attempt; the finished try's job i
   equal(second.update.attempt?.folder, join(setup.folder, "repair", cluster, "attempt-2"));
 });
 
-test("a spent budget stops the tries that did not start: the attempt passes with a try that ran, or ends budget_exhausted", async () => {
+test("a spent budget stops the tries that did not start: the attempt passes or is rejected by the try that ran", async () => {
   // One job at a time, each charging the whole budget of one minute, so the second try cannot start.
   for (const build of [0, 1]) {
     const setup = await diagnosed({ tries: 2, poolSize: 1, durationMs: 60_000, reply: (call) => patchedReply({ "Chummer/frmCreate.cs": "class frmCreate { int x; }" })(call), build: () => build });
@@ -235,8 +244,8 @@ test("a spent budget stops the tries that did not start: the attempt passes with
     if (build === 0) {
       deepStrictEqual([step.update.status, attempt.outcome, attempt.recordId], ["passed", "passed", `${setup.threadId}/${cluster}/repair/1/try-1`]);
     } else {
-      // No try passed and one never ran: the budget ended the cluster, shown by the try it stopped.
-      deepStrictEqual([step.update.status, attempt.outcome, attempt.stage, attempt.recordId], ["budget_exhausted", "rejected", "model", `${setup.threadId}/${cluster}/repair/1/try-2`]);
+      // No try passed, and the one that ran to its end decides: the attempt is rejected, shown by that try.
+      deepStrictEqual([step.update.status, attempt.outcome, attempt.stage, attempt.recordId], ["rejected", "rejected", "build", `${setup.threadId}/${cluster}/repair/1/try-1`]);
       ok(/try 1 \(hypothesis 1\) at build: .*; try 2 \(hypothesis 1\) at model: the run budget/.test(attempt.reason!), attempt.reason!);
     }
   }
@@ -281,4 +290,23 @@ test("the tries go round the confirmed hypotheses, at most six; a narrow check o
   });
   equal(repairStatus({ "d-1": repair(1) }), 0);
   equal(repairStatus({ "d-1": repair(2) }), 2);
+});
+
+test("a thread stored before attempts had tries repairs from its first confirmed hypothesis alone", async () => {
+  const setup = await diagnosed({ hypotheses: 2, tries: undefined, reply: (call) => patchedReply({ "Chummer/frmCreate.cs": "class frmCreate { int old; }" })(call) });
+  const step = await setup.service.repair(setup.input(setup.repairs[cluster]!), setup.store);
+  deepStrictEqual([step.update.status, step.update.records], ["passed", [`${setup.threadId}/${cluster}/repair/1`]]);
+  equal(read<AttemptDocument>(join(step.update.attempt!.folder, "attempt.json")).hypothesisRecord, `${setup.threadId}/${cluster}/hypothesis/1`);
+  equal(setup.agents.calls.filter((call) => call.kind === "repair").length, 1);
+});
+
+test("an earlier attempt whose try lost its patch is a setup error before any try's workspace exists", async () => {
+  const setup = await diagnosed({ tries: 2, reply: (call, number) => patchedReply({ "Chummer/frmCreate.cs": `class frmCreate { int lost${number}; }` })(call), build: () => 1 });
+  const step = await setup.service.repair(setup.input(setup.repairs[cluster]!), setup.store);
+  rmSync(join(step.update.attempt!.folder, "try-2", "patch.diff"));
+  const repairs = mergeRepairs({ [cluster]: setup.repairs[cluster]! }, { [cluster]: step.update });
+  const next = mergeRepairs(repairs, nextAttempts([cluster], repairs, {}).repairs)[cluster]!;
+  const made = setup.scratches.length;
+  await rejects(setup.service.repair(setup.input(next), setup.store), (error: Error) => error instanceof SetupError && /lost its patch/.test(error.message));
+  equal(setup.scratches.length, made);
 });
