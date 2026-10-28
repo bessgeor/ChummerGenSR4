@@ -12,7 +12,7 @@ import type { WorkflowPaths } from "../paths.js";
 import { readDocument } from "../steps/read-document.js";
 import { currentTuning, readAutoTuning, recordAutoTuning, startAutoTuning, type AutoTuningEntry } from "./auto-tuning.js";
 import { cycleActivation, cycleBaseline, cycleFolder, cycleHoldout, cycleOptions, cycleProposal, cycleTestBaseline, ensureCycle, readCycle, recoverCycle, type CycleDependencies } from "./cycle.js";
-import { defaultMaximumExposures } from "./holdout.js";
+import { defaultMaximumExposures, withLedgerLock } from "./holdout.js";
 import type { TuningRequest, TuningStateValue, TuningSteps } from "./tuning-graph.js";
 import { datasetLabel, tuningCommitTrailer, TuningRepository, type TuningWorkspace } from "./tuning-workspace.js";
 
@@ -125,8 +125,13 @@ export function tuningSteps(dependencies: TuningStepsDependencies): TuningRun {
         return null;
       }
       const cycleId = cycleIdOf(state);
-      const workspace = repository.open(cycleId, join(cycleFolder(evalsFolder, cycleId), "worktree"), folders);
-      recordAutoTuning(evalsFolder, state.tuningId, { branch: workspace.branch });
+      // Under the checkout ledger's lock, so a command that changes the checkout's tuning files either finished before the
+      // worktree was checked (its changes are uncommitted: refused) or finds the tuning's branch recorded (it is refused).
+      const workspace = withLedgerLock({ tuningFolder: inPlace.tuningFolder }, () => {
+        const opened = repository.open(cycleId, join(cycleFolder(evalsFolder, cycleId), "worktree"), folders);
+        recordAutoTuning(evalsFolder, state.tuningId, { branch: opened.branch });
+        return opened;
+      });
       log(`Automatic tuning ${state.tuningId}: the cycle works on ${inside.join(" and ")} in the worktree ${workspace.folder} on ${workspace.branch}, started at ${workspace.target} ${workspace.start}.`);
       return workspace;
     },

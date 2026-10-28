@@ -4,12 +4,14 @@ import { existsSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { certificatePath } from "../src/evals/certificate.js";
+import { partitionOf } from "../src/evals/dataset.js";
 import { runEvalCommand } from "../src/evals/eval-commands.js";
 import { processBranchGit } from "../src/git/branch-git.js";
 import { evaluatedJobKinds } from "../src/evals/evaluated-job-kinds.js";
 import { SetupError } from "../src/host/setup-error.js";
 import { readActiveFile, tuningFiles } from "../src/tuning/active-configuration.js";
-import { autoTuningPath, readAutoTuning } from "../src/tuning/auto-tuning.js";
+import { activate, rollback } from "../src/tuning/activation.js";
+import { autoTuningPath, readAutoTuning, recordAutoTuning, resolveAutoTuning, startAutoTuning } from "../src/tuning/auto-tuning.js";
 import { cycleFolder, readCycle } from "../src/tuning/cycle.js";
 import { readLedger } from "../src/tuning/holdout.js";
 import type { TuningStateValue } from "../src/tuning/tuning-graph.js";
@@ -19,6 +21,7 @@ import { requireWorkspaceStart, TuningRepository } from "../src/tuning/tuning-wo
 import type { JobCall } from "./diagnosis-harness.js";
 import { scratch, write } from "./diagnosis-fixtures.js";
 import { agents, dueTuning, proposal, refusingSteps, testCluster } from "./tuning-auto-fixtures.js";
+import { tuningFixture } from "./tuning-eval-fixtures.js";
 
 /** A repository on `main` with the tuning and certificates folders of a checkout, `out/` ignored as in the repository. */
 function tuningRepository(autocrlf = false) {
@@ -272,6 +275,50 @@ test("the tuning commands that change the tuning files in the checkout wait whil
   // Finished and merged, the tuning no longer holds them back.
   equal(await runEvalCommand(["tune", "auto"], { ...context, signal: new AbortController().signal }), 0, context.lines.join("\n"));
   equal(await runEvalCommand(["tune", "rollback", "--job", "hypothesis"], context), 0, context.lines.join("\n"));
+});
+
+test("a cycle run by hand that reaches its holdout after an automatic tuning took the tuning files into its worktree is stopped before it writes the ledger", async () => {
+  const repo = tuningRepository();
+  const ids = ["d-0000000000000100", "d-0000000000000400"];
+  const seed = Array.from({ length: 100 }, (_, index) => `seed-${index}`).find((value) => partitionOf(value, ids[0]!, 50) !== partitionOf(value, ids[1]!, 50))!;
+  const fixture = await tuningFixture(50, seed);
+  const evalsFolder = fixture.context.paths.evalsFolder;
+  let started = false;
+  // The candidate is right on every cluster and the code's prompt on none, so the cycle goes on to its holdout.
+  const fake = agents([proposal("Cite the capture.")], "none", { "Cite the capture.": "all" }, (call) => {
+    // The cycle passed its start check long ago; while its proposal is measured, an automatic tuning becomes due and takes the folders into its worktree.
+    if (!started && call.prompt.includes("+tuned-")) {
+      started = true;
+      startAutoTuning({ store: fixture.context.store, evalsFolder, now: fixture.context.now, newTuningId: () => "tune-race" },
+        { kind: "due", records: ["record-1"], every: 1, forced: true, settings: resolveAutoTuning(undefined) });
+      recordAutoTuning(evalsFolder, "tune-race", { branch: "tuning/tc-race" });
+    }
+    return false;
+  });
+  const context = { ...fixture.context, agents: () => fake, tuningFolder: repo.folders.tuningFolder, certificatesFolder: repo.folders.certificatesFolder };
+  await rejects(runEvalCommand(["tune", "cycle", "--dataset", fixture.dataset, "--min-pass", "0.3"], context),
+    (error: Error) => error instanceof SetupError && error.message.includes("tune cycle") && error.message.includes("tune-race") && error.message.includes("tuning/tc-race") && error.message.includes("has not merged them yet"));
+  ok(started);
+  // Nothing was recorded in the checkout, and the ledger's lock is released.
+  equal(existsSync(tuningFiles(repo.tuningFolder).holdout), false);
+  equal(existsSync(`${tuningFiles(repo.tuningFolder).holdout}.lock`), false);
+  equal(repo.run("status", "--porcelain=v1"), "");
+});
+
+test("activate and rollback run their guard holding the ledger's lock, and release it when the guard refuses", () => {
+  const folder = scratch("workflow-guard-");
+  const tuningFolder = join(folder, "tuning");
+  const lock = `${tuningFiles(tuningFolder).holdout}.lock`;
+  const held: boolean[] = [];
+  const guard = () => {
+    held.push(existsSync(lock));
+    throw new SetupError("guarded");
+  };
+  const refused = (error: Error) => error instanceof SetupError && error.message === "guarded";
+  throws(() => rollback({ tuningFolder, certificatesFolder: join(folder, "certificates"), ledgerGuard: guard }, "hypothesis", null, new Date()), refused);
+  throws(() => activate({ evalsFolder: folder, tuningFolder, certificatesFolder: join(folder, "certificates"), ledgerGuard: guard }, { run: "r", baseline: "b", thresholds: { metric: "prediction", minPass: 0.5, maxMeanCostUsd: null } }, new Date()), refused);
+  deepStrictEqual(held, [true, true]);
+  equal(existsSync(lock), false);
 });
 
 test("a stopped tuning whose worktree was removed meanwhile is a setup error, and writes nothing in its place", async () => {
