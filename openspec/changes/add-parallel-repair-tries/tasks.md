@@ -12,7 +12,7 @@ Each task names the tasks it builds on as `(after: …)`, by number in this list
 
 ## 3. Widening and reports
 
-- [ ] 3.1 (after: 2.1) Widen the selected try and show tries in `repair.json`, `widening.json` and the report. Evidence: widening graph tests with a two-try attempt and the report lines.
+- [x] 3.1 (after: 2.1) Widen the selected try and show tries in `repair.json`, `widening.json` and the report. Evidence: widening graph tests with a two-try attempt and the report lines.
 
 ## 4. Docs
 

@@ -58,9 +58,10 @@ export function describeWidening(widenings: readonly ClusterWidening[], accepted
   const lines: string[] = [];
   for (const item of widenings) {
     const head = `Widening ${item.clusterId}`;
-    if (item.status === "promoted") lines.push(`${head}: attempt ${item.attempt} PROMOTED as ${item.commit} on ${accepted?.branch ?? "the accepted branch"}`);
-    else if (item.rejection !== null) lines.push(`${head}: attempt ${item.attempt} ${item.status === "rejected" ? "rejected" : "failing"} at ${item.rejection.stage}: ${item.rejection.reason}`);
-    else lines.push(`${head}: attempt ${item.attempt} ${item.status}`);
+    const attempt = `attempt ${item.attempt}${item.tries !== undefined && item.tries > 1 ? ` try ${item.selectedTry} of ${item.tries}` : ""}`;
+    if (item.status === "promoted") lines.push(`${head}: ${attempt} PROMOTED as ${item.commit} on ${accepted?.branch ?? "the accepted branch"}`);
+    else if (item.rejection !== null) lines.push(`${head}: ${attempt} ${item.status === "rejected" ? "rejected" : "failing"} at ${item.rejection.stage}: ${item.rejection.reason}`);
+    else lines.push(`${head}: ${attempt} ${item.status}`);
     for (const level of item.levels) lines.push(...levelLines(head, level));
   }
   if (path !== null) {

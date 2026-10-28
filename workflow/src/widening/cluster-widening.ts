@@ -39,9 +39,13 @@ export type WideningStatus =
 export type ClusterWidening = {
   readonly clusterId: string;
   readonly attempt: number;
+  /** The repair record of the widened try: the attempt's, or its selected try's when it made several. */
   readonly recordId: string;
   /** The attempt's repair archive. */
   readonly archive: string;
+  /** The try the attempt selected, the only one widened, and how many tries it made; absent for an archive written before attempts had tries. */
+  readonly selectedTry?: number;
+  readonly tries?: number;
   /** `widening/<cluster>/attempt-<n>/` in the thread's folder: the widened source and build, and `widening.json`; every attempt keeps its own folder. */
   readonly folder: string;
   readonly scope: ClusterScope;
