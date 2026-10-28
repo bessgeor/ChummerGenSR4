@@ -37,7 +37,6 @@ Review findings not changed:
 | `node --import tsx --test workflow/tests/lane-agent.test.ts` | Run alone after run 1: 15 tests, 15 passed (exit 0). |
 | `npm run workflow:test`, run 2 | Passed with the new tests: 599 tests, 599 passed, 0 failed, 0 skipped (exit 0). |
 | `npm run workflow:test`, run 3 | Passed on the final source, after the review fixes (an attempt rejected by the try that ran when the budget stopped another, earlier attempts read before any workspace exists, and a thread stored before attempts had tries): 601 tests, 601 passed, 0 failed, 0 skipped (exit 0). The four lane tests of run 1 passed in runs 2 and 3. |
-| `npm run workflow:test`, run 4 | Passed on the final source, after the second review round (the report keeps the tries of an attempt that a next attempt followed): 624 tests, 624 passed, 0 failed, 0 skipped (exit 0). |
 | `npm run workflow:test`, run 4 | Passed after the second review round (each try goes on to its own build and check as soon as its jobs end; one deadline for the attempt): 604 tests, 604 passed, 0 failed, 0 skipped (exit 0). |
 | `npm run openspec:validate` | Passed strict validation: 21 passed, 0 failed. |
 | SHA-256 of `bin/ChummerGenSR4.exe` | `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`; the executable was not built, launched or touched. |
@@ -72,6 +71,9 @@ Review findings not changed:
 | `npm run workflow:test`, run 1 | Passed with the new tests: 622 tests, 622 passed, 0 failed, 0 skipped (exit 0). |
 | `npm run workflow:test`, run 2 | Passed before the review: 622 tests, 622 passed, 0 failed, 0 skipped (exit 0). |
 | `npm run workflow:test`, run 3 | Passed on the final source, after the review fixes (the try line ends with its reason, a widening prepared without its try names it when it ends, stricter archive checks): 623 tests, 623 passed, 0 failed, 0 skipped (exit 0). |
+| `npm run workflow:test`, run 4 | Passed on the final source, after the second review round (the report keeps the tries of an attempt that a next attempt followed): 624 tests, 624 passed, 0 failed, 0 skipped (exit 0). |
+| `npm run workflow:test`, CI run on the pushed branch | Failed: 624 tests, 623 passed, 1 failed (exit 1). Failing test, `repair-tries.test.ts` (task 2.1's test, nondeterministic): `a usage limit in one try parks the whole attempt; the finished try's job is charged, and the attempt starts again under a new number`, at line 220 (`deepStrictEqual([setup.host.builds.length, setup.host.checks.length], [0, 0])`): `Expected values to be strictly deep-equal: + actual - expected [ +   1, +   1 -   0, -   0 ]`. The finished try 2 was built and checked before try 1's usage limit was noted, because the test did not order the two tries' jobs. The same commit passed in the pull request's own CI run and in local runs 1 to 4. |
+| `npm run workflow:test`, run 5 | Passed after the test held try 2's job until try 1's job ended with the limit and the attempt had time to note it: 624 tests, 624 passed, 0 failed, 0 skipped (exit 0). |
 | `npm run openspec:validate` | Passed strict validation: 21 passed, 0 failed. |
 | SHA-256 of `bin/ChummerGenSR4.exe` | `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`; the executable was not built, launched or touched. |
 
