@@ -137,8 +137,8 @@ That a live `npm start` thread merges a real promoted fix into the branch it sta
 | Command | Result |
 | --- | --- |
 | `npm run workflow:typecheck` | Passed (exit 0). |
-| `npm run workflow:test` | Passed: 576 tests, 576 passed, 0 failed, 0 skipped (exit 0). |
-| `npm run openspec:validate` | Passed strict validation: 21 passed, 0 failed (run again after the final wording change to `AGENTS.md`; the typecheck and test results are unchanged, as no code changed). |
+| `npm run workflow:test` | Passed: 624 tests, 624 passed, 0 failed, 0 skipped (exit 0). |
+| `npm run openspec:validate` | Passed strict validation: 20 passed, 0 failed (run after the branch was rebased onto the current master and the docs merged with its parallel-tries text). |
 | SHA-256 of `bin/ChummerGenSR4.exe` | `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`; the executable was not built, launched or touched. |
 
 ## Fixture-tested scope
