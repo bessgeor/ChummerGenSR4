@@ -8,7 +8,7 @@ Each task names the tasks it builds on as `(after: …)`, by number in this list
 
 ## 2. Parallel tries
 
-- [ ] 2.1 (after: 1.1) Add `repair.tries`, run an attempt's tries side by side in their own worktrees and select the best passed try. Evidence: repair tests for two passed tries with different sizes, a tie, every try rejected, a usage limit in one try, a spent budget, and the archive's `try-<k>/` folders.
+- [x] 2.1 (after: 1.1) Add `repair.tries`, run an attempt's tries side by side in their own worktrees and select the best passed try. Evidence: repair tests for two passed tries with different sizes, a tie, every try rejected, a usage limit in one try, a spent budget, and the archive's `try-<k>/` folders.
 
 ## 3. Widening and reports
 
