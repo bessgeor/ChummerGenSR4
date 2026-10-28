@@ -182,7 +182,7 @@ export type HarnessOptions = {
   /** The active configurations a new thread stores in its options. */
   readonly tuning?: DispatchedTuning;
   /** Turns repair on (it is off by default here), with this deadline and fake host for builds and narrow checks. */
-  readonly repair?: { readonly deadlineMinutes: number; readonly maxAttempts?: number; readonly host: (root: string) => FakeRepairHost };
+  readonly repair?: { readonly deadlineMinutes: number; readonly maxAttempts?: number; readonly tries?: number; readonly host: (root: string) => FakeRepairHost };
   /**
    * Turns widening on (with repair; off by default here), with a fake host for builds and captures, more build cases
    * for the case file, and a wrapper around the git of the accepted branch.
@@ -300,7 +300,9 @@ export function diagnosisHarness(options: HarnessOptions) {
       caseFile: join(root, "cases.json"), cases: [], captures: [], settingsOverlay: null, threshold: null, canonicalCache: "cache",
       canonicalCacheSource: "default", noOcr: false, tessdata: null, only: command.arguments.only, recapture: false,
       diagnosis: !command.arguments.noDiagnosis, agents: settings, unattended: command.arguments.unattended, certificates: join(root, "certificates"),
-      repair: options.repair === undefined || command.arguments.noRepair ? null : { deadlineMinutes: options.repair.deadlineMinutes, maxAttempts: options.repair.maxAttempts ?? 1 },
+      repair: options.repair === undefined || command.arguments.noRepair ? null : {
+        deadlineMinutes: options.repair.deadlineMinutes, maxAttempts: options.repair.maxAttempts ?? 1, ...(options.repair.tries === undefined ? {} : { tries: options.repair.tries }),
+      },
       widening: options.repair !== undefined && options.widening !== undefined && !command.arguments.noRepair && !command.arguments.noWidening,
       fixChanges: command.arguments.fixChanges, ...(options.hypotheses === undefined ? {} : { hypotheses: options.hypotheses }), ...(options.tuning === undefined ? {} : { tuning: options.tuning }),
     }),
