@@ -108,3 +108,76 @@ This task changes only documentation; no live run belongs to it.
 Review findings changed: the Evaluation section's `check` label is the outcome of the record's own hypothesis; a try whose job failed with `invalid_output` or `refused` fails the attempt when no try passed; a try already building when a usage limit parks the attempt finishes its build and narrow check, whose result is discarded; tries are numbered round by round and those past the sixth are left out; the plan and subtask records of a try; the rule on execution failures stated once; the README checks every explanation given.
 
 Review findings changed after the second review: the Repair section describes the attempt's working folder as each try's git worktree on its branch, the patch as the difference between the try's commit and the thread's source commit, and the `repair` label as on the attempt's record, or with several tries on each try's record.
+
+## Task 5.1: a live run with two hypotheses and two tries
+
+### Checks on the branch
+
+| Command | Result |
+| --- | --- |
+| `npm run workflow:typecheck` | Passed (exit 0). |
+| `npm run workflow:test` | Passed: 624 tests, 624 passed, 0 failed, 0 skipped (exit 0). |
+| `npm run openspec:validate` | Passed strict validation: 21 passed, 0 failed. |
+
+### Setup
+
+Both live threads ran on commit `ca9001bf` (`workflow/` tree `88c897477745ac76cf9fb3b6de1908a4cc48bf61`); this task changes only this file and `tasks.md`.
+
+- No case of the suite differs between the canonical executable and a candidate built from this branch, so the candidate source was changed for the runs only, without committing: in `Chummer/frmCreate.Designer.cs` the location of `lblMetatypeSourceLabel` (the "Source:" caption on the Common tab of the build form) went from `(628, 32)` to `(640, 32)`; file SHA-256 `b793470b…4911` before, `805b5d14…264c` while seeded. After the runs the file was written back from `HEAD`; its hash was `b793470b…4911` again and `git status` was clean.
+- Command: `npm.cmd start -- --settings-overlay out/overlays/fixture-books --case Diego_v_alpha2_by_bessgeor --capture common`. The overlay's `settings/default.xml` holds the fixture books (SHA-256 `e85690ffd9c6257427e5a059bf3258f7d025e2bb8ff45f44877653c43221dda1`). The canonical cache came from `PARITY_CANONICAL_CACHE`, a folder outside the repository that the worktrees share. `PARITY_WORKFLOW_PROFILE` named a profile outside the repository that sets only `agents.executables.claude` (the Claude Code CLI 2.1.308), `diagnosis.hypotheses: 2` and `repair.tries: 2`. Providers, models, efforts, the model pool (2), the deadline (60 minutes) and `repair.maxAttempts` (2) were the defaults.
+- Canonical hash: `Get-FileHash bin/ChummerGenSR4.exe` printed `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56` before each thread and after the last run. Every build and capture runner call of both threads printed the same value as `Canonical SHA-256 before` and `after`, and each capture runner call printed it for its staged copy too.
+
+### Thread 1: an execution failure at the first capture
+
+Thread `wf-20261028T023537Z-ebe9b556`. Capture run `20261028T023549Z-dcc93d90` exited with 2, and its coverage was invalid: the candidate failed at startup with `window-activation: window 35000288 was not in the foreground after 10 attempts 200 ms apart`. The window in the foreground belonged to another ChummerGenSR4 process, showing a character that is in no fixture; that process was gone right after the run. The canonical side came from the cache. Visual: 0 rows; completeness 16 planned, 16 execution-lost. Triage found 0 clusters and 16 other findings. Outcome `findings_remaining`, exit 2. A foreign window caused this failure, not the change. The same command was run once more as thread 2.
+
+### Thread 2: two hypotheses, four tries, one selected
+
+Thread `wf-20261028T023648Z-52367ef0`, 34.5 min. Exit status 2, outcome `findings_remaining`. The causes are two execution failures, described below; both happened while the desktop was in use.
+
+- Capture. Execution: run `20261028T023653Z-4f6f73f3` exited with 1, coverage valid (contiguous, 0 failures, 6 optional absent); the canonical side came from the cache. Visual: 0 passed, 1 failed; compare `differences` with 1 discrepancy in 1 group; completeness 16 planned, 1 reported, 15 filtered, 0 unaccounted. Triage: 1 cluster, `d-14297e69d59676fd`, and 0 other findings.
+- Diagnosis. Two hypothesis jobs ran on Claude with effort medium (`hypothesis d-14297e69d59676fd #1` and `#2`), started side by side. Both named `lblMetatypeSourceLabel` at X=640 in `frmCreate`. Each was challenged on its own by a Codex job (`challenge … #1` and `#2`), and both challenges found no alternative. One check run, `20261028T023955Z-f7d3e3ff`, covered `build-facemage_Sam`, `career-facemage_Sam_career`, `build-Diego_v_alpha2_by_bessgeor` and `build-rigger` (`common`, `skills`) for both hypotheses. Every canonical side of the check ran live. Execution: capture status 1, coverage valid, 0 failures. Observations: `build-facemage_Sam/common` differs, `career-facemage_Sam_career/common` matches, `build-Diego_v_alpha2_by_bessgeor/skills` matches, `build-rigger/common` differs. The report line read `Diagnosis check: d-14297e69d59676fd confirmed (hypothesis 1 confirmed, hypothesis 2 confirmed)`. In `out/workflow/store.sqlite`, the records `…/hypothesis/1`, `…/hypothesis/2`, `…/challenge/1` and `…/challenge/2` each have the `check` label `confirmed`.
+- Repair. The log read `running 4 tries side by side (hypotheses 1, 2, 1, 2), each on claude (default model, effort high), deadline 60 min`. Under the model pool of 2, the try records give start times of 02:48:37Z and 02:48:39Z for tries 1 and 2, and of 02:49:10Z and 02:49:12Z for tries 3 and 4. Each try had its own worktree and branch, `workflow/wf-20261028T023648Z-52367ef0/repair/d-14297e69d59676fd/attempt-1-try-<k>`, and its own record, `…/repair/1/try-<k>`. Each try changed `Chummer/frmCreate.Designer.cs` from `Point(640, 32)` back to `Point(628, 32)` (1 line added, 1 removed; the four `patch.diff` files are byte for byte the same). Each try's build exited with 0 in its own folder. The four scratch folders named in the log were gone after the attempt.
+
+| Try | Hypothesis | Narrow check run | Execution | Visual | Outcome |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 1 | `20261028T024915Z-612565ac` | capture status 0, coverage valid, 0 failures | 1 passed, 0 failed | passed, **selected** |
+| 2 | 2 | `20261028T025057Z-da0dca0e` | capture status 0, coverage valid, 0 failures | 1 passed, 0 failed | passed, not selected |
+| 3 | 1 | `20261028T025006Z-3b1450aa` | capture status 0, coverage valid, 0 failures | 1 passed, 0 failed | passed, not selected |
+| 4 | 2 | `20261028T025148Z-feddc83a` | capture status 2, coverage INVALID (`failure:build-Diego_v_alpha2_by_bessgeor/candidate`), 1 failure | 0 passed, 0 failed | rejected at `check` |
+
+  Every narrow check took its canonical side from the cache (entry `c2ed9b23…9ba6`); the candidate side ran live. Try 4's candidate failed at its first action with `pointer: the pointer moved from {X=960,Y=17} to {X=961,Y=17} during the side`. This session gave no input during the run. This is an execution failure of that try's check; it is not a visual result.
+- Selection. Tries 1, 2 and 3 passed with the same size: 2 changed lines in 1 file. The tie went to the lowest try number. The report read `attempt 1 PASSED the narrow check with try 1 of 4`, then a line per try, ending `SELECTED, passed` for try 1, `not selected, passed` for tries 2 and 3, and `not selected, rejected at check: execution failure: …` for try 4. Each try line was followed by its narrow check's execution line and then its visual line. The attempt's `attempt.json` has `selectedTry: 1` and lists the four tries in `tries`; its top level holds try 1's record, branch, commit `bb136bc9…` and check. The archive holds `try-1/` to `try-4/`, each with its own `attempt.json`, `patch.diff`, files and build log. In the store, the repair labels are `passed` on `…/try-1`, `…/try-2` and `…/try-3`, and `rejected` at `check` on `…/try-4`.
+- Widening. Only try 1 was widened: one widened build (exit 0), and `widening.json` names `selectedTry` 1 of `tries` 4 and record `…/repair/1/try-1`.
+  - `narrow`: run `20261028T025209Z-cfce6142`, execution status 0, coverage valid; visual 1 passed, 0 failed.
+  - `character`: run `20261028T025259Z-6904be16`, execution status 0, coverage valid; visual 13 passed, 0 failed.
+  - `mode`: run `20261028T025534Z-a1be4e59`, execution status 2, coverage INVALID. The canonical side of `build-rigger` failed at startup with `window-activation: … (foreground: window 133398 'Claude' … (claude))`, a desktop app window that took the foreground. Visual: 68 passed, 0 failed. The attempt was rejected at `mode` as an execution failure (`Widening d-14297e69d59676fd: attempt 1 try 1 of 4 rejected at mode`). Nothing was promoted, and `accepted/wf-20261028T023648Z-52367ef0` got no commit. Because the failure was an execution failure, no next attempt followed (`Loop d-14297e69d59676fd: widening_rejected after 1 attempt`). Only `…/try-1` got a `widening` label, `rejected` at `mode`; the other tries have none.
+- Classifying the `mode` failure: `build-rigger` was run once more on its own, with `npm.cmd run parity -- --settings-overlay out/overlays/fixture-books --case build-rigger --capture common` and no cache, so the canonical side ran live; the candidate was the thread's seeded build. Run `20261028T031203Z-7fd7d7bf`: both sides `ok`, coverage valid, 0 failures. Visual: `build-rigger/common` failed with 0.000389, the seeded difference (the check run had observed it). The canonical hash was the same before and after. The canonical side starts fine when no other window takes the foreground, so the `mode` failure was caused by the foreground window, not by the code.
+
+### Fixture-tested scope apart from live evidence
+
+Live (thread 2):
+- Two hypotheses per cluster, each challenged on its own.
+- One check over both hypotheses, a label per hypothesis.
+- Four tries, each in its own worktree and branch, with its own build and narrow check.
+- The selection rule on a three-way tie (lowest try number).
+- One try rejected by an execution failure of its own narrow check, while the attempt passed with another try.
+- The archive's `try-<k>/` folders and `selectedTry`, and the report lines per try.
+- Only the selected try widened and labelled.
+- A widening level's execution failure, which allows no next attempt.
+
+Fixture-tested only (tasks 1.1 to 3.1):
+- A refuted or abstaining hypothesis beside a confirmed one.
+- Tries of different sizes, and a tie decided by the number of files.
+- Every try rejected, and the next attempt's prompt listing every try.
+- A usage limit in one try.
+- A spent budget or the deadline across tries.
+- Resuming a thread during a try or a widening level.
+- A promotion of a selected try.
+- Fix changes with tries.
+
+### Unverified
+
+- A live promotion of a selected try on `accepted/<thread>`: the `mode` level of thread 2 failed to execute, so the `suite` level, the promotion and the fix commit did not run live.
+- A live selection decided by patch size: every live try made the same one-line change.
+- A live hypothesis that is refuted or abstains beside another, a live usage limit, budget stop or deadline across tries, and a live resume of a thread with several tries.
