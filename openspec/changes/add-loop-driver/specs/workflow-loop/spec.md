@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: npm run loop runs threads until nothing changes
-`npm run loop -- [options]` SHALL accept the options of `npm start` except `--only` and `--resume`, and `--max-runs <n>` (a positive integer, no limit by default); an unknown option, a missing value or an excluded option SHALL be a setup error before anything runs. It SHALL start a loop with an ID it prints, run a workflow thread with those options, then run an automatic tuning, which tunes only when it is due, and start the next thread when the last thread merged a fix, its discovery admitted a scenario, or the tuning activated a configuration. It SHALL end `converged` when a thread and the tuning after it changed none of these, `limit` when it ran `--max-runs` threads, and `failed` when a thread exited with 2. Each thread SHALL be started with the loop's options as `npm start` would start it then, so it plans the scenarios admitted so far and builds the source merged so far.
+`npm run loop -- [options]` SHALL accept the options of `npm start` except `--only` and `--resume`, and `--max-runs <n>` (a positive integer, no limit by default); an unknown option, a missing value or an excluded option SHALL be a setup error before anything runs. It SHALL start a loop with an ID it prints, run a workflow thread with those options, then run an automatic tuning, which tunes only when it is due, and start the next thread when the last thread merged a fix, its discovery admitted a scenario, or the tuning activated a configuration. It SHALL end `converged` when a thread and the tuning after it changed none of these, `limit` when it ran `--max-runs` threads, and `failed` when a thread exited with 2 or the tuning after it failed (exit status 2). Each thread SHALL be started with the loop's options as `npm start` would start it then, so it plans the scenarios admitted so far and builds the source merged so far.
 
 #### Scenario: A fix, then nothing new
 - **WHEN** the first thread merges a fix and the second thread finds nothing to fix, discovers nothing new and no tuning is due
@@ -10,6 +10,10 @@
 #### Scenario: Execution failures
 - **WHEN** a thread of the loop exits with 2
 - **THEN** the loop ends `failed` with exit status 2 and starts no further thread or tuning
+
+#### Scenario: A failed tuning
+- **WHEN** the automatic tuning after a thread fails with exit status 2, whatever the thread changed
+- **THEN** the loop ends `failed` with exit status 2, names the tuning in its decision and starts no further thread
 
 #### Scenario: Limit
 - **WHEN** `npm run loop -- --max-runs 1` runs and the thread merges a fix

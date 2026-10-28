@@ -100,7 +100,7 @@ function nodeName(text: string): NodeName {
  * Parses the command line; an unknown or workflow-owned option, a missing or invalid value and contradicting
  * options are setup errors. `--case` and `--capture` accumulate; a repeated single-value option keeps its last value.
  */
-export function parseArguments(args: readonly string[]): Command {
+export function parseArguments(args: readonly string[], helpCommand = "npm start -- --help"): Command {
   if (args.includes("--help") || args.includes("-h")) {
     return { kind: "help" };
   }
@@ -143,7 +143,7 @@ export function parseArguments(args: readonly string[]): Command {
       default:
         throw new SetupError(workflowOwned.has(option)
           ? `Option '${option}' is set by the workflow; run npm run parity to use it.`
-          : `Unknown option '${option}'. See npm start -- --help.`);
+          : `Unknown option '${option}'. See ${helpCommand}.`);
     }
   }
 

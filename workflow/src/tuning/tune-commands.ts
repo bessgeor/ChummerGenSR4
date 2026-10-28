@@ -230,39 +230,52 @@ export function cycleLines(cycle: Cycle): string[] {
   ];
 }
 
+/** What an automatic tuning did: nothing when it was not due, else the tuning it ran or continued with its cycle's outcome. */
+export type AutoTuningResult =
+  | { readonly kind: "not_due"; readonly count: number; readonly every: number }
+  | { readonly kind: "tuned"; readonly tuningId: string; readonly cycleId: string; readonly outcome: Exclude<Cycle["outcome"], "running">; readonly status: number };
+
+/** What the caller of an automatic tuning learns before its thread runs: the tuning's ID and its cycle's. */
+export type AutoTuningStart = { readonly tuningId: string; readonly cycleId: string };
+
 /**
- * Counts the new hypothesis records. Not due prints the count and exits with 0. A due tuning runs as a new tuning
+ * Counts the new hypothesis records. Not due prints the count and changes nothing. A due tuning runs as a new tuning
  * thread: it records the tuning as in progress with the records it counts, freezes the next version of the automatic
  * dataset and runs a cycle on it. A tuning in progress is continued first, without counting or freezing again.
+ * `onStart` learns the tuning before its thread runs. This is `tune auto`; a setup error is thrown.
  */
-const auto: TuneCommand = async (args, context) => {
-  const options = CommandOptions.parse("tune auto", args, [], ["force"]);
+export async function runAutoTuning(context: EvalContext, force: boolean, onStart: (start: AutoTuningStart) => void = () => {}): Promise<AutoTuningResult> {
   const settings = context.autoTuning();
   const evalsFolder = context.paths.evalsFolder;
-  const trigger = await checkAutoTuning({ store: context.store, evalsFolder, now: context.now, newTuningId }, settings, options.flag("force"));
-  if (trigger.kind === "not_due") {
+  const notDue = (trigger: Extract<AutoTuningTrigger, { kind: "not_due" }>): AutoTuningResult => {
     context.log(`Automatic tuning: ${trigger.count} of ${trigger.every} new hypothesis records; not due.`);
-    return 0;
-  }
+    return { kind: "not_due", count: trigger.count, every: trigger.every };
+  };
+  const trigger = await checkAutoTuning({ store: context.store, evalsFolder, now: context.now, newTuningId }, settings, force);
+  if (trigger.kind === "not_due") return notDue(trigger);
   // One tune auto runs a tuning at a time; the trigger is read again under the lock, as another may have run meanwhile.
   return withAutoTuningRun(evalsFolder, async () => {
-    const locked = await checkAutoTuning({ store: context.store, evalsFolder, now: context.now, newTuningId }, settings, options.flag("force"));
-    if (locked.kind === "not_due") {
-      context.log(`Automatic tuning: ${locked.count} of ${locked.every} new hypothesis records; not due.`);
-      return 0;
-    }
+    const locked = await checkAutoTuning({ store: context.store, evalsFolder, now: context.now, newTuningId }, settings, force);
+    if (locked.kind === "not_due") return notDue(locked);
     // A new tuning whose folders lie inside the repository needs a branch to merge into and those folders committed: it
     // starts nothing without them. A tuning in progress checks them when it adds its worktree.
     if (locked.kind === "due") {
       const folders = { tuningFolder: context.tuningFolder(), certificatesFolder: context.certificatesFolder() };
       if (repositoryPaths(context.paths.repositoryRoot, folders).length > 0) requireWorkspaceStart(context.branchGit, context.paths.repositoryRoot, folders);
     }
-    return runAutoTuning(context, locked, settings);
+    return tuneNow(context, locked, settings, onStart);
   });
+}
+
+const auto: TuneCommand = async (args, context) => {
+  const options = CommandOptions.parse("tune auto", args, [], ["force"]);
+  const result = await runAutoTuning(context, options.flag("force"));
+  return result.kind === "not_due" ? 0 : result.status;
 };
 
-/** Starts the due tuning, or continues the one in progress, and returns the exit status of its cycle's outcome. */
-async function runAutoTuning(context: EvalContext, trigger: Exclude<AutoTuningTrigger, { kind: "not_due" }>, settings: AutoTuningSettings): Promise<number> {
+/** Starts the due tuning, or continues the one in progress, and returns its cycle's outcome with the exit status it gives. */
+async function tuneNow(context: EvalContext, trigger: Exclude<AutoTuningTrigger, { kind: "not_due" }>, settings: AutoTuningSettings,
+  onStart: (start: AutoTuningStart) => void): Promise<AutoTuningResult> {
   const evalsFolder = context.paths.evalsFolder;
   let input: TuningStateValue;
   if (trigger.kind === "due") {
@@ -277,6 +290,7 @@ async function runAutoTuning(context: EvalContext, trigger: Exclude<AutoTuningTr
     const kept = tuning.settings ?? recordAutoTuning(evalsFolder, tuning.tuningId, { settings }).settings!;
     input = tuningInput(tuning.tuningId, { kind: "auto", records: tuning.records, forced: tuning.forced, settings: kept }, tuning.dataset);
   }
+  onStart({ tuningId: input.tuningId, cycleId: autoCycleId(input.tuningId) });
   const { graph, steps } = tuningGraph(context, null);
   // A thread that concluded before its tuning ended (stopped between the two) is not run again: its conclusion ends the tuning.
   const cycle = await concludedTuning(graph, input.tuningId) ?? await runTuningThread(graph, steps, input, "npm run eval -- tune auto", context.signal);
@@ -286,7 +300,7 @@ async function runAutoTuning(context: EvalContext, trigger: Exclude<AutoTuningTr
   context.log(`Cycle folder: ${cycleFolder(evalsFolder, cycle.cycleId)}`);
   if (ended.branch !== null) context.log(`Automatic tuning ${input.tuningId}: branch ${ended.branch}, commit ${ended.commit ?? "none"}, merge ${ended.merge ?? "none"}.`);
   context.log(`Automatic tuning ${input.tuningId}: ${cycle.outcome}; dataset ${cycle.options.dataset}; state ${autoTuningPath(evalsFolder)}`);
-  return cycleStatus(cycle);
+  return { kind: "tuned", tuningId: input.tuningId, cycleId: cycle.cycleId, outcome: cycle.outcome, status: cycleStatus(cycle) };
 }
 
 const commands: Readonly<Record<string, TuneCommand>> = { add, propose, holdout, activate: activateCommand, rollback: rollbackCommand, cycle: cycleCommand, auto };
