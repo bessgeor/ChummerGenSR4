@@ -58,5 +58,5 @@ Review findings not changed:
 
 - A try that fails with `invalid_output` or `refused` beside a passed try does not fail the cluster: the attempt passes with the passed try, and the failed try stays in the archive as rejected at `model` with its failure.
 - An execution failure of any try's narrow check stands for a rejected attempt, so no next attempt follows it, as after an attempt of one try whose check failed to execute.
-- A usage limit in one try does not stop the other tries: the attempt waits for them, so no job runs after the attempt ends, and charges the jobs they finished.
+- A usage limit in one try does not stop the jobs of the other tries: the attempt waits for them, so no job runs after the attempt ends, and charges the jobs they finished; a sibling whose jobs end after the limit is not built or checked, and one already building finishes its build and check, whose result the parked attempt discards.
 - An attempt of one try also writes `try-1/`, as the proposal states; the state lists tries only for an attempt of several.
