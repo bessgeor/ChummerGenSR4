@@ -137,13 +137,20 @@ export function readAttempt(archive: string) {
   const attempt = readDocument(join(archive, "attempt.json"), ArchivedAttemptSchema);
   if (attempt.outcome !== "passed" || attempt.patch === null || attempt.answer === null) throw new SetupError(`The repair archive ${archive} is not of a passed attempt with a patch.`);
   // The top level is the selected try's: its record and commit are the ones widened, and no other try is.
-  if (attempt.tries !== undefined) {
-    const selected = attempt.tries.filter((item) => item.selected);
-    if (selected.length !== 1 || selected[0]!.try !== attempt.selectedTry || selected[0]!.recordId !== attempt.recordId || selected[0]!.commit !== (attempt.commit ?? null)) {
+  if (attempt.tries !== undefined || attempt.selectedTry !== undefined) {
+    const tries = attempt.tries ?? [];
+    const selected = tries.filter((item) => item.selected);
+    if (selected.length !== 1 || new Set(tries.map((item) => item.try)).size !== tries.length || selected[0]!.try !== attempt.selectedTry
+      || selected[0]!.recordId !== attempt.recordId || selected[0]!.commit !== (attempt.commit ?? null)) {
       throw new SetupError(`The repair archive ${archive} does not keep its one selected try's record and commit at its top level; restore it or start a new thread.`);
     }
   }
   return { ...attempt, patch: attempt.patch, answer: attempt.answer };
+}
+
+/** The selected try and the number of tries of a passed attempt's archive, for its widening; none for an archive written before attempts had tries. */
+function selectionOf(attempt: ReturnType<typeof readAttempt>): Pick<ClusterWidening, "selectedTry" | "tries"> {
+  return attempt.tries === undefined ? {} : { selectedTry: attempt.selectedTry!, tries: attempt.tries.length };
 }
 
 /** Widening on the real host: the widened candidate, one level per step, promotion on the accepted branch and rollback. */
@@ -171,7 +178,7 @@ export class WideningService {
       if (archived.recordId !== repair.attempt!.recordId) throw new SetupError(`The repair archive ${repair.attempt!.folder} is of record ${archived.recordId}, not of the thread's ${repair.attempt!.recordId}.`);
       widenings[repair.clusterId] = {
         clusterId: repair.clusterId, attempt: repair.attempt!.attempt, recordId: repair.attempt!.recordId, archive: repair.attempt!.folder,
-        ...(archived.tries === undefined ? {} : { selectedTry: archived.selectedTry!, tries: archived.tries.length }),
+        ...selectionOf(archived),
         folder: join(threadFolder, "widening", repair.clusterId, `attempt-${repair.attempt!.attempt}`), scope: { cases: cluster.cases, captures: cluster.captures },
         targets: [...new Set(cluster.members.map((member) => key(member.case, member.capture)))],
         status: "pending", build: null, levels: [], rejection: null, commit: null,
@@ -402,7 +409,9 @@ export class WideningService {
   }
 
   /** Writes the cluster's `widening.json`, labels the repair record and returns the final update. */
-  private async end(widening: ClusterWidening, store: BaseStore, accepted: AcceptedState | null): Promise<WideningStep> {
+  private async end(prepared: ClusterWidening, store: BaseStore, accepted: AcceptedState | null): Promise<WideningStep> {
+    // A widening prepared before widenings named their try names it from its archive.
+    const widening = prepared.tries === undefined ? { ...prepared, ...selectionOf(readAttempt(prepared.archive)) } : prepared;
     writeJson(join(widening.folder, "widening.json"), widening);
     await setLabels(store, { jobKind: "repair", recordId: widening.recordId }, {
       widening: {

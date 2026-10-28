@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { InMemoryStore, MemorySaver } from "@langchain/langgraph";
 import { SetupError } from "../src/host/setup-error.js";
 import { EvalRecordSchema, recordNamespace } from "../src/evals/eval-record.js";
 import type { AttemptDocument, TrySummary } from "../src/repair/attempt-archive.js";
@@ -14,6 +15,7 @@ import { challengeAnswer, diagnosisHarness, FakeAgents, hypothesisAnswer, twoClu
 import { FakeRepairHost, patchedReply, repairedSource } from "./repair-fixtures.js";
 import { readAttempt } from "../src/widening/widening-service.js";
 import { scratch } from "./diagnosis-fixtures.js";
+import { stoppedStage } from "./stage-state.js";
 import { FakeWideningHost, type WideningScript } from "./widening-fixtures.js";
 
 const cluster = "d-0000000000000100";
@@ -29,7 +31,7 @@ function tryOf(folder: string): number {
 const longerSource = Array.from({ length: 12 }, (_, index) => `// try 1 line ${index + 1}`).join("\n");
 
 /** One confirmed cluster whose attempt makes two tries of its hypothesis, then widening. */
-function harness(script: WideningScript = {}) {
+function harness(script: WideningScript = {}, extra: Partial<Parameters<typeof diagnosisHarness>[0]> = {}) {
   const agents = new FakeAgents((call: JobCall): Reply => {
     if (call.kind === "repair") return patchedReply({ "Chummer/frmCreate.cs": tryOf(call.workspace.folder) === 1 ? longerSource : repairedSource })(call);
     return { answer: call.kind === "challenge" ? challengeAnswer() : hypothesisAnswer() };
@@ -38,6 +40,7 @@ function harness(script: WideningScript = {}) {
     spots: [twoClusters[0]!], agents,
     repair: { deadlineMinutes: 60, tries: 2, host: (root) => new FakeRepairHost(root) },
     widening: { host: (root, names) => new FakeWideningHost(root, names, script), extraCases: ["gamma"] },
+    ...extra,
   });
 }
 
@@ -82,8 +85,8 @@ test("of an attempt with two passed tries only the selected one is widened and p
   // The report: the attempt with its selected try, each try with its size and its narrow check's execution apart from its visual result.
   const folder = repair.attempt!.folder;
   ok(run.lines.some((line) => line.startsWith(`Repair ${cluster}: attempt 1 PASSED the narrow check with try 2 of 2; `)));
-  ok(run.lines.includes(`Repair ${cluster}: try 1 (hypothesis 1) passed, ${one!.patch!.added + one!.patch!.removed} lines in 1 files, not selected; branch ${one!.branch}; archive ${join(folder, "try-1")}`));
-  ok(run.lines.includes(`Repair ${cluster}: try 2 (hypothesis 1) passed, 2 lines in 1 files, SELECTED; branch ${two!.branch}; archive ${join(folder, "try-2")}`));
+  ok(run.lines.includes(`Repair ${cluster}: try 1 (hypothesis 1, ${one!.patch!.added + one!.patch!.removed} lines in 1 files, branch ${one!.branch}, archive ${join(folder, "try-1")}) not selected, passed`));
+  ok(run.lines.includes(`Repair ${cluster}: try 2 (hypothesis 1, 2 lines in 1 files, branch ${two!.branch}, archive ${join(folder, "try-2")}) SELECTED, passed`));
   for (const number of [1, 2]) {
     ok(run.lines.some((line) => line.startsWith(`Repair ${cluster}: try ${number} narrow check execution: capture status `)));
     ok(run.lines.some((line) => line.startsWith(`Repair ${cluster}: try ${number} narrow check visual: `)));
@@ -107,6 +110,29 @@ test("a widening that rejects the selected try rolls back only that try, and the
   ok(run.lines.includes(`Widening ${cluster}: attempt 1 try 2 of 2 rejected at build: the widened source does not build; see build.log`));
 });
 
+test("a widening prepared before widenings named their try names it from the archive when it ends", async () => {
+  const checkpointer = new MemorySaver();
+  const store = new InMemoryStore();
+  const controller = new AbortController();
+  const killed = harness({ status: (request) => (request.label === `widen ${cluster} mode` ? (setTimeout(() => controller.abort(), 10), "hang") : undefined) },
+    { checkpointer, store, signal: controller.signal });
+  equal(await killed.start(), 3);
+  const threadId = killed.threadId();
+  // What a thread checkpointed before widenings named their try holds.
+  const { namespace } = await stoppedStage(killed.graph, threadId);
+  equal(namespace.split(":")[0], "widen");
+  const stage = { configurable: { thread_id: threadId, checkpoint_ns: namespace } };
+  await killed.graph.updateState(stage, { widenings: { [cluster]: { clusterId: cluster, selectedTry: undefined, tries: undefined } } });
+  equal((await killed.graph.getState(stage)).values.widenings[cluster].tries, undefined);
+  const resumed = harness({}, { checkpointer, store, root: killed.root, repository: killed.sourceRepository });
+  equal(await resumed.resume(threadId), 1);
+  const widening = (await resumed.state(threadId)).widenings[cluster]!;
+  deepStrictEqual([widening.status, widening.selectedTry, widening.tries], ["promoted", 2, 2]);
+  equal(readJson<ClusterWidening>(join(widening.folder, "widening.json")).selectedTry, 2);
+  deepStrictEqual(readJson<WideningDocument>(join(resumed.root, "threads", threadId, "widening.json")).widenings[0]!.selectedTry, 2);
+  ok(resumed.lines.some((line) => line.startsWith(`Widening ${cluster}: attempt 1 try 2 of 2 PROMOTED as `)));
+});
+
 test("an archive whose top level is not its selected try's is a setup error for widening", async () => {
   const run = harness({ build: () => 1 });
   equal(await run.start(), 1);
@@ -120,6 +146,9 @@ test("an archive whose top level is not its selected try's is a setup error for 
     { ...archive, commit: archive.tries![0]!.commit },
     { ...archive, selectedTry: 1 },
     { ...archive, tries: archive.tries!.map((item) => ({ ...item, selected: true })) },
+    { ...archive, recordId: archive.tries![0]!.recordId },
+    { ...archive, tries: archive.tries!.map((item) => ({ ...item, try: 2 })) },
+    { ...archive, tries: undefined },
   ]) {
     tamper(document);
     throws(() => readAttempt(copy), (error: unknown) => error instanceof SetupError && /does not keep its one selected try's record and commit/.test(error.message));
@@ -144,8 +173,8 @@ test("the report shows each try of a rejected attempt with its narrow check's ex
   };
   deepStrictEqual(describeRepair({ [cluster]: repair }, null), [
     `Repair ${cluster}: attempt 1 rejected at check: try 1 (hypothesis 1) at build: …; try 2 (hypothesis 2) at check: …; 2 records; archive attempt-1`,
-    `Repair ${cluster}: try 1 (hypothesis 1) rejected at build: the patched source does not build, 4 lines in 2 files, not selected; branch b-1; archive ${join("attempt-1", "try-1")}`,
-    `Repair ${cluster}: try 2 (hypothesis 2) rejected at check: build-alpha/skills still differs, 2 lines in 1 files, not selected; branch b-2; archive ${join("attempt-1", "try-2")}`,
+    `Repair ${cluster}: try 1 (hypothesis 1, 4 lines in 2 files, branch b-1, archive ${join("attempt-1", "try-1")}) not selected, rejected at build: the patched source does not build`,
+    `Repair ${cluster}: try 2 (hypothesis 2, 2 lines in 1 files, branch b-2, archive ${join("attempt-1", "try-2")}) not selected, rejected at check: build-alpha/skills still differs`,
     `Repair ${cluster}: try 2 narrow check execution: capture status 2, coverage INVALID: failure:build-alpha/candidate, 1 failures; run folder runs/2`,
     `Repair ${cluster}: try 2 narrow check visual: 0 passed, 1 failed`,
   ]);

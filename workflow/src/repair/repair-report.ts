@@ -64,9 +64,10 @@ export function describeRepair(repairs: Readonly<Record<string, ClusterRepair>>,
     }
     // Each try with its own narrow check: the attempt's fields are only those of the try that stands for it.
     for (const item of tries) {
-      const size = item.patch === null ? "" : `, ${item.patch.added + item.patch.removed} lines in ${item.patch.files} files`;
-      lines.push(`${head} try ${item.try} (hypothesis ${item.hypothesis}) ${item.outcome}${item.stage === null ? "" : ` at ${item.stage}: ${item.reason}`}${size}, `
-        + `${item.selected ? "SELECTED" : "not selected"}; branch ${item.branch}; archive ${join(attempt.folder, item.folder)}`);
+      const size = item.patch === null ? "no patch" : `${item.patch.added + item.patch.removed} lines in ${item.patch.files} files`;
+      // The reason, free text, ends the line.
+      lines.push(`${head} try ${item.try} (hypothesis ${item.hypothesis}, ${size}, branch ${item.branch}, archive ${join(attempt.folder, item.folder)}) `
+        + `${item.selected ? "SELECTED" : "not selected"}, ${item.outcome}${item.stage === null ? "" : ` at ${item.stage}: ${item.reason}`}`);
       lines.push(...checkLines(`${head} try ${item.try} narrow check`, item.check));
     }
   }
