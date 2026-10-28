@@ -64,6 +64,9 @@ function cycleFiles(folders: TuningFolders): string[] {
  */
 export function requireWorkspaceStart(git: BranchGit, repositoryRoot: string, folders: TuningFolders): { branch: string; commit: string; paths: string[] } {
   const paths = repositoryPaths(repositoryRoot, folders);
+  if (paths.includes(".")) {
+    throw new SetupError("A tuning or certificates folder is the repository itself, so an automatic tuning would take the whole repository into its worktree and commit it. Name folders for the tuning files, or folders outside the repository.");
+  }
   const checkoutGit: BranchGit = (args, options = {}) => git(args, { worktree: repositoryRoot, ...options, userSettings: true });
   const head = headBranch(checkoutGit);
   if (head.branch === null) {

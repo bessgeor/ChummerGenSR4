@@ -182,6 +182,13 @@ test("a tuning folder git ignores is a setup error", async () => {
   equal(existsSync(autoTuningPath(context.paths.evalsFolder)), false);
 });
 
+test("a tuning folder that is the repository itself is a setup error", async () => {
+  const repo = tuningRepository();
+  const { context } = await dueTuning(activating(), repo.root, { ...repo.folders, tuningFolder: () => repo.root });
+  await rejects(runEvalCommand(["tune", "auto"], context), (error: Error) => error instanceof SetupError && error.message.includes("is the repository itself"));
+  equal(existsSync(autoTuningPath(context.paths.evalsFolder)), false);
+});
+
 test("a merge that conflicts is a setup error naming the branch; resumed after the branch is rebased, the tuning merges", async () => {
   const repo = tuningRepository();
   // While the holdout runs, the branch gets a ledger of its own: the tuning's commit no longer rebases onto it.
@@ -270,6 +277,8 @@ test("the tuning commands that change the tuning files in the checkout wait whil
     ["rollback", "--job", "hypothesis"], ["cycle", "--dataset", "d", "--min-pass", "0.5"], ["cycle", "--resume", "tc-1"]]) {
     await rejects(runEvalCommand(["tune", ...args], context), waiting, args.join(" "));
   }
+  // The certificate is a file of the checkout's certificates folder as well.
+  await rejects(runEvalCommand(["certify", "--run", "r", "--metric", "prediction", "--min-pass", "0.5"], context), waiting, "certify");
   equal(existsSync(tuningFiles(repo.tuningFolder).holdout), false);
   stop = false;
   // Finished and merged, the tuning no longer holds them back.

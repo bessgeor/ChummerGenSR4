@@ -157,7 +157,7 @@ export function integrate(git: BranchGit, worktrees: Worktrees, request: Integra
         // branch's tree, so that the trailer marks the merge. Its second parent is the fix commit, or the commit the
         // fix was made on when the branch is at the fix commit itself (a merge needs two parents that differ). The
         // fix's branch goes back to the fix commit, which the rebase moved.
-        git(["update-ref", "-m", `workflow: keep ${item.commit} on ${item.branch}`, `refs/heads/${item.branch}`, item.commit]);
+        git(["update-ref", "-m", `workflow: keep ${item.commit} on ${item.branch}`, `refs/heads/${item.branch}`, item.commit, rebased]);
         const recorded = inWorktree(["commit-tree", `${tip}^{tree}`, "-p", tip, "-p", item.commit === tip ? parent : item.commit, ...message(item)]).trim();
         inWorktree(["checkout", "--quiet", "--detach", recorded]);
         tip = recorded;

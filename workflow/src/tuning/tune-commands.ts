@@ -93,7 +93,7 @@ function worktreeGuard(context: EvalContext, command: string): () => void {
  * there, not in the checkout, until it merges them: a command that changes those files in the checkout meanwhile would
  * not see the tuning's exposures, and the exposure limit would not hold across them. Such a command waits for the tuning.
  */
-function requireNoWorktreeTuning(context: EvalContext, command: string): void {
+export function requireNoWorktreeTuning(context: EvalContext, command: string): void {
   const current = readAutoTuning(context.paths.evalsFolder).current;
   if (current !== null && current.branch !== null) {
     throw new SetupError(`${command} would change the tuning files in the checkout while the automatic tuning ${current.tuningId} works on them in a worktree on ${current.branch} and has not merged them yet. `
