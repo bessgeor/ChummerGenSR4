@@ -24,7 +24,7 @@ out/loop/<loop>/loop.json and checkpointed in out/loop/checkpoints.sqlite.
   Every other option is an option of npm start (see npm start -- --help) and is given to every thread; --only and
   --resume are not taken.
 
-Exit status: 0 converged (a thread and the tuning after it changed nothing) or limit, 2 failed (a thread exited with 2),
+Exit status: 0 converged (a thread and the tuning after it changed nothing) or limit, 2 failed (a thread exited with 2 or a tuning's job failed),
 3 setup error.`;
 
 function maxRuns(text: string | undefined): number {

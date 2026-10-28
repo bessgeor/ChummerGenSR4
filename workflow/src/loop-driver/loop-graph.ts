@@ -61,15 +61,18 @@ export function changes(iteration: Iteration): string[] {
   ];
 }
 
-/** After the tuning: the next thread when the iteration changed something and the limit is not reached. */
+/**
+ * After the tuning: `failed` when the tuning's job failed (exit status 2), whatever the thread changed; else the next
+ * thread when the iteration changed something and the limit is not reached.
+ */
 export function decide(document: LoopDocument): Decision {
   const iteration = current(document);
-  const changed = changes(iteration);
-  if (changed.length === 0) {
-    const tuning = iteration.tuning;
-    const failed = tuning?.kind === "tuning" && tuning.outcome === "failed" ? [`tuning ${tuning.tuningId} failed with exit status ${tuning.exitStatus ?? "none"}`] : [];
-    return { next: "converged", reasons: ["the thread and the tuning after it changed nothing", ...failed] };
+  const tuning = iteration.tuning;
+  if (tuning?.kind === "tuning" && tuning.outcome === "failed") {
+    return { next: "failed", reasons: [`tuning ${tuning.tuningId} failed with exit status ${tuning.exitStatus ?? "none"}: its execution failures need a person`] };
   }
+  const changed = changes(iteration);
+  if (changed.length === 0) return { next: "converged", reasons: ["the thread and the tuning after it changed nothing"] };
   const runs = document.options.maxRuns;
   if (runs !== null && document.iterations.length >= runs) return { next: "limit", reasons: [...changed, `${runs} of --max-runs ${runs} threads ran`] };
   return { next: "thread", reasons: changed };
@@ -77,7 +80,7 @@ export function decide(document: LoopDocument): Decision {
 
 /**
  * start_thread → run_thread → decide_thread → tune → decide → start_thread …, ending `failed` at `decide_thread` after a
- * thread that exited with 2, and `converged` or `limit` at `decide`. Every node writes `loop.json` before it returns: the
+ * thread that exited with 2, and `failed`, `converged` or `limit` at `decide`. Every node writes `loop.json` before it returns: the
  * thread's ID before the thread starts and the tuning's before the tuning runs. A thread stopped by a setup error or an
  * interruption fails `run_thread`, and the loop stays `running`.
  */

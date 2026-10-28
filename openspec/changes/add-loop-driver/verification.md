@@ -30,7 +30,9 @@ No live run: the task changes how the workflow is composed and how a start picks
 | --- | --- |
 | `npm run workflow:typecheck` | Passed (exit 0) on the final source. |
 | `npm run workflow:test`, run 1 | Passed: 656 tests, 656 passed, 0 failed, 0 skipped (exit 0). |
-| `npm run workflow:test`, run 2 | Passed on the final source, with merges counted only when they changed the branch's tree and a failed tuning named in the decision: 657 tests, 657 passed, 0 failed, 0 skipped (exit 0). |
+| `npm run workflow:test`, run 2 | Passed on the source before the failed-tuning change: 657 tests, 657 passed, 0 failed, 0 skipped (exit 0). |
+| `npm run workflow:test`, run 3 | Failed after the failed-tuning change: 646 tests, 645 passed, 1 failed (exit 1). `not ok 35 - workflow\tests\loop-driver.test.ts` (`error: 'test failed'`, `failureType: 'testCodeFailure'`, location `loop-driver.test.ts:1:1`): the file did not compile (`workflow:typecheck`: `loop-driver.test.ts(157,49): error TS1002: Unterminated string literal`), because a line break had been written inside three string literals. |
+| `npm run workflow:test`, run 4 | Passed on the final source, with a failed tuning ending the loop `failed`: 659 tests, 659 passed, 0 failed, 0 skipped (exit 0). |
 | `npm run openspec:validate` | Passed strict validation: 20 passed, 0 failed. |
 | `npm run loop -- --help` | Printed the loop's usage (exit 0). |
 | `npm run loop -- --only capture`, `npm run loop -- --max-runs 0` | Setup errors before anything ran (exit 3): `npm run loop does not take --only: every thread of a loop runs the whole workflow.`; no `out/` folder was created. |
@@ -40,9 +42,9 @@ No live run: the task's evidence is the loop's decisions over a fake workflow ru
 
 | Evidence named by the task | Tests (`loop-driver.test.ts`) |
 | --- | --- |
-| Converged | A thread that merged a fix (the branch's tree changed), then one that changed nothing with no tuning due: two threads, `converged`, exit 0. A thread that changed nothing ends `converged` also under `--max-runs 1`; so does a fix merged without changing the branch's tree, and a tuning whose cycle failed, whose exit status 2 is kept in the iteration and named in the decision. |
+| Converged | A thread that merged a fix (the branch's tree changed), then one that changed nothing with no tuning due: two threads, `converged`, exit 0. A thread that changed nothing ends `converged` also under `--max-runs 1`; so does a fix merged without changing the branch's tree, and a rejected tuning (exit status 1, not an execution failure). |
 | Limit | `--max-runs 1` with a merged fix: the tuning step runs, then `limit`, exit 0. |
-| Failed after status 2 | A thread that exits with 2: `failed`, exit 2, no tuning and no further thread; its summary is recorded. |
+| Failed after status 2 | A thread that exits with 2: `failed`, exit 2, no tuning and no further thread; its summary is recorded. A tuning whose cycle failed (exit status 2) ends the loop `failed` with exit 2 and names the tuning in its decision, whether the thread changed nothing or merged a fix; no further thread starts. |
 | A merged fix, an admitted scenario and an activated tuning that go on | Four threads: each of the three changes starts the next thread with its reason (`thread wf-1 merged d-1`, `thread wf-2 admitted build-a@s1`, `tuning tune-2 activated a configuration`); a rejected tuning does not; the fourth converges. With this machine's steps, the eval CLI's automatic tuning runs in process: the first, due, activates a candidate and the second thread starts; the second is not due and the loop converges. |
 | The options each thread gets | Every thread is started as `{ kind: "start", arguments }` with the loop's options (`--case a,b --no-ocr --settings-overlay o --fix-changes`) under the ID that `loop.json` held before the thread started; with this machine's steps, through the composed workflow's `run` with that ID. Every tuning is in `loop.json` with its ID and cycle before it runs. |
 | `npm run loop` arguments | `--max-runs` takes a positive integer; `--only`, `--resume`, an unknown option, a missing or invalid value and contradicting options are setup errors. |

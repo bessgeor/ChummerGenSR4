@@ -134,13 +134,26 @@ test("a thread that changed nothing ends the loop converged, also with --max-run
   deepStrictEqual(document.iterations[0]!.tuning, { kind: "tuning", tuningId: "tune-1", cycle: "tc-1", outcome: "no_improvement", exitStatus: 0 });
 });
 
-test("a fix merged without changing the branch's tree and a failed tuning change nothing: converged, with the failed tuning named", async () => {
+test("a failed tuning ends the loop failed with exit status 2, also when the thread changed nothing", async () => {
   const loop = fakeLoop([{ status: 0, summary: { fixed: ["d-1"], merged: ["d-1"], sourceChanged: false } }], [tuned("failed")]);
-  equal(await loop.run([]), 0, loop.lines.join("\n"));
+  equal(await loop.run([]), 2, loop.lines.join("\n"));
   const document = loop.document();
-  deepStrictEqual([document.status, loop.runs.length], ["converged", 1]);
+  deepStrictEqual([document.status, loop.runs.length], ["failed", 1]);
   deepStrictEqual(document.iterations[0]!.tuning, { kind: "tuning", tuningId: "tune-1", cycle: "tc-1", outcome: "failed", exitStatus: 2 });
-  deepStrictEqual(document.iterations[0]!.decision, { next: "converged", reasons: ["the thread and the tuning after it changed nothing", "tuning tune-1 failed with exit status 2"] });
+  deepStrictEqual(document.iterations[0]!.decision, { next: "failed", reasons: ["tuning tune-1 failed with exit status 2: its execution failures need a person"] });
+});
+
+test("a failed tuning ends the loop failed after a thread that merged a fix, without another thread", async () => {
+  const loop = fakeLoop([{ status: 0, summary: { fixed: ["d-1"], merged: ["d-1"], sourceChanged: true } }], [tuned("failed")]);
+  equal(await loop.run(["--max-runs", "3"]), 2, loop.lines.join("\n"));
+  const document = loop.document();
+  deepStrictEqual([document.status, loop.runs.length, decisions(document)], ["failed", 1, ["failed"]]);
+});
+
+test("a rejected tuning is not an execution failure: the loop goes on only when something changed", async () => {
+  const loop = fakeLoop([{ status: 0, summary: { fixed: ["d-1"], merged: ["d-1"], sourceChanged: false } }], [tuned("rejected")]);
+  equal(await loop.run([]), 0, loop.lines.join("\n"));
+  deepStrictEqual([loop.document().status, loop.runs.length], ["converged", 1]);
 });
 
 test("a merged fix, an admitted scenario and an activated tuning each start the next thread", async () => {
