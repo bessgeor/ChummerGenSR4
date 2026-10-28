@@ -148,7 +148,7 @@ None for this task: the cycle's model jobs are faked, and the repository is a te
 
 ## Task 4.1: docs
 
-`AGENTS.md` lists `autoTuning` among the profile's settings. Its Tuning section describes `tune auto`: the trigger, the freeze, the cycle as a tuning graph thread, the resumption, the worktree with its commit and merge, the setup errors with what to do about each, and the commands it holds back. `README.md` describes `tune auto` in its summary of tuning.
+`AGENTS.md` lists `autoTuning` among the profile's settings. Its Tuning section describes `tune auto`: the trigger, the freeze, the cycle as a tuning graph thread, the resumption, the worktree with its commit and merge, the setup errors with what to do about each, and the commands it holds back. `README.md` describes `tune auto` in its summary of tuning, and says the merge commit is made only when the cycle changed the tuning or certificate files.
 
 ### Commands and results
 
@@ -157,6 +157,9 @@ None for this task: the cycle's model jobs are faked, and the repository is a te
 | `npm run workflow:typecheck` | Passed. |
 | `npm run workflow:test`, output kept (first run, before the review fixes to the text) | 645 tests, all passed (0 failed, 0 cancelled, 0 skipped). |
 | `npm run workflow:typecheck` and `npm run workflow:test`, output kept (after the review fixes to the text) | Typecheck passed; 645 tests, all passed (0 failed, 0 cancelled, 0 skipped). |
+| `npm run workflow:test`, output kept (after the README correction on the merge) | Failed: 645 tests, 644 passed, 1 failed. `not ok 349 - a next attempt refused at the run budget keeps the rejection it followed` (`workflow/tests/loop-graph.test.ts:197`): `Expected values to be strictly equal: 1 !== 2` (expected 2, actual 1, `ERR_ASSERTION`), after 24.7 s. The task changes no code. |
+| `node --import tsx --test workflow/tests/loop-graph.test.ts` (same tree, alone) | 15 tests, all passed. |
+| `npm run workflow:test`, output kept (same tree, run again) | 645 tests, all passed (0 failed, 0 cancelled, 0 skipped). |
 | `npm run openspec:validate` | Passed: 20 passed, 0 failed. |
 | SHA-256 of `bin/ChummerGenSR4.exe` | `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`, unchanged; no run launched it. |
 
