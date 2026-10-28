@@ -8,7 +8,7 @@ Each task names the tasks it builds on as `(after: …)`, by number in this list
 
 ## 2. The driver
 
-- [ ] 2.1 (after: 1.1, add-automatic-tuning#3.1) Add `npm run loop` with its arguments and the loop graph (`buildLoopGraph`, checkpointed in `out/loop/checkpoints.sqlite`) with `loop.json`, the iteration and its decisions. Evidence: workflow tests with a fake runner and tuning for converged, limit, failed after status 2, a merged fix, an admitted scenario and an activated tuning that go on, and the options each thread gets.
+- [x] 2.1 (after: 1.1, add-automatic-tuning#3.1) Add `npm run loop` with its arguments and the loop graph (`buildLoopGraph`, checkpointed in `out/loop/checkpoints.sqlite`) with `loop.json`, the iteration and its decisions. Evidence: workflow tests with a fake runner and tuning for converged, limit, failed after status 2, a merged fix, an admitted scenario and an activated tuning that go on, and the options each thread gets.
 
 ## 3. Stop and resume
 
