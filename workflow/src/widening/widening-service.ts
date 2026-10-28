@@ -98,6 +98,9 @@ const ArchivedAttemptSchema = z.object({
       added: z.number(), removed: z.number(), binary: z.boolean(),
     })),
   }).nullable(),
+  /** Absent in an archive written before attempts had tries. */
+  tries: z.array(z.object({ try: z.number().int().positive(), recordId: z.string(), commit: z.string().nullable(), selected: z.boolean() })).optional(),
+  selectedTry: z.number().int().positive().nullable().optional(),
 });
 
 /** The commit a widening starts at: the accepted branch's after a promotion, else the thread's source commit. */
@@ -129,9 +132,17 @@ export function staleFiles(worktrees: Worktrees, attemptCommit: string, accepted
   return [...stale].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
 }
 
-function readAttempt(archive: string) {
+/** A passed attempt's `attempt.json`, whose top level, when it made tries, must be its one selected try's. */
+export function readAttempt(archive: string) {
   const attempt = readDocument(join(archive, "attempt.json"), ArchivedAttemptSchema);
   if (attempt.outcome !== "passed" || attempt.patch === null || attempt.answer === null) throw new SetupError(`The repair archive ${archive} is not of a passed attempt with a patch.`);
+  // The top level is the selected try's: its record and commit are the ones widened, and no other try is.
+  if (attempt.tries !== undefined) {
+    const selected = attempt.tries.filter((item) => item.selected);
+    if (selected.length !== 1 || selected[0]!.try !== attempt.selectedTry || selected[0]!.recordId !== attempt.recordId || selected[0]!.commit !== (attempt.commit ?? null)) {
+      throw new SetupError(`The repair archive ${archive} does not keep its one selected try's record and commit at its top level; restore it or start a new thread.`);
+    }
+  }
   return { ...attempt, patch: attempt.patch, answer: attempt.answer };
 }
 
@@ -156,8 +167,11 @@ export class WideningService {
       const diagnosis = input.clusters[repair.clusterId];
       if (cluster === undefined || diagnosis === undefined) throw new SetupError(`Triage or diagnosis has no cluster ${repair.clusterId}, whose repair passed.`);
       base ??= readSealedManifest(diagnosis).source.commit;
+      const archived = readAttempt(repair.attempt!.folder);
+      if (archived.recordId !== repair.attempt!.recordId) throw new SetupError(`The repair archive ${repair.attempt!.folder} is of record ${archived.recordId}, not of the thread's ${repair.attempt!.recordId}.`);
       widenings[repair.clusterId] = {
         clusterId: repair.clusterId, attempt: repair.attempt!.attempt, recordId: repair.attempt!.recordId, archive: repair.attempt!.folder,
+        ...(archived.tries === undefined ? {} : { selectedTry: archived.selectedTry!, tries: archived.tries.length }),
         folder: join(threadFolder, "widening", repair.clusterId, `attempt-${repair.attempt!.attempt}`), scope: { cases: cluster.cases, captures: cluster.captures },
         targets: [...new Set(cluster.members.map((member) => key(member.case, member.capture)))],
         status: "pending", build: null, levels: [], rejection: null, commit: null,
