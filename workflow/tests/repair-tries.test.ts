@@ -210,6 +210,15 @@ test("a usage limit in one try parks the whole attempt; the finished try's job i
     reply: (call, number) => (number === 1 && limited ? { failure: { kind: "quota_exhausted", message: "You've hit your usage limit." } }
       : patchedReply({ "Chummer/frmCreate.cs": "class frmCreate { int fixed; }" })(call)),
   });
+  // Try 2 runs its job only after try 1's has ended with the limit and the attempt had time to take note of it, whatever the timing of the host.
+  const run = setup.agents.run.bind(setup.agents);
+  setup.agents.run = async (job) => {
+    if (limited && job.kind === "repair" && job.label.endsWith(" try 2")) {
+      while (!setup.agents.events.some((event) => event.endsWith(" try 1 end"))) await new Promise((resolve) => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    return run(job);
+  };
   const first = await setup.service.repair(setup.input(setup.repairs[cluster]!), setup.store);
   const attemptRecord = (number: number) => `${setup.threadId}/${cluster}/repair/${number}`;
   equal(first.update.waiting?.job, "repair");
