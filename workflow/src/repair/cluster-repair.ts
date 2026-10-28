@@ -14,6 +14,11 @@ export type CheckExecution = {
   readonly failed: number;
 };
 
+/** Whether a narrow check failed to execute: its capture run had status 2 or invalid coverage. */
+export function lostExecution(check: CheckExecution | null): boolean {
+  return check !== null && (check.status === 2 || !check.coverageValid);
+}
+
 /** An archived attempt, as the graph state and the report see it; `attempt.json` in `folder` has everything. */
 export type AttemptSummary = {
   readonly attempt: number;
@@ -32,6 +37,11 @@ export type AttemptSummary = {
    */
   readonly tries?: readonly TrySummary[];
 };
+
+/** Whether the narrow check of the attempt, or of any of its tries, failed to execute. */
+export function attemptLostExecution(attempt: AttemptSummary): boolean {
+  return lostExecution(attempt.check) || (attempt.tries ?? []).some((item) => lostExecution(item.check));
+}
 
 export type RepairStatus =
   /** No attempt has finished. */
