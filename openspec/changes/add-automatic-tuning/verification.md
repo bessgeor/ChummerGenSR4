@@ -145,3 +145,25 @@ None for this task: the cycle's model jobs are faked, and the repository is a te
 ### Unverified
 
 - A `tune auto` with real tune and eval jobs, and its merge into this repository's branch.
+
+## Task 4.1: docs
+
+`AGENTS.md` lists `autoTuning` among the profile's settings. Its Tuning section describes `tune auto`: the trigger, the freeze, the cycle as a tuning graph thread, the resumption, the worktree with its commit and merge, the setup errors with what to do about each, and the commands it holds back. `README.md` describes `tune auto` in its summary of tuning.
+
+### Commands and results
+
+| Command | Result |
+| --- | --- |
+| `npm run workflow:typecheck` | Passed. |
+| `npm run workflow:test`, output kept (first run, before the review fixes to the text) | 645 tests, all passed (0 failed, 0 cancelled, 0 skipped). |
+| `npm run workflow:typecheck` and `npm run workflow:test`, output kept (after the review fixes to the text) | Typecheck passed; 645 tests, all passed (0 failed, 0 cancelled, 0 skipped). |
+| `npm run openspec:validate` | Passed: 20 passed, 0 failed. |
+| SHA-256 of `bin/ChummerGenSR4.exe` | `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`, unchanged; no run launched it. |
+
+### Live evidence
+
+None for this task: it changes only documentation.
+
+### Unverified
+
+- A `tune auto` with real tune and eval jobs, and its merge into this repository's branch.
