@@ -1,6 +1,6 @@
 import { deepStrictEqual, equal, notEqual, ok, rejects, throws } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { certificatePath } from "../src/evals/certificate.js";
@@ -445,6 +445,27 @@ test("an automatic tuning with both folders outside the repository uses them in 
   ok(existsSync(certificatePath(context.certificatesFolder(), "hypothesis")));
   deepStrictEqual([repo.run("rev-parse", "main"), repo.run("branch", "--list", "tuning/*"), repo.run("status", "--porcelain=v1")], [before, "", ""]);
   ok(context.lines.includes(`Automatic tuning ${entry.tuningId}: the tuning and certificates folders lie outside the repository; the cycle works on them in place.`), context.lines.join("\n"));
+});
+
+test("folders that lie outside the repository by name but link to folders inside it are inside: the cycle works in a worktree and merges", async () => {
+  const repo = tuningRepository();
+  mkdirSync(repo.tuningFolder, { recursive: true });
+  const links = scratch("workflow-links-");
+  // Junctions on Windows, symbolic links elsewhere.
+  symlinkSync(repo.tuningFolder, join(links, "tuning"), "junction");
+  symlinkSync(repo.certificatesFolder, join(links, "certificates"), "junction");
+  const folders = { tuningFolder: () => join(links, "tuning"), certificatesFolder: () => join(links, "certificates") };
+  deepStrictEqual(requireWorkspaceStart(processBranchGit(repo.root), repo.root, { tuningFolder: folders.tuningFolder(), certificatesFolder: folders.certificatesFolder() }).paths,
+    ["workflow/evals/tuning", "workflow/evals/certificates"]);
+  const { context } = await dueTuning(activating(), repo.root, folders);
+  equal(await runEvalCommand(["tune", "auto"], context), 0, context.lines.join("\n"));
+  const entry = finished(context.paths.evalsFolder);
+  const tip = repo.run("rev-parse", "main");
+  deepStrictEqual([entry.outcome, entry.merge], ["activated", tip]);
+  ok(entry.branch !== null && entry.commit !== null);
+  equal(readLedger(repo.tuningFolder).exposures.length, 1);
+  ok(existsSync(certificatePath(repo.certificatesFolder, "hypothesis")));
+  equal(repo.run("status", "--porcelain=v1"), "");
 });
 
 test("with only the tuning folder inside the repository, the certificate is written in place and the tuning files are merged", async () => {

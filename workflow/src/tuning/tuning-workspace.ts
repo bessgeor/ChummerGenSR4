@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { certificatePath } from "../evals/certificate.js";
 import { evaluatedJobKinds } from "../evals/evaluated-job-kinds.js";
@@ -36,9 +36,24 @@ export function tuningBranch(cycleId: string): string {
   return `tuning/${cycleId}`;
 }
 
-/** A path relative to the repository's root with forward slashes, or null when it lies outside it. */
+/**
+ * The path with every symbolic link and junction followed. A folder that does not exist yet is resolved through its
+ * deepest existing ancestor, so a link above it counts.
+ */
+function realPath(path: string): string {
+  const absolute = resolve(path);
+  try {
+    return realpathSync.native(absolute);
+  } catch (error) {
+    const parent = dirname(absolute);
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT" || parent === absolute) throw error;
+    return join(realPath(parent), basename(absolute));
+  }
+}
+
+/** A path relative to the repository's root with forward slashes, or null when it lies outside it; links are followed on both. */
 function insidePath(repositoryRoot: string, path: string): string | null {
-  const inside = relative(resolve(repositoryRoot), resolve(path));
+  const inside = relative(realPath(repositoryRoot), realPath(path));
   if (inside === "") return ".";
   if (inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside)) return null;
   return inside.split(sep).join("/");
