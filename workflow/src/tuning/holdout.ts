@@ -83,6 +83,8 @@ export type HoldoutDependencies = EvalRunDependencies & {
   readonly tuningFolder: string;
   /** How long a command waits for another one that holds the ledger; default 10 s. */
   readonly ledgerLockWaitMs?: number;
+  /** Run holding the ledger's lock before the ledger is read: it throws when these tuning files must not change now. */
+  readonly ledgerGuard?: () => void;
 };
 
 /**
@@ -90,7 +92,7 @@ export type HoldoutDependencies = EvalRunDependencies & {
  * do not both pass the exposure limit. The step awaits nothing, so the lock is held for milliseconds; a command that
  * cannot get it in time fails and names the folder.
  */
-function withLedgerLock<T>(dependencies: HoldoutDependencies, step: () => T): T {
+export function withLedgerLock<T>(dependencies: Pick<HoldoutDependencies, "tuningFolder" | "ledgerLockWaitMs">, step: () => T): T {
   const lock = `${tuningFiles(dependencies.tuningFolder).holdout}.lock`;
   mkdirSync(dependencies.tuningFolder, { recursive: true });
   const deadline = Date.now() + (dependencies.ledgerLockWaitMs ?? 10_000);
@@ -145,6 +147,7 @@ export async function openHoldout(dependencies: HoldoutDependencies, request: Ho
   const where = `${dataset.name} v${dataset.version}`;
   // The ledger is read, checked and written under its lock with nothing awaited in between: two commands cannot both pass the limit.
   const opening = withLedgerLock(dependencies, (): { refused: string[] } | { unstarted: Exposure } | { recorded: Exposure; count: number } => {
+    dependencies.ledgerGuard?.();
     const ledger = readLedger(dependencies.tuningFolder);
     // Another name, version or seed does not make an item new: an exposure counts against every dataset whose test partition holds one of its items.
     const exposed = ledger.exposures.filter((exposure) => exposure.jobKind === jobKind && exposure.testItems.some((item) => testItems.includes(item)));

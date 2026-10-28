@@ -7,10 +7,16 @@ import type { EvaluatedJobKind } from "../evals/evaluated-job-kinds.js";
 import { SetupError } from "../host/setup-error.js";
 import { readActiveFile, writeActiveFile, type ActiveFile, type ComparisonSummary, type Entry } from "./active-configuration.js";
 import { comparisonSummary, runState } from "./development.js";
-import { activeOf, exposureOf, measuredOf, pairingProblems, readLedger } from "./holdout.js";
+import { activeOf, exposureOf, measuredOf, pairingProblems, readLedger, withLedgerLock } from "./holdout.js";
 import { requireCurrent, staleness, tuningId } from "./tuning.js";
 
-export type ActivationFolders = { readonly evalsFolder: string; readonly tuningFolder: string; readonly certificatesFolder: string };
+export type ActivationFolders = {
+  readonly evalsFolder: string;
+  readonly tuningFolder: string;
+  readonly certificatesFolder: string;
+  /** Run holding the ledger's lock before anything is read or written: it throws when these tuning files must not change now. */
+  readonly ledgerGuard?: () => void;
+};
 
 export type ActivationRequest = { readonly run: string; readonly baseline: string; readonly thresholds: Thresholds };
 
@@ -28,6 +34,13 @@ function codeEntry(certificate: Certificate | null): Entry {
  * test run on the same items and meets the certificate rule; otherwise returns every reason and changes nothing.
  */
 export function activate(folders: ActivationFolders, request: ActivationRequest, now: Date): ActivationOutcome {
+  return withLedgerLock(folders, () => {
+    folders.ledgerGuard?.();
+    return activateLocked(folders, request, now);
+  });
+}
+
+function activateLocked(folders: ActivationFolders, request: ActivationRequest, now: Date): ActivationOutcome {
   const runs = join(folders.evalsFolder, "runs");
   const candidate = runState(join(runs, request.run));
   // Activated by this run already, on this request (stopped before its certificate was written): the certificate is written again.
@@ -98,7 +111,14 @@ export function activate(folders: ActivationFolders, request: ActivationRequest,
  * Restores the job kind's previous entry and its certificate (or removes the certificate when it had none), and keeps
  * the entry it replaces with the time and reason. Returns the restored entry and why it cannot be dispatched, if so.
  */
-export function rollback(folders: Pick<ActivationFolders, "tuningFolder" | "certificatesFolder">, jobKind: EvaluatedJobKind, reason: string | null, now: Date): { restored: Entry; stale: string | null } {
+export function rollback(folders: Pick<ActivationFolders, "tuningFolder" | "certificatesFolder" | "ledgerGuard">, jobKind: EvaluatedJobKind, reason: string | null, now: Date): { restored: Entry; stale: string | null } {
+  return withLedgerLock(folders, () => {
+    folders.ledgerGuard?.();
+    return rollbackLocked(folders, jobKind, reason, now);
+  });
+}
+
+function rollbackLocked(folders: Pick<ActivationFolders, "tuningFolder" | "certificatesFolder">, jobKind: EvaluatedJobKind, reason: string | null, now: Date): { restored: Entry; stale: string | null } {
   const file = readActiveFile(folders.tuningFolder, jobKind);
   if (file === null || file.history.length === 0) throw new SetupError(`There is no earlier ${jobKind} configuration to roll back to.`);
   const restored = file.history[file.history.length - 1]!;

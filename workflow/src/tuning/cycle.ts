@@ -58,6 +58,8 @@ export type CycleDependencies = {
   readonly tuningFolder: string;
   readonly certificatesFolder: string;
   readonly newRunId: () => string;
+  /** Run holding the tuning files' ledger lock before the cycle changes them in these folders: it throws when they must not change now. */
+  readonly ledgerGuard?: () => void;
 };
 
 export function cycleFolder(evalsFolder: string, cycleId: string): string {
@@ -80,7 +82,10 @@ function save(evalsFolder: string, cycle: Cycle): Cycle {
 }
 
 function folders(dependencies: CycleDependencies) {
-  return { evalsFolder: dependencies.evalsFolder, tuningFolder: dependencies.tuningFolder, certificatesFolder: dependencies.certificatesFolder };
+  return {
+    evalsFolder: dependencies.evalsFolder, tuningFolder: dependencies.tuningFolder, certificatesFolder: dependencies.certificatesFolder,
+    ...(dependencies.ledgerGuard === undefined ? {} : { ledgerGuard: dependencies.ledgerGuard }),
+  };
 }
 
 function thresholds(options: CycleOptions) {
@@ -252,7 +257,10 @@ export async function cycleHoldout(dependencies: CycleDependencies, cycleId: str
   let holdoutRun = cycle.holdout!.run;
   const exposure = exposureOf(readLedger(dependencies.tuningFolder), holdoutRun);
   if (exposure === undefined) {
-    const opened = await openHoldout({ ...dependencies.run, newRunId: () => holdoutRun, evalsFolder: dependencies.evalsFolder, tuningFolder: dependencies.tuningFolder }, {
+    const opened = await openHoldout({
+      ...dependencies.run, newRunId: () => holdoutRun, evalsFolder: dependencies.evalsFolder, tuningFolder: dependencies.tuningFolder,
+      ...(dependencies.ledgerGuard === undefined ? {} : { ledgerGuard: dependencies.ledgerGuard }),
+    }, {
       candidate: cycle.selected!, baselineRun: cycle.baseline!, candidateRun: selected.run!, metric: options.metric, maxExposures: options.maxExposures,
       // The ledger may hold the candidate's exposure under another ID (a holdout stopped before its run was created): the cycle follows it.
       onExposure: (recorded) => {

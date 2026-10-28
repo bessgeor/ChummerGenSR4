@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { resolve } from "node:path";
 import { CommandOptions } from "../evals/command-options.js";
 import { runDependencies, type EvalContext } from "../evals/eval-context.js";
 import { newEvalRunId, summaryLines } from "../evals/eval-run.js";
@@ -15,9 +15,10 @@ import { candidatesFolder, parseTuningFile, storeCandidate } from "./candidates.
 import { cycleFolder, cycleOptions, ensureCycle, readCycle, type Cycle, type CycleDependencies } from "./cycle.js";
 import { defaultMaximumExposures, openHoldout, type HoldoutDependencies } from "./holdout.js";
 import { proposeCandidate, type TuneDependencies } from "./propose.js";
-import type { TuningStateValue } from "./tuning-graph.js";
+import { tuningInput, type TuningStateValue } from "./tuning-graph.js";
 import { compileTuningGraph, concludedTuning, runTuningThread, type TuningGraph } from "./tuning-runner.js";
 import { autoCycleId, tuningSteps, type TuningRun } from "./tuning-steps.js";
+import { repositoryPaths, requireWorkspaceStart } from "./tuning-workspace.js";
 import { requireCurrent } from "./tuning.js";
 
 export const tuneUsage = `  tune add --file <json>          store a tuning configuration as a candidate (out/evals/tuning/candidates/)
@@ -34,8 +35,10 @@ export const tuneUsage = `  tune add --file <json>          store a tuning confi
   tune cycle --resume <cycle>     continue a stopped cycle with its stored options
   tune auto [--force]             count the new workflow hypothesis records against the profile's autoTuning.every (default ${autoTuningDefaults.every}); a tuning is
                                   due with that many, or with --force: it freezes the next version of autoTuning.dataset (default ${autoTuningDefaults.dataset})
-                                  and runs a cycle on it (out/evals/tuning/auto.json); a tuning in progress is continued first. It runs the cycle on the
-                                  tuning and certificates folders in place, so it needs both outside the repository (the profile's tuning and certificates)`;
+                                  and runs a cycle on it (out/evals/tuning/auto.json); a tuning in progress is continued first. When the tuning or
+                                  certificates folder lies inside the repository, the cycle works in a worktree on tuning/<cycle> started at the branch
+                                  HEAD names, and its changes to those folders are committed there and merged into that branch; folders outside the
+                                  repository are used in place`;
 
 type TuneCommand = (args: readonly string[], context: EvalContext) => Promise<number>;
 
@@ -80,9 +83,28 @@ function holdoutDependencies(context: EvalContext): HoldoutDependencies {
   return { ...runDependencies(context), evalsFolder: context.paths.evalsFolder, tuningFolder: context.tuningFolder() };
 }
 
+/** The guard a command that changes the checkout's tuning files runs under the ledger lock, where the tuning's worktree step takes it too. */
+function worktreeGuard(context: EvalContext, command: string): () => void {
+  return () => requireNoWorktreeTuning(context, command);
+}
+
+/**
+ * An automatic tuning that works in a worktree reads and writes the holdout ledger, the active files and the certificates
+ * there, not in the checkout, until it merges them: a command that changes those files in the checkout meanwhile would
+ * not see the tuning's exposures, and the exposure limit would not hold across them. Such a command waits for the tuning.
+ */
+export function requireNoWorktreeTuning(context: EvalContext, command: string): void {
+  const current = readAutoTuning(context.paths.evalsFolder).current;
+  if (current !== null && current.branch !== null) {
+    throw new SetupError(`${command} would change the tuning files in the checkout while the automatic tuning ${current.tuningId} works on them in a worktree on ${current.branch} and has not merged them yet. `
+      + "Finish it first with: npm run eval -- tune auto");
+  }
+}
+
 const holdout: TuneCommand = async (args, context) => {
   const options = CommandOptions.parse("tune holdout", args, ["candidate", "baseline", "run", "metric", "max-exposures"]);
-  const outcome = await openHoldout(holdoutDependencies(context), {
+  requireNoWorktreeTuning(context, "tune holdout");
+  const outcome = await openHoldout({ ...holdoutDependencies(context), ledgerGuard: worktreeGuard(context, "tune holdout") }, {
     candidate: options.required("candidate"), baselineRun: options.required("baseline"), candidateRun: options.required("run"),
     metric: options.text("metric") === null ? null : options.choice("metric", metrics, "prediction"),
     maxExposures: options.number("max-exposures", defaultMaximumExposures, 1, defaultMaximumExposures, true),
@@ -100,7 +122,10 @@ const activateCommand: TuneCommand = async (args, context) => {
   const options = CommandOptions.parse("tune activate", args, ["run", "baseline", "metric", "min-pass", "max-mean-cost-usd"]);
   options.required("metric");
   options.required("min-pass");
-  const outcome = activate({ evalsFolder: context.paths.evalsFolder, tuningFolder: context.tuningFolder(), certificatesFolder: context.certificatesFolder() }, {
+  requireNoWorktreeTuning(context, "tune activate");
+  const outcome = activate({
+    evalsFolder: context.paths.evalsFolder, tuningFolder: context.tuningFolder(), certificatesFolder: context.certificatesFolder(), ledgerGuard: worktreeGuard(context, "tune activate"),
+  }, {
     run: options.required("run"), baseline: options.required("baseline"),
     thresholds: {
       metric: options.choice("metric", metrics, "prediction"), minPass: options.number("min-pass", 0, 0, 1),
@@ -122,7 +147,8 @@ const rollbackCommand: TuneCommand = async (args, context) => {
   const options = CommandOptions.parse("tune rollback", args, ["job", "reason"]);
   options.required("job");
   const jobKind = options.choice("job", evaluatedJobKinds, "hypothesis");
-  const { restored, stale } = rollback({ tuningFolder: context.tuningFolder(), certificatesFolder: context.certificatesFolder() }, jobKind, options.text("reason"), context.now());
+  requireNoWorktreeTuning(context, "tune rollback");
+  const { restored, stale } = rollback({ tuningFolder: context.tuningFolder(), certificatesFolder: context.certificatesFolder(), ledgerGuard: worktreeGuard(context, "tune rollback") }, jobKind, options.text("reason"), context.now());
   context.log(`Rolled back ${jobKind} to ${entryName(restored)}${restored.certificate === null ? ", without a certificate" : `, certificate ${restored.certificate.promptVersion}`}.`);
   if (stale !== null) context.log(`It cannot be dispatched: ${stale}. Roll back again.`);
   return 0;
@@ -136,12 +162,15 @@ export function comparisonLine(comparison: ComparisonSummary): string {
 }
 
 /** The tuning graph's steps over the evaluation context, and the graph compiled with the tuning threads' checkpointer. */
-function tuningGraph(context: EvalContext): { graph: TuningGraph; steps: TuningRun; cycle: CycleDependencies } {
+function tuningGraph(context: EvalContext, guardedBy: string | null): { graph: TuningGraph; steps: TuningRun; cycle: CycleDependencies } {
   const cycle: CycleDependencies = {
     run: holdoutDependencies(context), tune: tuneDependencies(context), evalsFolder: context.paths.evalsFolder, tuningFolder: context.tuningFolder(),
     certificatesFolder: context.certificatesFolder(), newRunId: () => newEvalRunId(context.now()),
+    // A cycle run by hand works on the checkout's tuning files and stops when an automatic tuning has taken them into its
+    // worktree; an automatic tuning's own cycle works in that worktree, or in folders outside the repository.
+    ...(guardedBy === null ? {} : { ledgerGuard: worktreeGuard(context, guardedBy) }),
   };
-  const steps = tuningSteps({ cycle, store: context.store, paths: context.paths, git: context.git });
+  const steps = tuningSteps({ cycle, store: context.store, paths: context.paths, git: context.git, branchGit: context.branchGit });
   return { graph: compileTuningGraph(steps, context.tuningCheckpointer()), steps, cycle };
 }
 
@@ -153,7 +182,8 @@ function cycleStatus(cycle: Cycle): number {
 const cycleCommand: TuneCommand = async (args, context) => {
   const options = CommandOptions.parse("tune cycle", args, ["dataset", "metric", "min-pass", "candidates", "repeat", "max-exposures", "max-mean-cost-usd", "resume"]);
   const resumed = options.text("resume");
-  const { graph, steps, cycle: dependencies } = tuningGraph(context);
+  requireNoWorktreeTuning(context, "tune cycle");
+  const { graph, steps, cycle: dependencies } = tuningGraph(context, "tune cycle");
   let input: TuningStateValue;
   if (resumed !== null) {
     for (const other of ["dataset", "metric", "min-pass", "candidates", "repeat", "max-exposures", "max-mean-cost-usd"]) {
@@ -165,7 +195,7 @@ const cycleCommand: TuneCommand = async (args, context) => {
     // A cycle keeps its stored options; its thread continues from its checkpoint, or runs again from the baseline when it
     // has none or concluded, and its steps find what the cycle recorded.
     const stored = readCycle(context.paths.evalsFolder, resumed);
-    input = { tuningId: resumed, request: { kind: "cycle", options: stored.options }, dataset: stored.options.dataset, cycle: null, concluded: null };
+    input = tuningInput(resumed, { kind: "cycle", options: stored.options }, stored.options.dataset);
     if (stored.outcome === "running") context.log(`Tuning cycle ${resumed}: resumed.`);
   } else {
     options.required("min-pass");
@@ -176,7 +206,7 @@ const cycleCommand: TuneCommand = async (args, context) => {
       maxExposures: options.number("max-exposures", defaultMaximumExposures, 1, defaultMaximumExposures, true),
       maxMeanCostUsd: options.text("max-mean-cost-usd") === null ? null : options.number("max-mean-cost-usd", 0, Number.MIN_VALUE, Number.MAX_VALUE),
     });
-    input = { tuningId: cycleId, request: { kind: "cycle", options: cycle }, dataset: cycle.dataset, cycle: null, concluded: null };
+    input = tuningInput(cycleId, { kind: "cycle", options: cycle }, cycle.dataset);
     // Recorded before its thread starts, so the cycle can be resumed from any point.
     ensureCycle(dependencies, cycleId, cycle);
     context.log(`Tuning cycle ${cycleId}: resume it after an interruption with: npm run eval -- tune cycle --resume ${cycleId}`);
@@ -201,18 +231,6 @@ export function cycleLines(cycle: Cycle): string[] {
 }
 
 /**
- * The tuning and certificates folders an automatic tuning would write inside the repository. Its cycle runs on its
- * folders in place, so it runs only when they lie outside the repository's working tree.
- */
-function foldersInsideRepository(context: EvalContext): string[] {
-  const inside = (folder: string) => {
-    const path = relative(resolve(context.paths.repositoryRoot), resolve(folder));
-    return path === "" || (path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path));
-  };
-  return [context.tuningFolder(), context.certificatesFolder()].filter(inside);
-}
-
-/**
  * Counts the new hypothesis records. Not due prints the count and exits with 0. A due tuning runs as a new tuning
  * thread: it records the tuning as in progress with the records it counts, freezes the next version of the automatic
  * dataset and runs a cycle on it. A tuning in progress is continued first, without counting or freezing again.
@@ -226,17 +244,18 @@ const auto: TuneCommand = async (args, context) => {
     context.log(`Automatic tuning: ${trigger.count} of ${trigger.every} new hypothesis records; not due.`);
     return 0;
   }
-  const inside = foldersInsideRepository(context);
-  if (inside.length > 0) {
-    throw new SetupError(`tune auto runs its cycle on the tuning and certificates folders in place, so they must lie outside the repository; `
-      + `${inside.join(" and ")} ${inside.length === 1 ? "lies" : "lie"} inside it. Name other folders with tuning and certificates in the profile.`);
-  }
   // One tune auto runs a tuning at a time; the trigger is read again under the lock, as another may have run meanwhile.
   return withAutoTuningRun(evalsFolder, async () => {
     const locked = await checkAutoTuning({ store: context.store, evalsFolder, now: context.now, newTuningId }, settings, options.flag("force"));
     if (locked.kind === "not_due") {
       context.log(`Automatic tuning: ${locked.count} of ${locked.every} new hypothesis records; not due.`);
       return 0;
+    }
+    // A new tuning whose folders lie inside the repository needs a branch to merge into and those folders committed: it
+    // starts nothing without them. A tuning in progress checks them when it adds its worktree.
+    if (locked.kind === "due") {
+      const folders = { tuningFolder: context.tuningFolder(), certificatesFolder: context.certificatesFolder() };
+      if (repositoryPaths(context.paths.repositoryRoot, folders).length > 0) requireWorkspaceStart(context.branchGit, context.paths.repositoryRoot, folders);
     }
     return runAutoTuning(context, locked, settings);
   });
@@ -249,22 +268,23 @@ async function runAutoTuning(context: EvalContext, trigger: Exclude<AutoTuningTr
   if (trigger.kind === "due") {
     context.log(`Automatic tuning: ${trigger.records.length} of ${trigger.every} new hypothesis records${trigger.forced ? ", forced" : ""}; due.`);
     const tuningId = newTuningId(context.now());
-    input = { tuningId, request: { kind: "auto", records: trigger.records, forced: trigger.forced, settings }, dataset: null, cycle: null, concluded: null };
+    input = tuningInput(tuningId, { kind: "auto", records: trigger.records, forced: trigger.forced, settings }, null);
     context.log(`Automatic tuning ${tuningId}: resume it after an interruption with: npm run eval -- tune auto`);
   } else {
     const { tuning } = trigger;
     context.log(`Automatic tuning ${tuning.tuningId}: in progress since ${tuning.startedUtc}; continued.`);
     // A tuning recorded before settings were kept takes the profile's now, and keeps them from here on.
     const kept = tuning.settings ?? recordAutoTuning(evalsFolder, tuning.tuningId, { settings }).settings!;
-    input = { tuningId: tuning.tuningId, request: { kind: "auto", records: tuning.records, forced: tuning.forced, settings: kept }, dataset: tuning.dataset, cycle: null, concluded: null };
+    input = tuningInput(tuning.tuningId, { kind: "auto", records: tuning.records, forced: tuning.forced, settings: kept }, tuning.dataset);
   }
-  const { graph, steps } = tuningGraph(context);
+  const { graph, steps } = tuningGraph(context, null);
   // A thread that concluded before its tuning ended (stopped between the two) is not run again: its conclusion ends the tuning.
   const cycle = await concludedTuning(graph, input.tuningId) ?? await runTuningThread(graph, steps, input, "npm run eval -- tune auto", context.signal);
   if (cycle.outcome === "running") throw new SetupError(`Tuning cycle ${cycle.cycleId} concluded while it is still running.`);
-  finishAutoTuning(evalsFolder, input.tuningId, cycle.outcome, context.now());
+  const ended = finishAutoTuning(evalsFolder, input.tuningId, cycle.outcome, context.now());
   for (const line of cycleLines(cycle)) context.log(line);
   context.log(`Cycle folder: ${cycleFolder(evalsFolder, cycle.cycleId)}`);
+  if (ended.branch !== null) context.log(`Automatic tuning ${input.tuningId}: branch ${ended.branch}, commit ${ended.commit ?? "none"}, merge ${ended.merge ?? "none"}.`);
   context.log(`Automatic tuning ${input.tuningId}: ${cycle.outcome}; dataset ${cycle.options.dataset}; state ${autoTuningPath(evalsFolder)}`);
   return cycleStatus(cycle);
 }

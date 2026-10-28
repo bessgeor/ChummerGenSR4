@@ -36,8 +36,9 @@ export async function concludedTuning(graph: TuningGraph, tuningId: string): Pro
  * is recovered first. An interruption is a setup error that names how to resume.
  */
 export async function runTuningThread(graph: TuningGraph, steps: TuningRun, input: TuningStateValue, resume: string, signal?: AbortSignal): Promise<Cycle> {
-  steps.recover(input);
   const unfinished = (await tuningThread(graph, input.tuningId)) === "unfinished";
+  // An unfinished thread's cycle is recovered in the folders its checkpoint works on: its worktree's, when it has one.
+  steps.recover(unfinished ? (await graph.getState({ configurable: { thread_id: input.tuningId } })).values as TuningStateValue : input);
   let final: TuningStateValue;
   try {
     final = await graph.invoke(unfinished ? null : input, {
