@@ -40,7 +40,7 @@ function checkLines(head: string, check: CheckExecution | null): string[] {
   ];
 }
 
-/** The repair lines of the end-of-run report: per cluster its outcome, then its narrow check's execution apart from its visual result. */
+/** The repair lines of the end-of-run report: per cluster its outcome, then its narrow check's execution apart from its visual result, per try for an attempt of several. */
 export function describeRepair(repairs: Readonly<Record<string, ClusterRepair>>, path: string | null): string[] {
   const lines: string[] = [];
   for (const repair of Object.values(repairs)) {
