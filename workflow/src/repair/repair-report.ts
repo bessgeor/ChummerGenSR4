@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import type { TrySummary } from "./attempt-archive.js";
 import { attemptLostExecution, type CheckExecution, type ClusterRepair, type RepairStatus } from "./cluster-repair.js";
 
 /** `repair.json`: each repaired cluster's status, attempt and records, with totals. */
@@ -40,6 +41,19 @@ function checkLines(head: string, check: CheckExecution | null): string[] {
   ];
 }
 
+/** A line per try with its own narrow check's execution line apart from its visual line; `label` names the attempt, as `Repair <cluster>:` or `Repair <cluster>: attempt <n>`. */
+function tryLines(label: string, folder: string, tries: readonly TrySummary[]): string[] {
+  const lines: string[] = [];
+  for (const item of tries) {
+    const size = item.patch === null ? "no patch" : `${item.patch.added + item.patch.removed} lines in ${item.patch.files} files`;
+    // The reason, free text, ends the line.
+    lines.push(`${label} try ${item.try} (hypothesis ${item.hypothesis}, ${size}, branch ${item.branch}, archive ${join(folder, item.folder)}) `
+      + `${item.selected ? "SELECTED" : "not selected"}, ${item.outcome}${item.stage === null ? "" : ` at ${item.stage}: ${item.reason}`}`);
+    lines.push(...checkLines(`${label} try ${item.try} narrow check`, item.check));
+  }
+  return lines;
+}
+
 /** The repair lines of the end-of-run report: per cluster its outcome, then its narrow check's execution apart from its visual result, per try for an attempt of several. */
 export function describeRepair(repairs: Readonly<Record<string, ClusterRepair>>, path: string | null): string[] {
   const lines: string[] = [];
@@ -47,6 +61,7 @@ export function describeRepair(repairs: Readonly<Record<string, ClusterRepair>>,
     const head = `Repair ${repair.clusterId}:`;
     for (const earlier of repair.earlier ?? []) {
       lines.push(`${head} attempt ${earlier.attempt} rejected by ${earlier.rejectedBy} at ${earlier.stage}: ${earlier.reason}; archive ${earlier.archive}`);
+      lines.push(...tryLines(`${head} attempt ${earlier.attempt}`, earlier.archive, earlier.tries ?? []));
     }
     const attempt = repair.attempt;
     if (attempt === null) {
@@ -63,13 +78,7 @@ export function describeRepair(repairs: Readonly<Record<string, ClusterRepair>>,
       continue;
     }
     // Each try with its own narrow check: the attempt's fields are only those of the try that stands for it.
-    for (const item of tries) {
-      const size = item.patch === null ? "no patch" : `${item.patch.added + item.patch.removed} lines in ${item.patch.files} files`;
-      // The reason, free text, ends the line.
-      lines.push(`${head} try ${item.try} (hypothesis ${item.hypothesis}, ${size}, branch ${item.branch}, archive ${join(attempt.folder, item.folder)}) `
-        + `${item.selected ? "SELECTED" : "not selected"}, ${item.outcome}${item.stage === null ? "" : ` at ${item.stage}: ${item.reason}`}`);
-      lines.push(...checkLines(`${head} try ${item.try} narrow check`, item.check));
-    }
+    lines.push(...tryLines(head, attempt.folder, tries));
   }
   if (path !== null) lines.push(`Repair: ${Object.keys(repairs).length} clusters; ${path}`);
   return lines;

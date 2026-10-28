@@ -22,7 +22,7 @@ export function retryLimits(options: RunOptions, agentMilliseconds: number): Ret
 export function latestRejection(repair: ClusterRepair, widening: ClusterWidening | undefined): Rejection | null {
   const attempt = repair.attempt;
   if (attempt === null) return null;
-  const common = { attempt: attempt.attempt, recordId: attempt.recordId, archive: attempt.folder };
+  const common = { attempt: attempt.attempt, recordId: attempt.recordId, archive: attempt.folder, ...(attempt.tries === undefined ? {} : { tries: attempt.tries }) };
   if (repair.status === "rejected") {
     if (attempt.stage === null || attempt.reason === null) throw new Error(`Cluster ${repair.clusterId}'s attempt ${attempt.attempt} is rejected without a stage and a reason.`);
     return {

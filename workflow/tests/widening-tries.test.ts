@@ -8,6 +8,7 @@ import { SetupError } from "../src/host/setup-error.js";
 import { EvalRecordSchema, recordNamespace } from "../src/evals/eval-record.js";
 import type { AttemptDocument, TrySummary } from "../src/repair/attempt-archive.js";
 import type { ClusterRepair } from "../src/repair/cluster-repair.js";
+import { nextAttempts } from "../src/loop/retry.js";
 import { describeRepair, type RepairDocument } from "../src/repair/repair-report.js";
 import type { ClusterWidening } from "../src/widening/cluster-widening.js";
 import type { WideningDocument } from "../src/widening/widening-report.js";
@@ -177,5 +178,32 @@ test("the report shows each try of a rejected attempt with its narrow check's ex
     `Repair ${cluster}: try 2 (hypothesis 2, 2 lines in 1 files, branch b-2, archive ${join("attempt-1", "try-2")}) not selected, rejected at check: build-alpha/skills still differs`,
     `Repair ${cluster}: try 2 narrow check execution: capture status 2, coverage INVALID: failure:build-alpha/candidate, 1 failures; run folder runs/2`,
     `Repair ${cluster}: try 2 narrow check visual: 0 passed, 1 failed`,
+  ]);
+});
+
+test("the report keeps the tries of an attempt that a next attempt followed, each with its own narrow check", () => {
+  const check = (status: 0 | 1 | 2, coverageValid: boolean) => ({
+    runFolder: `runs/${status}`, status, coverageValid, invalidReasons: coverageValid ? [] : ["failure:build-alpha/candidate"], failures: coverageValid ? 0 : 1, passed: 0, failed: 1,
+  });
+  const tries: TrySummary[] = [
+    { try: 1, hypothesis: 1, hypothesisRecord: "h/1", recordId: "r/try-1", branch: "b-1", commit: "c1", folder: "try-1", outcome: "rejected", stage: "check", reason: "alpha still differs", selected: false, patch: { files: 2, added: 3, removed: 1 }, check: check(1, true) },
+    { try: 2, hypothesis: 2, hypothesisRecord: "h/2", recordId: "r/try-2", branch: "b-2", commit: "c2", folder: "try-2", outcome: "rejected", stage: "check", reason: "beta still differs", selected: false, patch: { files: 1, added: 1, removed: 1 }, check: check(2, false) },
+  ];
+  const first: ClusterRepair = {
+    clusterId: cluster, status: "rejected", earlier: [], waiting: null, records: ["r/try-1", "r/try-2"],
+    attempt: { attempt: 1, recordId: "r/try-2", folder: "attempt-1", outcome: "rejected", stage: "check", reason: "both tries rejected", check: check(2, false), branch: "b-2", commit: "c2", tries },
+  };
+  // The next attempt keeps the rejected one, with its tries, among the earlier attempts.
+  const { repairs } = nextAttempts([cluster], { [cluster]: first }, {});
+  const next: ClusterRepair = { ...first, ...repairs[cluster]!, waiting: null, records: ["r/try-1", "r/try-2", "r/2"] } as ClusterRepair;
+  deepStrictEqual(next.earlier[0]!.tries, tries);
+  const passed: ClusterRepair = { ...next, status: "passed", attempt: { attempt: 2, recordId: "r/2", folder: "attempt-2", outcome: "passed", stage: null, reason: null, check: check(0, true) } };
+  deepStrictEqual(describeRepair({ [cluster]: passed }, null).slice(0, 6), [
+    `Repair ${cluster}: attempt 1 rejected by repair at check: both tries rejected; archive attempt-1`,
+    `Repair ${cluster}: attempt 1 try 1 (hypothesis 1, 4 lines in 2 files, branch b-1, archive ${join("attempt-1", "try-1")}) not selected, rejected at check: alpha still differs`,
+    `Repair ${cluster}: attempt 1 try 1 narrow check execution: capture status 1, coverage valid, 0 failures; run folder runs/1`,
+    `Repair ${cluster}: attempt 1 try 1 narrow check visual: 0 passed, 1 failed`,
+    `Repair ${cluster}: attempt 1 try 2 (hypothesis 2, 2 lines in 1 files, branch b-2, archive ${join("attempt-1", "try-2")}) not selected, rejected at check: beta still differs`,
+    `Repair ${cluster}: attempt 1 try 2 narrow check execution: capture status 2, coverage INVALID: failure:build-alpha/candidate, 1 failures; run folder runs/2`,
   ]);
 });

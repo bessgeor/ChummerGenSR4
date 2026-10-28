@@ -64,6 +64,8 @@ export type EarlierAttempt = {
   /** A repair stage, or a widening stage when widening rejected it. */
   readonly stage: string;
   readonly reason: string;
+  /** Every try of an attempt that made several, as the attempt had them. */
+  readonly tries?: readonly TrySummary[];
 };
 
 /** Where one confirmed cluster's repair stands; checkpointed with the thread. */
