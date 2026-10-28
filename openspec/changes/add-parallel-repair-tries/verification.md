@@ -98,7 +98,8 @@ Review findings not changed:
 | --- | --- |
 | `npm run workflow:typecheck` | Passed (exit 0) on the final source. |
 | `npm run workflow:test`, run 1 | Passed after the first draft of the docs: 624 tests, 624 passed, 0 failed, 0 skipped (exit 0). |
-| `npm run workflow:test`, run 2 | Passed on the final source, after the review fixes: 624 tests, 624 passed, 0 failed, 0 skipped (exit 0). |
+| `npm run workflow:test`, run 2 | Passed after the first review fixes: 624 tests, 624 passed, 0 failed, 0 skipped (exit 0). |
+| `npm run workflow:test`, run 3 | Passed on the final source, after the second review fixes: 624 tests, 624 passed, 0 failed, 0 skipped (exit 0). |
 | `npm run openspec:validate` | Passed strict validation: 21 passed, 0 failed. |
 | SHA-256 of `bin/ChummerGenSR4.exe` | `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`; the executable was not built, launched or touched. |
 
@@ -106,6 +107,4 @@ This task changes only documentation; no live run belongs to it.
 
 Review findings changed: the Evaluation section's `check` label is the outcome of the record's own hypothesis; a try whose job failed with `invalid_output` or `refused` fails the attempt when no try passed; a try already building when a usage limit parks the attempt finishes its build and narrow check, whose result is discarded; tries are numbered round by round and those past the sixth are left out; the plan and subtask records of a try; the rule on execution failures stated once; the README checks every explanation given.
 
-Review findings not changed:
-
-- The Repair section's paragraph on the attempt's working folder still describes a scratch copy without history, while the tries' paragraph names each try's worktree and branch. This change documents hypotheses and tries; how attempts use worktrees and branches in general is outside it.
+Review findings changed after the second review: the Repair section describes the attempt's working folder as each try's git worktree on its branch, the patch as the difference between the try's commit and the thread's source commit, and the `repair` label as on the attempt's record, or with several tries on each try's record.
