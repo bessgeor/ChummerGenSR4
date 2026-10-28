@@ -89,3 +89,23 @@ Review findings not changed:
 - An attempt of one try also names `selectedTry` 1 of `tries` 1 in `widening.json`, as its archive does, while the state and `repair.json` list tries only for an attempt of several; the report names the try only for an attempt of several.
 - Widening reads the archive's `attempt.json` when it prepares, builds and promotes, as it read it before when it built and promoted; the file is small and the archive is the source of the commit it applies.
 - The repair service's log line for a try and the report's line for a try are written apart, as the attempt's log and report lines were before.
+
+## Task 4.1: hypotheses and tries in `AGENTS.md` and `README.md`
+
+`AGENTS.md` documents `diagnosis.hypotheses` and `repair.tries` in the profile, the hypotheses of a cluster with their challenges, the check over every hypothesis and the labels per hypothesis (Diagnosis and Evaluation), the tries of an attempt with their records, branches, selection rule, usage limit, budget, deadline and archive (Repair and Fix changes), the selected try in widening (Widening) and the tries in a next attempt's prompt and the rule on execution failures (Loop). `README.md` describes several explanations per group and the tries side by side with the smallest passed change going on.
+
+| Command | Result |
+| --- | --- |
+| `npm run workflow:typecheck` | Passed (exit 0) on the final source. |
+| `npm run workflow:test`, run 1 | Passed after the first draft of the docs: 624 tests, 624 passed, 0 failed, 0 skipped (exit 0). |
+| `npm run workflow:test`, run 2 | Passed on the final source, after the review fixes: 624 tests, 624 passed, 0 failed, 0 skipped (exit 0). |
+| `npm run openspec:validate` | Passed strict validation: 21 passed, 0 failed. |
+| SHA-256 of `bin/ChummerGenSR4.exe` | `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`; the executable was not built, launched or touched. |
+
+This task changes only documentation; no live run belongs to it.
+
+Review findings changed: the Evaluation section's `check` label is the outcome of the record's own hypothesis; a try whose job failed with `invalid_output` or `refused` fails the attempt when no try passed; a try already building when a usage limit parks the attempt finishes its build and narrow check, whose result is discarded; tries are numbered round by round and those past the sixth are left out; the plan and subtask records of a try; the rule on execution failures stated once; the README checks every explanation given.
+
+Review findings not changed:
+
+- The Repair section's paragraph on the attempt's working folder still describes a scratch copy without history, while the tries' paragraph names each try's worktree and branch. This change documents hypotheses and tries; how attempts use worktrees and branches in general is outside it.
