@@ -20,7 +20,7 @@ import { runWorkflow, type RunDependencies, type RunRequest } from "./graph/run-
 import { HostSteps } from "./host-steps.js";
 import { CpuPool, defaultCpuPoolSize } from "./host/cpu-pool.js";
 import { ProcessHostRunner } from "./host/host-runner.js";
-import { hostLanePool } from "./lanes/host-lanes.js";
+import { controlFilePauses, hostLanePool } from "./lanes/host-lanes.js";
 import { laneDefinitions } from "./lanes/lane-settings.js";
 import { startAgentWithRider } from "./lanes/rider-dispatch.js";
 import { createScratchFolder } from "./host/scratch-folder.js";
@@ -30,6 +30,7 @@ import { Worktrees } from "./git/worktrees.js";
 import { threadTraces } from "./thread-traces.js";
 import { sqliteCheckpointedThread } from "./graph/checkpointed-thread.js";
 import { LoopService } from "./loop/loop-service.js";
+import { recordThreadPause } from "./loop/thread-pauses.js";
 import type { Command } from "./options/arguments.js";
 import { localDataFolder, type Profile } from "./options/profile.js";
 import { resolveRunOptions } from "./options/run-options.js";
@@ -56,12 +57,21 @@ export type ComposedWorkflow = {
   readonly close: () => void;
 };
 
-/** Composes the workflow of `npm start` for the repository; `signal` aborts the running steps of a thread (Ctrl+C). */
-export function composeWorkflow(repositoryRoot: string, profile: Profile, log: (line: string) => void, signal?: AbortSignal): ComposedWorkflow {
+/** How the workflow is composed for a loop: the loop's folder, whose control file pauses the desktop lanes of its threads. */
+export type CompositionOptions = { readonly loopFolder?: string };
+
+/**
+ * Composes the workflow of `npm start` for the repository; `signal` aborts the running steps of a thread (Ctrl+C). Composed
+ * for a loop, a desktop command takes no lane the loop's control file pauses.
+ */
+export function composeWorkflow(repositoryRoot: string, profile: Profile, log: (line: string) => void, signal?: AbortSignal,
+  composition: CompositionOptions = {}): ComposedWorkflow {
   const paths = workflowPaths(repositoryRoot);
   mkdirSync(paths.workflowFolder, { recursive: true });
   const now = () => new Date();
-  const lanes = hostLanePool(laneDefinitions(profile.lanes), localDataFolder(process.env), log, startAgentWithRider);
+  const definitions = laneDefinitions(profile.lanes);
+  const pauses = composition.loopFolder === undefined ? null : controlFilePauses(composition.loopFolder, definitions, log, now);
+  const lanes = hostLanePool(definitions, localDataFolder(process.env), log, startAgentWithRider, pauses);
   const host = new ProcessHostRunner(repositoryRoot, lanes, new CpuPool(profile.cpuPool ?? defaultCpuPoolSize()),
     (text) => process.stdout.write(text));
   const stepStore = new StepStore(paths.steps);
@@ -128,6 +138,7 @@ export function composeWorkflow(repositoryRoot: string, profile: Profile, log: (
         threadFolder: paths.threadFolder, discoveryThreadFolder: (id) => folders.thread(id).root, git: branchGit,
       }, threadId),
       checkpointedThread: (threadId) => sqliteCheckpointedThread(checkpointer, threadId),
+      recordPause: (threadId, pause) => recordThreadPause(paths.threadFolder(threadId), pause),
       log,
       now,
       ...(signal === undefined ? {} : { signal }),

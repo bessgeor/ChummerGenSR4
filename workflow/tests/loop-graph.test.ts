@@ -98,7 +98,7 @@ test("a cluster rejected at its narrow check gets a second attempt that sees the
   const outcome = outcomeOf(run.root, threadId);
   equal(outcome.outcome, "verified_for_scope");
   deepStrictEqual(outcome.clusters.map((item) => [item.clusterId, item.disposition, item.attempts, item.commit]), [[first, "fixed", 2, state.accepted?.commit]]);
-  deepStrictEqual({ ...outcome.measures, elapsedMilliseconds: null }, { clusters: 1, fixed: 1, fixRate: 1, attempts: 2, modelMilliseconds: 4000, elapsedMilliseconds: null });
+  deepStrictEqual({ ...outcome.measures, elapsedMilliseconds: null }, { clusters: 1, fixed: 1, fixRate: 1, attempts: 2, modelMilliseconds: 4000, elapsedMilliseconds: null, pausedMilliseconds: 0 });
   equal(outcome.measures.elapsedMilliseconds, 2 * 60 * 60_000);
   deepStrictEqual(outcome.scope, { cases: ["build-alpha"], captures: null });
   const repairDocument = readJson<RepairDocument>(join(run.root, "threads", threadId, "repair.json"));

@@ -1,3 +1,4 @@
+import { pausable } from "../../loop/loop-control.js";
 import { END, Send, START, StateGraph, type LangGraphRunnableConfig } from "@langchain/langgraph";
 import { nextWideningRoute } from "../../widening/cluster-widening.js";
 import type { WideningInput, WideningStep } from "../../widening/widening-service.js";
@@ -26,7 +27,7 @@ function applyWidening(step: WideningStep) {
  */
 export function buildWidenStage(widening: WideningSteps) {
   return new StateGraph(WorkflowState)
-    .addNode("prepare_widening", (state: WorkflowStateValue) => {
+    .addNode("prepare_widening", pausable((state: WorkflowStateValue) => {
       if (state.triageSummary === null) throw new Error("Widening ran before triage.");
       const captured = state.plan.flatMap((item) => (state.captures[item.name] === undefined ? [] : [state.captures[item.name]!]));
       const check = state.diagnosisCheck;
@@ -37,15 +38,15 @@ export function buildWidenStage(widening: WideningSteps) {
           ...(check === null ? [] : [{ runFolder: check.runFolder, status: check.execution.status }]),
         ],
       });
-    })
-    .addNode("route_widening", () => ({}))
-    .addNode("widen", async (state: ClusterTask, config: LangGraphRunnableConfig) => applyWidening(await widening.widen(wideningInput(state, config))))
-    .addNode("promote", async (state: ClusterTask, config: LangGraphRunnableConfig) =>
-      applyWidening(await widening.promote(wideningInput(state, config), requireStore(config))))
-    .addNode("roll_back", async (state: ClusterTask, config: LangGraphRunnableConfig) =>
-      applyWidening(await widening.rollBack(wideningInput(state, config), requireStore(config))))
-    .addNode("finish_widening", (state: WorkflowStateValue) => ({ wideningPath: widening.finish(state.threadId, state.widenings, state.accepted, state.earlierWidenings ?? []) }))
-    .addNode("retry_repair", retryRepair)
+    }))
+    .addNode("route_widening", pausable(() => ({})))
+    .addNode("widen", pausable(async (state: ClusterTask, config: LangGraphRunnableConfig) => applyWidening(await widening.widen(wideningInput(state, config)))))
+    .addNode("promote", pausable(async (state: ClusterTask, config: LangGraphRunnableConfig) =>
+      applyWidening(await widening.promote(wideningInput(state, config), requireStore(config)))))
+    .addNode("roll_back", pausable(async (state: ClusterTask, config: LangGraphRunnableConfig) =>
+      applyWidening(await widening.rollBack(wideningInput(state, config), requireStore(config)))))
+    .addNode("finish_widening", pausable((state: WorkflowStateValue) => ({ wideningPath: widening.finish(state.threadId, state.widenings, state.accepted, state.earlierWidenings ?? []) })))
+    .addNode("retry_repair", pausable(retryRepair))
     .addEdge(START, "prepare_widening")
     .addEdge("prepare_widening", "route_widening")
     .addConditionalEdges("route_widening", (state: WorkflowStateValue) => {

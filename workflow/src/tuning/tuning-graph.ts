@@ -1,3 +1,4 @@
+import { pausable } from "../loop/loop-control.js";
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
 import type { AutoTuningSettings } from "./auto-tuning.js";
 import { proposalsPending, type Cycle, type CycleOptions } from "./cycle.js";
@@ -76,20 +77,20 @@ export function afterProposal(state: TuningStateValue): TuningNode {
  */
 export function buildTuningGraph(steps: TuningSteps) {
   return new StateGraph(TuningState)
-    .addNode("count", (state: TuningStateValue) => {
+    .addNode("count", pausable((state: TuningStateValue) => {
       steps.count(state);
       return {};
-    })
-    .addNode("freeze", async (state: TuningStateValue) => ({ dataset: await steps.freeze(state) }))
-    .addNode("worktree", (state: TuningStateValue) => ({ workspace: steps.worktree(state) }))
-    .addNode("baseline", async (state: TuningStateValue) => ({ cycle: await steps.baseline(state) }))
-    .addNode("propose", async (state: TuningStateValue) => ({ cycle: await steps.propose(state) }))
-    .addNode("holdout", async (state: TuningStateValue) => ({ cycle: await steps.holdout(state) }))
-    .addNode("test_baseline", async (state: TuningStateValue) => ({ cycle: await steps.testBaseline(state) }))
-    .addNode("activate", (state: TuningStateValue) => ({ cycle: steps.activate(state) }))
-    .addNode("conclude", (state: TuningStateValue) => ({ concluded: steps.conclude(state) }))
-    .addNode("commit", (state: TuningStateValue) => ({ tuningCommit: steps.commit(state) }))
-    .addNode("merge", (state: TuningStateValue) => ({ mergeCommit: steps.merge(state) }))
+    }))
+    .addNode("freeze", pausable(async (state: TuningStateValue) => ({ dataset: await steps.freeze(state) })))
+    .addNode("worktree", pausable((state: TuningStateValue) => ({ workspace: steps.worktree(state) })))
+    .addNode("baseline", pausable(async (state: TuningStateValue) => ({ cycle: await steps.baseline(state) })))
+    .addNode("propose", pausable(async (state: TuningStateValue) => ({ cycle: await steps.propose(state) })))
+    .addNode("holdout", pausable(async (state: TuningStateValue) => ({ cycle: await steps.holdout(state) })))
+    .addNode("test_baseline", pausable(async (state: TuningStateValue) => ({ cycle: await steps.testBaseline(state) })))
+    .addNode("activate", pausable((state: TuningStateValue) => ({ cycle: steps.activate(state) })))
+    .addNode("conclude", pausable((state: TuningStateValue) => ({ concluded: steps.conclude(state) })))
+    .addNode("commit", pausable((state: TuningStateValue) => ({ tuningCommit: steps.commit(state) })))
+    .addNode("merge", pausable((state: TuningStateValue) => ({ mergeCommit: steps.merge(state) })))
     .addConditionalEdges(START, (state: TuningStateValue) => (state.request.kind === "auto" ? "count" : "baseline"), ["count", "baseline"])
     .addEdge("count", "freeze")
     .addEdge("freeze", "worktree")

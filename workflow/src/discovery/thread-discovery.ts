@@ -1,3 +1,4 @@
+import type { PauseGate } from "../loop/loop-control.js";
 import { z } from "zod";
 import { SetupError } from "../host/setup-error.js";
 import type { RunOptions } from "../options/run-options.js";
@@ -75,15 +76,17 @@ export interface ThreadDiscoverySteps {
   /**
    * Runs the workflow thread's discovery thread to its conclusion: it starts it, resumes it when it is unfinished, or reads the
    * conclusion of a finished one without running it again. A failure is thrown, and an unfinished discovery thread stays resumable.
+   * Given the folder of the loop that runs the workflow thread, the discovery thread pauses with that loop.
    */
-  discover(input: { readonly threadId: string; readonly options: RunOptions }, signal?: AbortSignal): Promise<ThreadDiscovery>;
+  discover(input: { readonly threadId: string; readonly options: RunOptions }, signal?: AbortSignal, loopFolder?: string | null): Promise<ThreadDiscovery>;
 }
 
 /** A workflow thread's discovery through the discovery runner. */
 export class RunnerDiscovery implements ThreadDiscoverySteps {
   constructor(private readonly runner: DiscoveryRunner, private readonly log: (line: string) => void) {}
 
-  async discover(input: { readonly threadId: string; readonly options: RunOptions }, signal?: AbortSignal): Promise<ThreadDiscovery> {
+  async discover(input: { readonly threadId: string; readonly options: RunOptions }, signal?: AbortSignal, loopFolder: string | null = null): Promise<ThreadDiscovery> {
+    const gate: PauseGate | null = loopFolder === null ? null : { folder: loopFolder, log: this.log };
     const id = discoveryThreadId(input.threadId);
     const found = await this.runner.thread(id);
     let concluded: Concluded;
@@ -91,12 +94,12 @@ export class RunnerDiscovery implements ThreadDiscoverySteps {
       case "absent": {
         const options = threadDiscoveryOptions(input.threadId, input.options);
         this.log(`Discovery thread ${id}: baseline ${options.from}, ${options.targets} targets at most.`);
-        concluded = await this.runner.start(id, options, signal);
+        concluded = await this.runner.start(id, options, signal, gate);
         break;
       }
       case "unfinished":
         this.log(`Resuming discovery thread ${id}.`);
-        concluded = await this.runner.resume(id, signal);
+        concluded = await this.runner.resume(id, signal, gate);
         break;
       case "finished":
         this.log(`Discovery thread ${id} already finished; its conclusion is read without running it again.`);

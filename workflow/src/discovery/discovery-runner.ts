@@ -1,3 +1,4 @@
+import { invokePausable, type PauseGate } from "../loop/loop-control.js";
 import type { BaseCheckpointSaver, BaseStore } from "@langchain/langgraph-checkpoint";
 import type { AgentRunners } from "../agents/agent-runners.js";
 import type { QuotaWaiter } from "../diagnosis/quota-waiter.js";
@@ -70,9 +71,9 @@ export interface DiscoveryRunner {
   readonly graph: DiscoveryGraph;
   thread(threadId: string): Promise<DiscoveryThread>;
   /** Runs a new thread with this ID to its conclusion; a setup error when the ID already has a thread. */
-  start(threadId: string, options: DiscoveryOptions, signal?: AbortSignal): Promise<Concluded>;
+  start(threadId: string, options: DiscoveryOptions, signal?: AbortSignal, gate?: PauseGate | null): Promise<Concluded>;
   /** Continues an unfinished thread to its conclusion; a setup error when there is none or it finished. */
-  resume(threadId: string, signal?: AbortSignal): Promise<Concluded>;
+  resume(threadId: string, signal?: AbortSignal, gate?: PauseGate | null): Promise<Concluded>;
   /** The conclusion of a finished thread, without running anything; a setup error when there is none or it is unfinished. */
   read(threadId: string): Promise<Concluded>;
 }
@@ -94,19 +95,19 @@ export function discoveryRunner(graph: DiscoveryGraph, now: () => Date): Discove
   return {
     graph,
     thread,
-    async start(threadId, options, signal) {
+    async start(threadId, options, signal, gate = null) {
       if ((await thread(threadId)).kind !== "absent") throw new SetupError(`Discovery thread ${threadId} already exists; resume it instead.`);
       const input: DiscoveryStateValue = {
         threadId, options, startedUtc: now().toISOString(), prepared: null, rankJob: pendingJob(), selected: null, scenarios: {}, agentMilliseconds: 0,
         execution: null, registered: null, concluded: null,
       };
-      return conclusionOf(await graph.invoke(input, threadConfig(threadId, signal)));
+      return conclusionOf(await invokePausable(graph, input, threadConfig(threadId, signal), gate, `Discovery thread ${threadId}`) as DiscoveryStateValue);
     },
-    async resume(threadId, signal) {
+    async resume(threadId, signal, gate = null) {
       const found = await thread(threadId);
       if (found.kind === "absent") throw new SetupError(`There is no discovery thread ${threadId} to resume.`);
       if (found.kind === "finished") throw new SetupError(`Discovery thread ${threadId} already finished; start a new one instead.`);
-      return conclusionOf(await graph.invoke(null, threadConfig(threadId, signal)));
+      return conclusionOf(await invokePausable(graph, null, threadConfig(threadId, signal), gate, `Discovery thread ${threadId}`) as DiscoveryStateValue);
     },
     async read(threadId) {
       const found = await thread(threadId);

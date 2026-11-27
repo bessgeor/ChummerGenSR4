@@ -16,8 +16,10 @@ export type LoopMeasures = {
   readonly attempts: number;
   /** The model time charged to the thread's run budget. */
   readonly modelMilliseconds: number;
-  /** From the thread's start to its conclusion; null when the thread does not record its start. */
+  /** From the thread's start to its conclusion, without the time a loop held it paused; null when the thread does not record its start. */
   readonly elapsedMilliseconds: number | null;
+  /** The time a loop held the thread paused (see `pauses.json` in the thread's folder); 0 for a thread that never was. */
+  readonly pausedMilliseconds: number;
 };
 
 /** A promoted fix and what its merge into the branch the thread started on made. */
@@ -103,6 +105,7 @@ export function describeOutcome(document: OutcomeDocument, path: string): string
   if (document.merge !== null) lines.push(describeMerge(document.merge));
   const { measures } = document;
   lines.push(`Outcome: ${document.outcome}; ${measures.fixed} of ${measures.clusters} clusters fixed, ${attemptCount(measures.attempts)}, `
-    + `model time ${minutes(measures.modelMilliseconds)}, elapsed ${measures.elapsedMilliseconds === null ? "unknown" : minutes(measures.elapsedMilliseconds)}; ${path}`);
+    + `model time ${minutes(measures.modelMilliseconds)}, elapsed ${measures.elapsedMilliseconds === null ? "unknown" : minutes(measures.elapsedMilliseconds)}`
+    + `${(measures.pausedMilliseconds ?? 0) === 0 ? "" : `, paused ${minutes(measures.pausedMilliseconds)}`}; ${path}`);
   return lines;
 }

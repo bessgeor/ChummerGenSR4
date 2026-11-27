@@ -14,7 +14,8 @@ import { inventoryLines, type InventorySummary } from "../src/inventory/inventor
 import type { WorkflowStateValue } from "../src/graph/workflow-state.js";
 import type { Conclusion, ConcludeInput } from "../src/loop/loop-service.js";
 import type { OutcomeDocument } from "../src/loop/outcome.js";
-import { exitStatus, runWorkflow, type RunDependencies } from "../src/graph/run-workflow.js";
+import { exitStatus, runWorkflow, type RunDependencies, type RunRequest } from "../src/graph/run-workflow.js";
+import type { Pause } from "../src/loop/loop-control.js";
 import { SetupError } from "../src/host/setup-error.js";
 import type { Arguments, NodeName } from "../src/options/arguments.js";
 import { resolveRunOptions, type RunOptions } from "../src/options/run-options.js";
@@ -165,7 +166,7 @@ class FakeLoop implements LoopSteps {
     const document: OutcomeDocument = {
       threadId: input.threadId, outcome: "verified_for_scope", scope: { cases: input.plan.map((item) => item.name), captures: null },
       problems: { cases: [], otherFindings: 0 }, clusters: [], accepted: null, merge: null,
-      measures: { clusters: 0, fixed: 0, fixRate: null, attempts: 0, modelMilliseconds: 0, elapsedMilliseconds: null }, discovery: input.discovery,
+      measures: { clusters: 0, fixed: 0, fixRate: null, attempts: 0, modelMilliseconds: 0, elapsedMilliseconds: null, pausedMilliseconds: 0 }, discovery: input.discovery,
       concludedUtc: "2026-10-01T12:00:00Z",
     };
     return { document, path: "outcome.json" };
@@ -203,6 +204,7 @@ function harness(cases: string[], steps = new FakeSteps(), checkpointer = new Me
   const graph = buildWorkflowGraph(steps, discovery === undefined ? noDiagnosis : recordingDiagnosis(discovery.diagnosed), noRepair, noWidening, loop,
     discovery === undefined ? noDiscovery : new RunnerDiscovery(discovery.runner, log)).compile({ checkpointer, store: new InMemoryStore() });
   const readCalls: [string, boolean][] = [];
+  const pauses: { threadId: string; pause: Pause }[] = [];
   const dependencies: RunDependencies = {
     graph,
     resolveOptions: (command) => (discovery === undefined ? {
@@ -216,6 +218,7 @@ function harness(cases: string[], steps = new FakeSteps(), checkpointer = new Me
     head: () => ({ branch: "main", commit: "c0ffee" }),
     threadTraces: () => [],
     checkpointedThread: (threadId) => memoryCheckpointedThread(checkpointer, threadId),
+    recordPause: (threadId, pause) => pauses.push({ threadId, pause }),
     readCase: (runFolder, compared) => {
       readCalls.push([runFolder, compared]);
       return fakeDetails(runFolder, compared);
@@ -224,9 +227,10 @@ function harness(cases: string[], steps = new FakeSteps(), checkpointer = new Me
     now: () => new Date("2026-10-01T12:00:00Z"),
     ...(signal === undefined ? {} : { signal }),
   };
-  const startRun = (only: NodeName | null = null, overrides: Partial<Arguments> = {}) => runWorkflow({ kind: "start", arguments: { ...baseArguments, only, ...overrides } }, dependencies);
+  const startRun = (only: NodeName | null = null, overrides: Partial<Arguments> = {}, request: RunRequest = {}) =>
+    runWorkflow({ kind: "start", arguments: { ...baseArguments, only, ...overrides } }, dependencies, request);
   const threadId = () => /Thread (wf-\S+):/.exec(lines.join("\n"))?.[1] ?? "";
-  return { steps, lines, dependencies, startRun, threadId, checkpointer, readCalls, loop };
+  return { steps, lines, dependencies, startRun, threadId, checkpointer, readCalls, loop, pauses };
 }
 
 test("compare of each case overlaps the capture of the next, and triage and the inventory run last", async () => {

@@ -169,7 +169,8 @@ export class CaptureStep {
 
 /**
  * The capture runner's fingerprint of the machine and app environment, which decides the pixels, read on every desktop
- * lane side by side; lanes whose fingerprints differ would capture pixels that no step key or cache entry may mix.
+ * lane side by side; lanes whose fingerprints differ would capture pixels that no step key or cache entry may mix. A lane
+ * a loop paused is read too: it takes captures again as soon as it is unpaused, so its environment is checked with the others'.
  */
 export async function readEnvironmentFingerprint(
   paths: WorkflowPaths, host: HostRunner, createScratchFolder: (prefix: string, parent?: string) => ScratchFolder, label: string, signal?: AbortSignal,

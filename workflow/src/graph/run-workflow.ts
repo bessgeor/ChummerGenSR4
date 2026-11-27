@@ -14,6 +14,7 @@ import { describeDiagnosis, diagnosisStatus } from "./diagnosis-report.js";
 import type { HeadBranch } from "../git/integration.js";
 import { stageIds, widens, type buildWorkflowGraph } from "./workflow-graph.js";
 import type { WorkflowStateValue } from "./workflow-state.js";
+import { invokePausable, type Pause, type PauseGate } from "../loop/loop-control.js";
 
 export const setupErrorStatus = 3;
 
@@ -39,6 +40,8 @@ export type RunDependencies = {
   readonly threadTraces: (threadId: string) => readonly string[];
   /** The checkpointed thread whose ID equals the given one without regard to case, if any; it reads no checkpoint history. */
   readonly checkpointedThread: (threadId: string) => Promise<string | null> | string | null;
+  /** Records a pause of a thread a loop paused, which the thread's elapsed time leaves out. */
+  readonly recordPause: (threadId: string, pause: Pause) => void;
   /** Aborts when the operator interrupts the run (Ctrl+C): running children are stopped and the thread stays resumable. */
   readonly signal?: AbortSignal;
 };
@@ -95,8 +98,11 @@ function report(state: WorkflowStateValue, readCase: RunDependencies["readCase"]
   if (state.outcome != null && state.outcomePath != null) for (const line of describeOutcome(state.outcome, state.outcomePath)) log(line);
 }
 
-/** How a run starts: a start may be given the ID of its new thread instead of getting a new one. */
-export type RunRequest = { readonly threadId?: string };
+/**
+ * How a run starts: a start may be given the ID of its new thread instead of getting a new one. A thread a loop runs
+ * gets the loop's gate: its nodes pause while the loop is paused, and it goes on once the loop is unpaused.
+ */
+export type RunRequest = { readonly threadId?: string; readonly loopControl?: PauseGate };
 
 /** A thread ID a caller chose: one path segment of letters, digits, dots, underscores and hyphens. */
 const threadIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -206,12 +212,18 @@ function finish(final: WorkflowStateValue, dependencies: RunDependencies): numbe
   return status;
 }
 
+/** Runs the thread's graph to its end, through the pauses of the loop that runs it, if any. */
+function invokeThread(threadId: string, input: WorkflowStateValue | null, request: RunRequest, dependencies: RunDependencies): Promise<WorkflowStateValue> {
+  return invokePausable(dependencies.graph, input, threadConfig(threadId, dependencies.signal), request.loopControl ?? null, `Thread ${threadId}`,
+    (pause) => dependencies.recordPause(threadId, pause));
+}
+
 /**
  * Runs or resumes a thread and returns the exit status; any failure is a setup error, and an unfinished thread stays resumable.
  * A start given `request.threadId` runs its new thread under that ID.
  */
 export async function runWorkflow(command: Exclude<Command, { kind: "help" }>, dependencies: RunDependencies, request: RunRequest = {}): Promise<number> {
-  const { graph, log } = dependencies;
+  const { log } = dependencies;
   // Set once the thread may run: a thread that is refused has nothing to resume.
   let threadId: string | null = null;
   try {
@@ -221,12 +233,12 @@ export async function runWorkflow(command: Exclude<Command, { kind: "help" }>, d
       await checkResumable(command.threadId, dependencies);
       threadId = command.threadId;
       log(`Resuming thread ${command.threadId}.`);
-      final = await graph.invoke(null, threadConfig(command.threadId, dependencies.signal));
+      final = await invokeThread(command.threadId, null, request, dependencies);
     } else {
       const started = await start(command, request, dependencies);
       threadId = started.threadId;
       log(`Resume it after an interruption with: npm start -- --resume ${threadId}`);
-      final = await graph.invoke(started.input, threadConfig(threadId, dependencies.signal));
+      final = await invokeThread(threadId, started.input, request, dependencies);
     }
     return finish(final, dependencies);
   } catch (error) {

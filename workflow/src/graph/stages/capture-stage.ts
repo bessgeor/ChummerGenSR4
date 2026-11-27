@@ -1,3 +1,4 @@
+import { pausable } from "../../loop/loop-control.js";
 import { END, Send, START, StateGraph, type LangGraphRunnableConfig } from "@langchain/langgraph";
 import type { PlannedCase } from "../../cases/case-plan.js";
 import type { InventorySummary } from "../../inventory/inventory-service.js";
@@ -55,30 +56,30 @@ function caseRoute(state: WorkflowStateValue, lanes: number): Send[] | "triage" 
  */
 export function buildCaptureStage(steps: WorkflowSteps) {
   return new StateGraph(WorkflowState)
-    .addNode("route_cases", (state: WorkflowStateValue) => ({ pendingCaseIndexes: pendingCases(state, steps.captureLanes).map(({ index }) => index) }))
-    .addNode("capture", async (state: CaseTask, config: LangGraphRunnableConfig) => {
+    .addNode("route_cases", pausable((state: WorkflowStateValue) => ({ pendingCaseIndexes: pendingCases(state, steps.captureLanes).map(({ index }) => index) })))
+    .addNode("capture", pausable(async (state: CaseTask, config: LangGraphRunnableConfig) => {
       const outcome = await steps.capture(context(state, "capture", config.signal), caseAt(state));
       return { captures: { [outcome.case]: outcome } };
-    })
-    .addNode("compare", async (state: CaseTask, config: LangGraphRunnableConfig) => {
+    }))
+    .addNode("compare", pausable(async (state: CaseTask, config: LangGraphRunnableConfig) => {
       const item = caseAt(state);
       const captured = state.captures[item.name];
       if (captured === undefined) throw new Error(`compare ${item.name} ran before its capture.`);
       const outcome = await steps.compare(context(state, "compare", config.signal), captured);
       return { compares: { [outcome.case]: outcome } };
-    })
-    .addNode("triage", async (state: WorkflowStateValue, config: LangGraphRunnableConfig) => {
+    }))
+    .addNode("triage", pausable(async (state: WorkflowStateValue, config: LangGraphRunnableConfig) => {
       const summary = await steps.triage({ threadId: state.threadId, plan: state.plan, captures: state.captures, compares: state.compares }, requireStore(config));
       return { triageSummary: summary };
-    })
-    .addNode("inventory", async (state: WorkflowStateValue) => {
+    }))
+    .addNode("inventory", pausable(async (state: WorkflowStateValue) => {
       // A thread stored before the inventory existed has no such field, and its capture runs recorded no UI trees.
       const recorded: InventorySummary | null | undefined = state.inventorySummary;
       if (recorded === undefined) return {};
       if (state.fingerprints === null) throw new Error("The inventory ran without the thread's inputs.");
       const summary = await steps.inventory({ threadId: state.threadId, plan: state.plan, captures: state.captures, candidateSource: state.fingerprints.candidateSource });
       return { inventorySummary: summary };
-    })
+    }))
     .addEdge(START, "route_cases")
     // Plain edges: the router runs once after every capture and compare of the step finished, and sees all their writes.
     .addEdge("capture", "route_cases")

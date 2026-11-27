@@ -1,5 +1,6 @@
 import type { BaseCheckpointSaver } from "@langchain/langgraph-checkpoint";
 import { join } from "node:path";
+import { invokePausable, type PauseGate } from "../loop/loop-control.js";
 import { SetupError } from "../host/setup-error.js";
 import type { Cycle } from "./cycle.js";
 import { buildTuningGraph, type TuningStateValue, type TuningSteps } from "./tuning-graph.js";
@@ -33,17 +34,19 @@ export async function concludedTuning(graph: TuningGraph, tuningId: string): Pro
 /**
  * Runs a tuning thread to its conclusion: an unfinished thread continues from its checkpoint, without repeating a finished
  * node; otherwise the thread runs from its start with `input`, whose steps find what an earlier run recorded. Its cycle
- * is recovered first. An interruption is a setup error that names how to resume.
+ * is recovered first. An interruption is a setup error that names how to resume. With the gate of the loop that runs the
+ * tuning, the thread pauses with the loop.
  */
-export async function runTuningThread(graph: TuningGraph, steps: TuningRun, input: TuningStateValue, resume: string, signal?: AbortSignal): Promise<Cycle> {
+export async function runTuningThread(graph: TuningGraph, steps: TuningRun, input: TuningStateValue, resume: string, signal?: AbortSignal,
+  gate: PauseGate | null = null): Promise<Cycle> {
   const unfinished = (await tuningThread(graph, input.tuningId)) === "unfinished";
   // An unfinished thread's cycle is recovered in the folders its checkpoint works on: its worktree's, when it has one.
   steps.recover(unfinished ? (await graph.getState({ configurable: { thread_id: input.tuningId } })).values as TuningStateValue : input);
   let final: TuningStateValue;
   try {
-    final = await graph.invoke(unfinished ? null : input, {
+    final = await invokePausable(graph, unfinished ? null : input, {
       configurable: { thread_id: input.tuningId }, durability: "sync", ...(signal === undefined ? {} : { signal }),
-    }) as TuningStateValue;
+    }, gate, `Tuning ${input.tuningId}`) as TuningStateValue;
   } catch (error) {
     if (signal?.aborted === true) throw new SetupError(`Interrupted: tuning ${input.tuningId} stopped; resume it with ${resume}.`);
     throw error;
