@@ -11,6 +11,8 @@ import { loadProfile } from "../options/profile.js";
 import { workflowPaths } from "../paths.js";
 import { loopUsage, parseLoopArguments } from "./loop-arguments.js";
 import { loopPaths, newLoopId } from "./loop-document.js";
+import { pauseLoop } from "./pause-loop.js";
+import { laneDefinitions } from "../lanes/lane-settings.js";
 import { hostLoopSteps, openLoopCheckpointer, runLoop } from "./run-loop.js";
 
 // An unexpected error must not end with Node's status 1.
@@ -31,6 +33,7 @@ async function main(): Promise<number> {
       return 0;
     }
     profile = loadProfile(process.env);
+    if (command.kind === "pause") return pauseLoop(command, { paths: loopPaths(repositoryRoot), lanes: laneDefinitions(profile.lanes), now: () => new Date(), log });
   } catch (error) {
     if (!(error instanceof SetupError)) throw error;
     log(`Setup error: ${error.message}`);
@@ -40,7 +43,9 @@ async function main(): Promise<number> {
   const now = () => new Date();
   const signal = interruptSignal(log);
   const paths = loopPaths(repositoryRoot);
-  const workflow = composeWorkflow(repositoryRoot, profile, log, signal);
+  // The loop's ID comes first: its control file pauses the desktop lanes of the composed workflow.
+  const loopId = newLoopId(now());
+  const workflow = composeWorkflow(repositoryRoot, profile, log, signal, { loopFolder: paths.folder(loopId) });
   try {
     const checkpointer = openLoopCheckpointer(paths);
     try {
@@ -48,7 +53,7 @@ async function main(): Promise<number> {
       try {
         const threadFolder = workflowPaths(repositoryRoot).threadFolder;
         return await runLoop(command, {
-          paths, checkpointer, now, log, signal, newLoopId,
+          paths, checkpointer, now, log, signal, newLoopId: () => loopId,
           steps: (loopId) => hostLoopSteps(loopId, { paths, workflow, threadFolder, evalContext: evals.context, now, log }),
         });
       } finally {
