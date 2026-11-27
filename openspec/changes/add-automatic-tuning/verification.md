@@ -171,3 +171,56 @@ None for this task: it changes only documentation.
 ### Unverified
 
 - A `tune auto` with real tune and eval jobs, and its merge into this repository's branch.
+
+## Task 5.1: live `tune auto`
+
+The run was made in a separate worktree on the local branch `live/add-automatic-tuning-5.1`, which is `f722e89f` plus two commits that move ten captions of `frmCreate` (six on the Common tab, four on the Character Info tab), so that the workflow has discrepancies to diagnose. This branch is based on the later `e1f0eb29`, which adds the loop driver and changes the code `tune auto` runs (`workflow/src/tuning/tune-commands.ts`; the evaluation context moved to `workflow/src/evals/compose-eval-context.ts`). The live branch does not contain it: the live runs exercised `tune auto` as at `f722e89f`, and its code on this branch is covered by the workflow tests only. `tune auto` merges into the branch `HEAD` names, so its merge was made on that branch; the activated configuration, the ledger and the certificate are on that branch and not on this one. Every thread made two hypotheses per cluster on Claude (default model, effort `medium`); the last thread and the tuning ran every job kind on Claude, and the tuning and certificates folders were the defaults inside the repository (`workflow/evals/tuning/`, `workflow/evals/certificates/`).
+
+### Commands and results
+
+| Command | Result |
+| --- | --- |
+| `npm start -- --settings-overlay <fixture books> --case Diego_v_alpha2_by_bessgeor --capture common --no-repair` (first seed commit) | Thread `wf-20261028T223930Z-a2d55858`, exit 1 (visual differences), outcome `findings_remaining`. 3 clusters (`d-eddff41f5311393a`, `d-774d1c4a38ae1d43`, `d-185dcd72ea30eacf`), each `confirmed` by its check; 6 hypothesis records. Its challenges ran on Codex. |
+| `npm run eval -- tune auto` | `Automatic tuning: 6 of 12 new hypothesis records; not due.`, exit 0. |
+| `npm start -- … --capture character-info --no-repair` (second seed commit) | Thread `wf-20261028T232136Z-c05b4eb0`: 4 clusters, 8 hypothesis records written. The process was stopped while its challenges ran; the thread has no check and no outcome and was not resumed. |
+| `npm start -- … --capture character-info --no-repair` (same commit, new thread) | Thread `wf-20261127T224130Z-54829f0d`, exit 1 (visual differences), outcome `findings_remaining`. 4 clusters: `d-8ac9d12926050fd3`, `d-f704dfafdb4ac15a` and `d-d4f8cf18c094d85b` `confirmed`, `d-3bb07969d58e38cd` `refuted`; 8 hypothesis records. |
+| `npm run eval -- tune auto` | Exit 0, outcome `activated`; details below. |
+| `npm run workflow:typecheck` and `npm run workflow:test` on this branch, output kept | Typecheck passed; 659 tests, all passed (0 failed, 0 cancelled, 0 skipped). |
+| `npm run openspec:validate` | Passed: 20 passed, 0 failed. |
+| SHA-256 of `bin/ChummerGenSR4.exe`, before and after the runs | `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56` both times. |
+
+### Capture runs of the seed threads
+
+Each thread's own capture run planned the one case `build-Diego_v_alpha2_by_bessgeor`; the check runs are not compared, so they have no report. "Completeness" is the comparer's: all three reports are complete, with 16 planned captures, 1 `reported`, 15 `filtered` and none in any other state.
+
+| Thread and run | Execution | Visual |
+| --- | --- | --- |
+| `wf-20261028T223930Z-a2d55858`, capture `20261028T224051Z-65461193` | Capture status 1, coverage valid, 0 failures, 6 optional absent; canonical side from the cache. | `common` failed (1 row). Report `differences`, 3 discrepancies; completeness as above. |
+| `wf-20261028T223930Z-a2d55858`, check `20261028T231450Z-6065e5d0` | Capture status 1, coverage valid, 0 failures, 20 optional absent; canonical sides from the cache (4 hits). | 3 rows failed (`common` of the three build cases), 5 within threshold. |
+| `wf-20261028T232136Z-c05b4eb0`, capture `20261028T232219Z-c8e2e006` | Capture status 1, coverage valid, 0 failures, 6 optional absent; canonical side captured live (cache miss, stored). | `character-info` failed (1 row). Report `differences`, 4 discrepancies; completeness as above. No check ran. |
+| `wf-20261127T224130Z-54829f0d`, capture `20261127T224150Z-94b1c101` | Capture status 1, coverage valid, 0 failures, 6 optional absent; canonical side captured live (not from the cache). | `character-info` failed (1 row). Report `differences`, 4 discrepancies; completeness as above. |
+| `wf-20261127T224130Z-54829f0d`, check `20261127T225156Z-74cbc306` | Capture status 1, coverage valid, 0 failures, 20 optional absent; canonical sides captured live (0 hits, 4 stored). | 6 rows failed (`character-info` and `right-other-info` of the three build cases), 6 within threshold. |
+
+### Live evidence
+
+`tune auto` (tuning `tune-20261127T225916Z-ac08db30`):
+
+- count: `Automatic tuning: 22 of 12 new hypothesis records; due.` The 22 are the records of the three threads above (6, 8 and 8); `auto.json` lists the 22 as counted and holds no tuning in progress afterwards.
+- dataset: `auto-hypothesis` v1 (seed `auto`, test 50 %, reason `automatic tuning tune-20261127T225916Z-ac08db30 after 22 new hypothesis records`, hash `a1c9f681…`): 11 items, one per cluster, 5 test and 6 development. The 4 clusters of the stopped thread have only their own observed capture as reference.
+- worktree: the cycle `tc-20261127T225916Z-ac08db30` worked on `workflow/evals/tuning` and `workflow/evals/certificates` in a worktree on `tuning/tc-20261127T225916Z-ac08db30`, started at `live/add-automatic-tuning-5.1` `5025c466`.
+- development: baseline run `er-20261127T225922Z-870c91b2` (no active configuration, `hypothesis-v2`) passed `prediction` on 2 of 6 items. The `tune` job proposed `tuned-6a7d37963d69` (three guidance lines, context `inline`): predict the observed member's own case and capture first, then the same capture in other cases, and do not abstain only because the shift is small. Its run `er-20261127T230121Z-2401884d` passed 6 of 6: 6 pairs, mean difference 0.667, 95 % t interval [0.125, 1.209], `improved`.
+- holdout: run `er-20261127T230250Z-1ad9b473` (1 of at most 3 candidates shown the test items) passed 5 of 5; test baseline `er-20261127T230410Z-046357e0` passed 3 of 5. Test comparison: 5 pairs, mean difference 0.400, 95 % t interval [-0.280, 1.080], `no-difference` (not `worse`).
+- activation: certificate for `hypothesis-v2+tuned-6a7d37963d69` (claude, default model, `medium`) on run `er-20261127T230250Z-1ad9b473`: 5 items, 5 passes, 95 % Wilson interval [0.566, 1], above `minPass` 0.5. Outcome `activated`, exit 0.
+- branch and merge: `Tune hypothesis: activated` (`7f0a5178`, trailer `Tuning-Cycle: tc-20261127T225916Z-ac08db30`) changes exactly `workflow/evals/certificates/hypothesis.json`, `workflow/evals/tuning/active/hypothesis.json` and `workflow/evals/tuning/holdout.json`. It was merged into `live/add-automatic-tuning-5.1` as `6476ea03` (`Merge tuning/tc-20261127T225916Z-ac08db30: hypothesis activated`, trailers `Tuning: tune-20261127T225916Z-ac08db30` and `Merged-Tuning: tc-20261127T225916Z-ac08db30`), with `tuning/tc-20261127T225916Z-ac08db30-merge` kept. The checkout was fast-forwarded and was clean afterwards, and the cycle's worktree was removed. `auto.json` records the branch, the commit, the merge and the outcome.
+
+### Fixture-tested scope
+
+The not-due path was run live (the first `tune auto` above). `--force`, records added during a tuning, the `no_improvement`, `rejected` and `failed` outcomes, resumption after an interruption, merge conflicts, uncommitted tuning files, a detached `HEAD`, folders outside the repository and the commands held back during a tuning are covered by the workflow tests of tasks 1.1 to 3.1 only; this run exercised none of them.
+
+### Unverified
+
+- A live `tune auto` that ends `no_improvement`, `rejected` or `failed`, is interrupted and resumed, or meets a merge conflict.
+- A live `tune auto` with the tuning or certificates folders outside the repository.
+- A live `tune auto` with this branch's code, which `e1f0eb29` changed (see above).
+- The root-cause metric: the dataset's items have no gold root cause (`root cause no gold` on every sample), so only `prediction` was measured.
+- The test comparison's interval includes 0 with n = 5, so the run does not show the tuned prompt better on the test partition; it only met the activation rule (not `worse`, Wilson lower bound above 0.5).

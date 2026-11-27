@@ -20,5 +20,5 @@ Each task names the tasks it builds on as `(after: …)`, by number in this list
 
 ## 5. Verification and archive
 
-- [ ] 5.1 (after: 4.1) Run `npm run eval -- tune auto` live on the store's records; record in `verification.md` the count, the dataset, the cycle's outcome with n and the 95 % intervals, the branch and merge, fixture-tested scope apart from live evidence, and what remains unverified.
+- [x] 5.1 (after: 4.1) Run `npm run eval -- tune auto` live on the store's records; record in `verification.md` the count, the dataset, the cycle's outcome with n and the 95 % intervals, the branch and merge, fixture-tested scope apart from live evidence, and what remains unverified.
 - [ ] 5.2 (after: 5.1) Archive the change with `openspec archive add-automatic-tuning`. Evidence: `npm run openspec:validate` passes after the archive.
