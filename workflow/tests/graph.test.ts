@@ -200,11 +200,11 @@ function recordingDiagnosis(diagnosed: string[]): DiagnosisSteps {
 function harness(cases: string[], steps = new FakeSteps(), checkpointer = new MemorySaver(), signal?: AbortSignal, discovery?: Discovering) {
   const loop = new FakeLoop();
   const lines: string[] = [];
+  const pauses: { threadId: string; pause: Pause }[] = [];
   const log = (line: string) => lines.push(line);
   const graph = buildWorkflowGraph(steps, discovery === undefined ? noDiagnosis : recordingDiagnosis(discovery.diagnosed), noRepair, noWidening, loop,
-    discovery === undefined ? noDiscovery : new RunnerDiscovery(discovery.runner, log)).compile({ checkpointer, store: new InMemoryStore() });
+    discovery === undefined ? noDiscovery : new RunnerDiscovery(discovery.runner, log, (threadId, pause) => pauses.push({ threadId, pause }))).compile({ checkpointer, store: new InMemoryStore() });
   const readCalls: [string, boolean][] = [];
-  const pauses: { threadId: string; pause: Pause }[] = [];
   const dependencies: RunDependencies = {
     graph,
     resolveOptions: (command) => (discovery === undefined ? {

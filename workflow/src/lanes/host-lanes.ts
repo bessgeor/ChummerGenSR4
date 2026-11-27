@@ -34,8 +34,9 @@ export function hostLanePool(definitions: readonly LaneDefinition[], localData: 
 }
 
 /**
- * The lanes the control file of the loop in `loopFolder` pauses. Each time it is read, an agent lane whose flag differs
- * from the one last written gets it in `paused.json` in its folder, beside its agent's heartbeat.
+ * The lanes the control file of the loop in `loopFolder` pauses. Each time it is read, an agent lane the control file
+ * names, whose flag differs from the one last written, gets it in `paused.json` in its folder, beside its agent's
+ * heartbeat; a lane this loop never set a flag for keeps the file another loop wrote.
  */
 export function controlFilePauses(loopFolder: string, definitions: readonly LaneDefinition[], log: (line: string) => void, now: () => Date): LanePauses {
   const written = new Map<string, boolean>();
@@ -45,7 +46,7 @@ export function controlFilePauses(loopFolder: string, definitions: readonly Lane
       const control = readControl(loopFolder);
       const paused = new Set(definitions.filter((definition) => lanePaused(control, definition.name)).map((definition) => definition.name));
       for (const definition of definitions) {
-        if (definition.kind !== "agent") continue;
+        if (definition.kind !== "agent" || control.lanes[definition.name] === undefined) continue;
         const flag = paused.has(definition.name);
         if (written.get(definition.name) === flag) continue;
         writeLanePaused(definition.folder, flag, now());

@@ -1,4 +1,4 @@
-import type { PauseGate } from "../loop/loop-control.js";
+import type { Pause, PauseGate } from "../loop/loop-control.js";
 import { z } from "zod";
 import { SetupError } from "../host/setup-error.js";
 import type { RunOptions } from "../options/run-options.js";
@@ -83,10 +83,15 @@ export interface ThreadDiscoverySteps {
 
 /** A workflow thread's discovery through the discovery runner. */
 export class RunnerDiscovery implements ThreadDiscoverySteps {
-  constructor(private readonly runner: DiscoveryRunner, private readonly log: (line: string) => void) {}
+  constructor(
+    private readonly runner: DiscoveryRunner,
+    private readonly log: (line: string) => void,
+    /** Records a pause of the discovery thread as one of the workflow thread whose `discovery` stage waits for it. */
+    private readonly recordPause: (workflowThreadId: string, pause: Pause) => void,
+  ) {}
 
   async discover(input: { readonly threadId: string; readonly options: RunOptions }, signal?: AbortSignal, loopFolder: string | null = null): Promise<ThreadDiscovery> {
-    const gate: PauseGate | null = loopFolder === null ? null : { folder: loopFolder, log: this.log };
+    const gate: PauseGate | null = loopFolder === null ? null : { folder: loopFolder, log: this.log, onPause: (pause) => this.recordPause(input.threadId, pause) };
     const id = discoveryThreadId(input.threadId);
     const found = await this.runner.thread(id);
     let concluded: Concluded;

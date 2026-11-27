@@ -123,7 +123,7 @@ export function composeWorkflow(repositoryRoot: string, profile: Profile, log: (
     const discovery = new RunnerDiscovery(composeDiscovery({
       repositoryRoot, paths, folders, registry: registryPaths(repositoryRoot), git: processGit(repositoryRoot), host: hostDiscovery(paths, host, steps, createScratchFolder),
       agents, quota, createScratchFolder, checkpointer: discoveryCheckpointer, store, now, log,
-    }), log);
+    }), log, (threadId, pause) => recordThreadPause(paths.threadFolder(threadId), pause));
     const loop = new LoopService({ threadFolder: paths.threadFolder, integrate: (request) => integrate(branchGit, worktrees, request), now });
     const graph = buildWorkflowGraph(steps, diagnosis, repair, widening, loop, discovery).compile({ checkpointer, store });
     const dependencies: RunDependencies = {

@@ -214,8 +214,8 @@ function finish(final: WorkflowStateValue, dependencies: RunDependencies): numbe
 
 /** Runs the thread's graph to its end, through the pauses of the loop that runs it, if any. */
 function invokeThread(threadId: string, input: WorkflowStateValue | null, request: RunRequest, dependencies: RunDependencies): Promise<WorkflowStateValue> {
-  return invokePausable(dependencies.graph, input, threadConfig(threadId, dependencies.signal), request.loopControl ?? null, `Thread ${threadId}`,
-    (pause) => dependencies.recordPause(threadId, pause));
+  const gate = request.loopControl === undefined ? null : { ...request.loopControl, onPause: (pause: Pause) => dependencies.recordPause(threadId, pause) };
+  return invokePausable(dependencies.graph, input, threadConfig(threadId, dependencies.signal), gate, `Thread ${threadId}`);
 }
 
 /**

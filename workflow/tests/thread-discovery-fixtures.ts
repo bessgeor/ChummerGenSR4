@@ -1,3 +1,4 @@
+import type { PauseGate } from "../src/loop/loop-control.js";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DiscoveryGraph, DiscoveryRunner, DiscoveryThread } from "../src/discovery/discovery-runner.js";
@@ -23,6 +24,8 @@ export class FakeDiscoveryRunner implements DiscoveryRunner {
   readonly calls: string[] = [];
   readonly started: { threadId: string; options: DiscoveryOptions }[] = [];
   readonly signals: (AbortSignal | undefined)[] = [];
+  /** The pause gate each start and resume got. */
+  readonly gates: (PauseGate | null)[] = [];
   failBeforeCheckpoint: Error | null = null;
   failAfterCheckpoint: Error | null = null;
   private readonly threads = new Map<string, { options: DiscoveryOptions; concluded: Concluded | null }>();
@@ -35,9 +38,10 @@ export class FakeDiscoveryRunner implements DiscoveryRunner {
     return found.concluded === null ? { kind: "unfinished", options: found.options } : { kind: "finished", options: found.options, concluded: found.concluded };
   }
 
-  async start(threadId: string, options: DiscoveryOptions, signal?: AbortSignal): Promise<Concluded> {
+  async start(threadId: string, options: DiscoveryOptions, signal?: AbortSignal, gate: PauseGate | null = null): Promise<Concluded> {
     this.calls.push(`start ${threadId}`);
     this.signals.push(signal);
+    this.gates.push(gate);
     if (this.threads.has(threadId)) throw new SetupError(`Discovery thread ${threadId} already exists; resume it instead.`);
     this.started.push({ threadId, options });
     const failure = this.failBeforeCheckpoint;

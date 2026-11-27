@@ -109,7 +109,8 @@ test("a lane paused while it captures finishes that case and takes no new one; t
   deepStrictEqual(lanes.lines, []);
   // The agent lanes' flags are beside their agents, in paused.json.
   deepStrictEqual(JSON.parse(readFileSync(lanePausedPath(join(lanes.root, "vm")), "utf8")), { paused: true, updatedUtc: now().toISOString() });
-  deepStrictEqual(JSON.parse(readFileSync(lanePausedPath(join(lanes.root, "desktop")), "utf8")), { paused: false, updatedUtc: now().toISOString() });
+  // A lane this loop set no flag for keeps whatever another loop wrote there.
+  equal(existsSync(lanePausedPath(join(lanes.root, "desktop"))), false);
   // Unpaused, the lane takes commands again.
   setPaused(lanes.loop, "vm", false, now());
   const d = lanes.capture("d");

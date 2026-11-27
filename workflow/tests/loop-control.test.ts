@@ -5,7 +5,7 @@ import { Worker } from "node:worker_threads";
 import { Annotation, END, MemorySaver, START, StateGraph } from "@langchain/langgraph";
 import { SetupError } from "../src/host/setup-error.js";
 import {
-  controlLockPath, controlPath, invokePausable, LoopControlSchema, nothingPaused, pausable, readControl, setPaused, writeControl, type PauseGate,
+  controlLockPath, controlPath, invokePausable, LoopControlSchema, nothingPaused, pausable, readControl, setPaused, waitWhilePaused, writeControl, type Pause, type PauseGate,
 } from "../src/loop/loop-control.js";
 import { parseLoopArguments } from "../src/loop-driver/loop-arguments.js";
 import { loopPaths, readLoopDocument, writeLoopDocument } from "../src/loop-driver/loop-document.js";
@@ -119,6 +119,7 @@ test("a graph invoked by another graph's node keeps its own checkpointer and pau
     .addEdge("second", END)
     .compile({ checkpointer: innerSaver });
   const seen: { next: string[]; interrupted: boolean }[] = [];
+  const pauses: number[] = [];
   const gate: PauseGate = {
     folder, log: () => {}, pollMilliseconds: 1,
     sleep: async () => {
@@ -127,10 +128,9 @@ test("a graph invoked by another graph's node keeps its own checkpointer and pau
       setPaused(folder, null, false, now());
     },
   };
-  const pauses: number[] = [];
   const outer = new StateGraph(State)
     .addNode("run", async () => {
-      const result = await invokePausable(inner, { log: [] }, { configurable: { thread_id: "inner-1" } }, gate, "Inner", (pause) => pauses.push(pause.milliseconds));
+      const result = await invokePausable(inner, { log: [] }, { configurable: { thread_id: "inner-1" } }, { ...gate, onPause: (pause) => pauses.push(pause.milliseconds) }, "Inner");
       return { log: result.log.map((line: string) => `inner ${line}`) };
     })
     .addEdge(START, "run")
@@ -242,3 +242,62 @@ function parseStart() {
   if (command.kind !== "start") throw new Error("expected a start");
   return command.arguments;
 }
+
+test("a loop paused again right after an unpause, before the resumed node runs, interrupts that node again", async () => {
+  const folder = scratch("workflow-loop-control-");
+  const events: string[] = [];
+  const graph = new StateGraph(State)
+    .addNode("a", pausable(() => {
+      events.push("a runs");
+      return { log: ["a"] };
+    }))
+    .addEdge(START, "a")
+    .addEdge("a", END)
+    .compile({ checkpointer: new MemorySaver() });
+  setPaused(folder, null, true, now());
+  let pauses = 0;
+  const gate: PauseGate = {
+    folder, log: () => {}, pollMilliseconds: 1,
+    sleep: async () => {
+      events.push("unpause");
+      setPaused(folder, null, false, now());
+    },
+    // The first wait ends, and the loop is paused again before the graph is resumed.
+    onPause: () => {
+      if (pauses++ === 0) {
+        events.push("pause again");
+        setPaused(folder, null, true, now());
+      }
+    },
+  };
+  const result = await invokePausable(graph, { log: [] }, { configurable: { thread_id: "r-1" } }, gate, "Thread r-1");
+  deepStrictEqual(events, ["unpause", "pause again", "unpause", "a runs"]);
+  deepStrictEqual([result.log, pauses], [["a"], 2]);
+});
+
+test("a wait ended by the signal still reports its pause, and a clock set back during a pause gives a pause of no time", async () => {
+  const folder = scratch("workflow-loop-control-");
+  setPaused(folder, null, true, now());
+  const reported: Pause[] = [];
+  const controller = new AbortController();
+  const clock = [new Date("2026-11-01T10:00:00Z"), new Date("2026-11-01T10:07:00Z")];
+  await rejects(waitWhilePaused({
+    folder, log: () => {}, now: () => clock.shift()!, onPause: (pause) => reported.push(pause),
+    sleep: async () => {
+      controller.abort();
+      throw new SetupError("stopped");
+    },
+  }, "Thread s-1", controller.signal), /stopped/);
+  deepStrictEqual(reported, [{ startedUtc: "2026-11-01T10:00:00.000Z", endedUtc: "2026-11-01T10:07:00.000Z", milliseconds: 420_000 }]);
+  const back = [new Date("2026-11-01T10:00:00Z"), new Date("2026-11-01T09:59:55Z")];
+  await waitWhilePaused({
+    folder, log: () => {}, now: () => back.shift()!, onPause: (pause) => reported.push(pause),
+    sleep: async () => {
+      setPaused(folder, null, false, now());
+    },
+  }, "Thread s-1");
+  equal(reported[1]!.milliseconds, 0);
+  // A loop that is not paused does not wait, and reports nothing.
+  await waitWhilePaused({ folder, log: () => {}, onPause: (pause) => reported.push(pause) }, "Thread s-1");
+  equal(reported.length, 2);
+});

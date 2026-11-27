@@ -162,12 +162,14 @@ export function loopFolderOf(config: LangGraphRunnableConfig | undefined): strin
 /**
  * A graph node that interrupts on entry, before it does anything, while the loop that runs its graph is paused. The
  * loop is named by `configurable.loopControl`, which a graph a loop does not run lacks: such a node never pauses. A
- * resumed node runs from its start and reads the control file again; once the loop is unpaused it does its work.
+ * resumed node runs from its start and reads the control file again: what its interrupt returns is ignored, and a loop
+ * paused again before the node ran interrupts it again. Once the loop is unpaused it does its work.
  */
 export function pausable<S, R>(node: (state: S, config: LangGraphRunnableConfig) => R): (state: S, config: LangGraphRunnableConfig) => R {
   return (state, config) => {
     const folder = loopFolderOf(config);
-    if (folder !== null && readControl(folder).paused) interrupt({ paused: true } satisfies PauseInterrupt);
+    // Each call takes the next resume value, if any; the first call without one interrupts.
+    if (folder !== null) while (readControl(folder).paused) interrupt({ paused: true } satisfies PauseInterrupt);
     return node(state, config);
   };
 }
@@ -184,28 +186,36 @@ export type PauseGate = {
   readonly pollMilliseconds?: number;
   readonly now?: () => Date;
   readonly sleep?: (milliseconds: number, signal: AbortSignal | undefined) => Promise<void>;
+  /** Learns each pause the graph waited through, also one the signal ended. */
+  readonly onPause?: (pause: Pause) => void;
 };
 
-/** The gate of a graph invoked by a node of a graph the loop runs, from that node's configuration; null outside a loop. */
-export function gateOf(config: LangGraphRunnableConfig | undefined, log: (line: string) => void): PauseGate | null {
-  const folder = loopFolderOf(config);
-  return folder === null ? null : { folder, log };
-}
-
-/** Waits until the loop's control file no longer says the loop is paused, and returns how long it waited. */
-export async function waitWhilePaused(gate: PauseGate, label: string, signal?: AbortSignal): Promise<Pause> {
+/**
+ * Waits until the loop's control file no longer says the loop is paused. A wait that took place, ended by the unpause or
+ * by the signal, is reported to the gate's `onPause`; a clock set back during it gives a pause of no time.
+ */
+export async function waitWhilePaused(gate: PauseGate, label: string, signal?: AbortSignal): Promise<void> {
   const now = gate.now ?? (() => new Date());
   const sleep = gate.sleep ?? delay;
   const started = now();
-  let announced = false;
+  const report = () => {
+    const ended = now();
+    gate.onPause?.({ startedUtc: started.toISOString(), endedUtc: ended.toISOString(), milliseconds: Math.max(0, ended.getTime() - started.getTime()) });
+  };
+  let waited = false;
   while (readControl(gate.folder).paused) {
-    if (!announced) gate.log(`${label} is paused; it goes on once the loop is unpaused (npm run loop -- --unpause).`);
-    announced = true;
-    await sleep(gate.pollMilliseconds ?? 1000, signal);
+    if (!waited) gate.log(`${label} is paused; it goes on once the loop is unpaused (npm run loop -- --unpause).`);
+    waited = true;
+    try {
+      await sleep(gate.pollMilliseconds ?? 1000, signal);
+    } catch (error) {
+      report();
+      throw error;
+    }
   }
-  const ended = now();
-  if (announced) gate.log(`${label} goes on: the loop is unpaused.`);
-  return { startedUtc: started.toISOString(), endedUtc: ended.toISOString(), milliseconds: ended.getTime() - started.getTime() };
+  if (!waited) return;
+  report();
+  gate.log(`${label} goes on: the loop is unpaused.`);
 }
 
 /** The configuration of a graph's invocation. */
@@ -223,12 +233,12 @@ export function invokeAlone<G extends Invocable>(graph: G, input: unknown, confi
 
 /**
  * Invokes a graph a loop may pause. With a gate, its nodes see the loop's control file, and each time the graph stops
- * at their pause interrupts it waits until the loop is unpaused, reports the pause and invokes it again from its
+ * at their pause interrupts it waits until the loop is unpaused (see `waitWhilePaused`) and invokes it again from its
  * checkpoint with `Command({ resume: true })`, which runs the interrupted tasks from their start. Tasks that finished
  * beside the interrupted ones keep their writes. Without a gate the graph is invoked as it is and never pauses.
  */
 export async function invokePausable<G extends Invocable>(graph: G, input: unknown, config: InvokeConfig, gate: PauseGate | null,
-  label: string, onPause: (pause: Pause) => void = () => {}): Promise<Awaited<ReturnType<G["invoke"]>>> {
+  label: string): Promise<Awaited<ReturnType<G["invoke"]>>> {
   if (gate === null) return invokeAlone(graph, input, config) as Promise<Awaited<ReturnType<G["invoke"]>>>;
   const configured: InvokeConfig = { ...config, configurable: { ...config.configurable, [loopControlKey]: gate.folder } };
   let result = await invokeAlone(graph, input, configured);
@@ -237,7 +247,7 @@ export async function invokePausable<G extends Invocable>(graph: G, input: unkno
     if (!interrupts.every((item) => (item.value as Partial<PauseInterrupt> | undefined)?.paused === true)) {
       throw new SetupError(`${label} stopped at an interrupt that is not a pause: ${JSON.stringify(interrupts.map((item) => item.value))}.`);
     }
-    onPause(await waitWhilePaused(gate, label, config.signal));
+    await waitWhilePaused(gate, label, config.signal);
     result = await invokeAlone(graph, new Command({ resume: true }), configured);
   }
   return result as Awaited<ReturnType<G["invoke"]>>;
