@@ -224,3 +224,27 @@ The not-due path was run live (the first `tune auto` above). `--force`, records 
 - A live `tune auto` with this branch's code, which `e1f0eb29` changed (see above).
 - The root-cause metric: the dataset's items have no gold root cause (`root cause no gold` on every sample), so only `prediction` was measured.
 - The test comparison's interval includes 0 with n = 5, so the run does not show the tuned prompt better on the test partition; it only met the activation rule (not `worse`, Wilson lower bound above 0.5).
+
+## Task 5.2: archive
+
+Tasks 1.1 to 5.1 were checked off before the archive.
+
+| Command | Result |
+| --- | --- |
+| `npx openspec archive add-automatic-tuning --yes` | Exit 0. Printed `Task status: 5/6 tasks` and `Warning: 1 incomplete task(s) found. Continuing due to --yes flag.` (task 5.2 itself, checked off after the validation below), then `bounded-self-tuning: update`, `+ 3 added`, `Totals: + 3, ~ 0, - 0, → 0`, `Specs updated successfully.` and `Change 'add-automatic-tuning' archived as '2026-11-28-add-automatic-tuning'.` |
+| `npm run openspec:validate` after the archive | Exit 0: `Totals: 19 passed, 0 failed (19 items)`. The output also holds `INFO` notes that requirement texts are longer than 500 characters. |
+| `npm run workflow:typecheck` after the archive | Passed (exit 0). |
+| `npm run workflow:test` after the archive, output kept | 711 tests, 711 passed, 0 failed, 0 cancelled, 0 skipped (exit 0). |
+| SHA-256 of `bin/ChummerGenSR4.exe` | `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`; no run of this task built or launched it. |
+
+### Evidence by requirement
+
+| Requirement of `bounded-self-tuning` | Fixture-tested | Live |
+| --- | --- | --- |
+| New hypothesis records trigger a tuning | Tasks 1.1 and 2.1 | Task 5.1: not due, then due |
+| An automatic tuning works in its own worktree and merges its files | Task 3.1 | Task 5.1: an activated tuning's worktree, commit and merge |
+| Tuning runs as a checkpointed graph | Task 2.1 | Task 5.1: one uninterrupted automatic tuning |
+
+### Unverified
+
+What the live run did not exercise is listed under Task 5.1, in its fixture-tested scope and its unverified list. The live run also used `tune auto` as at `f722e89f`, before the changes of `e1f0eb29`, so the live column above is not evidence for the code as it is after them.
