@@ -4,7 +4,7 @@ import { defaultLaneSettings, DesktopLane } from "../host/desktop-lane.js";
 import { AgentLane, defaultAgentLaneSettings } from "./agent-lane.js";
 import type { LaneDefinition, RiderEntry } from "./lane-settings.js";
 import { LanePool, type HostLane, type LanePauses } from "./lane-pool.js";
-import { lanePaused, readControl, writeLanePaused } from "../loop/loop-control.js";
+import { lanePaused, loopObserver, readControl, writeLanePaused } from "../loop/loop-control.js";
 
 /** Starts the agent of a lane folder through Rider. */
 export type RiderStarter = (entry: RiderEntry, folder: string, signal?: AbortSignal) => Promise<void>;
@@ -54,5 +54,6 @@ export function controlFilePauses(loopFolder: string, definitions: readonly Lane
       }
       return paused;
     },
+    held: (lane, held) => loopObserver(loopFolder)?.laneHeld(lane, held),
   };
 }

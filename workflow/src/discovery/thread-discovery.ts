@@ -91,7 +91,9 @@ export class RunnerDiscovery implements ThreadDiscoverySteps {
   ) {}
 
   async discover(input: { readonly threadId: string; readonly options: RunOptions }, signal?: AbortSignal, loopFolder: string | null = null): Promise<ThreadDiscovery> {
-    const gate: PauseGate | null = loopFolder === null ? null : { folder: loopFolder, log: this.log, onPause: (pause) => this.recordPause(input.threadId, pause) };
+    const gate: PauseGate | null = loopFolder === null ? null : {
+      folder: loopFolder, log: this.log, onPause: (pause) => this.recordPause(input.threadId, pause), reason: `the discovery of workflow thread ${input.threadId}`,
+    };
     const id = discoveryThreadId(input.threadId);
     const found = await this.runner.thread(id);
     let concluded: Concluded;

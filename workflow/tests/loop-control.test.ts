@@ -74,7 +74,7 @@ test("an invalid control file is a setup error that names it, when it is read an
   throws(() => readControl(folder), (error: Error) => error instanceof SetupError && error.message.includes(path));
   throws(() => writeControl(folder, { paused: false, lanes: { "": { paused: true } }, updatedUtc: "2026-11-01T10:00:00Z" }));
   const ran: string[] = [];
-  await rejects(invokePausable(oneNode(ran), { log: [] }, { configurable: { thread_id: "t-invalid" } }, { folder, log: () => {} }, "Thread t-invalid"),
+  await rejects(invokePausable(oneNode(ran), { log: [] }, { configurable: { thread_id: "t-invalid" } }, { folder, log: () => {} }, "Thread t-invalid", "workflow"),
     (error: Error) => error instanceof SetupError && error.message.includes(path));
   deepStrictEqual(ran, []);
 });
@@ -94,7 +94,7 @@ function oneNode(ran: string[]) {
 
 test("a pausable node of a graph run without a loop reads no control file and never pauses", async () => {
   const ran: string[] = [];
-  const result = await invokePausable(oneNode(ran), { log: [] }, { configurable: { thread_id: "t-1" } }, null, "Thread t-1");
+  const result = await invokePausable(oneNode(ran), { log: [] }, { configurable: { thread_id: "t-1" } }, null, "Thread t-1", "workflow");
   deepStrictEqual([result.log, ran], [["a"], ["a"]]);
 });
 
@@ -130,7 +130,7 @@ test("a graph invoked by another graph's node keeps its own checkpointer and pau
   };
   const outer = new StateGraph(State)
     .addNode("run", async () => {
-      const result = await invokePausable(inner, { log: [] }, { configurable: { thread_id: "inner-1" } }, { ...gate, onPause: (pause) => pauses.push(pause.milliseconds) }, "Inner");
+      const result = await invokePausable(inner, { log: [] }, { configurable: { thread_id: "inner-1" } }, { ...gate, onPause: (pause) => pauses.push(pause.milliseconds) }, "Inner", "workflow");
       return { log: result.log.map((line: string) => `inner ${line}`) };
     })
     .addEdge(START, "run")
@@ -184,7 +184,7 @@ test("a task running when the pause is set finishes and keeps its write; the nex
       setPaused(folder, null, false, now());
     },
   };
-  const result = await invokePausable(ordered, { log: [] }, { configurable: { thread_id: "p-1" } }, gate, "Thread p-1");
+  const result = await invokePausable(ordered, { log: [] }, { configurable: { thread_id: "p-1" } }, gate, "Thread p-1", "workflow");
   // The running task kept its write while the next was interrupted, and no finished task ran again.
   deepStrictEqual(states, [{ next: ["next"], log: ["slow"] }]);
   deepStrictEqual(ran, ["slow start", "slow end", "next"]);
@@ -277,7 +277,7 @@ test("a loop paused again right after an unpause, before the resumed node runs, 
       }
     },
   };
-  const result = await invokePausable(graph, { log: [] }, { configurable: { thread_id: "r-1" } }, gate, "Thread r-1");
+  const result = await invokePausable(graph, { log: [] }, { configurable: { thread_id: "r-1" } }, gate, "Thread r-1", "workflow");
   deepStrictEqual(events, ["unpause", "pause again", "unpause", "a runs"]);
   deepStrictEqual([result.log, pauses], [["a"], 2]);
 });

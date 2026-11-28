@@ -13,6 +13,8 @@ export type LanePauses = {
   /** The names of the paused lanes; a control file that cannot be read is a setup error. */
   paused(): ReadonlySet<string>;
   readonly log: (line: string) => void;
+  /** Learns that a desktop command took (`held`) or gave back the lane. */
+  readonly held?: (lane: string, held: boolean) => void;
 };
 
 /**
@@ -67,6 +69,28 @@ export class LanePool {
     }
   }
 
+  /** The lane held by a command, which the loop learns of until the command releases it. */
+  private async hold(lane: HostLane, release: () => Promise<void>): Promise<HeldLane> {
+    const held = this.pauses?.held;
+    if (held === undefined) return { lane, release };
+    try {
+      held(lane.name, true);
+    } catch (error) {
+      await release();
+      throw error;
+    }
+    return {
+      lane,
+      release: async () => {
+        try {
+          await release();
+        } finally {
+          held(lane.name, false);
+        }
+      },
+    };
+  }
+
   /**
    * Waits until a lane that is not paused is free (or the signal aborts) and holds it. A paused lane is not tried, so
    * it takes no new command while the one it runs goes on; while every lane is paused the command waits and says so.
@@ -83,7 +107,7 @@ export class LanePool {
       waitingForUnpause = open.length === 0;
       for (const { lane, attempts: next } of open) {
         const release = await next.next(signal);
-        if (release !== null) return { lane, release };
+        if (release !== null) return this.hold(lane, release);
       }
       await delay(this.pollMilliseconds, signal);
     }

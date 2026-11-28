@@ -102,13 +102,13 @@ export function discoveryRunner(graph: DiscoveryGraph, now: () => Date): Discove
         threadId, options, startedUtc: now().toISOString(), prepared: null, rankJob: pendingJob(), selected: null, scenarios: {}, agentMilliseconds: 0,
         execution: null, registered: null, concluded: null,
       };
-      return conclusionOf(await invokePausable(graph, input, threadConfig(threadId, signal), gate, `Discovery thread ${threadId}`) as DiscoveryStateValue);
+      return conclusionOf(await invokePausable(graph, input, threadConfig(threadId, signal), gate, `Discovery thread ${threadId}`, "discovery") as DiscoveryStateValue);
     },
     async resume(threadId, signal, gate = null) {
       const found = await thread(threadId);
       if (found.kind === "absent") throw new SetupError(`There is no discovery thread ${threadId} to resume.`);
       if (found.kind === "finished") throw new SetupError(`Discovery thread ${threadId} already finished; start a new one instead.`);
-      return conclusionOf(await invokePausable(graph, null, threadConfig(threadId, signal), gate, `Discovery thread ${threadId}`) as DiscoveryStateValue);
+      return conclusionOf(await invokePausable(graph, null, threadConfig(threadId, signal), gate, `Discovery thread ${threadId}`, "discovery") as DiscoveryStateValue);
     },
     async read(threadId) {
       const found = await thread(threadId);

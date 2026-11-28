@@ -154,7 +154,7 @@ export async function runLoop(command: Extract<LoopCommand, { kind: "start" | "r
     // The loop's own nodes pause with it too: a paused loop starts no further thread or tuning until it is unpaused.
     const invoke = (composed: LoopComposition, input: LoopStateValue | null, id: string) => invokePausable(graphOf(composed), input, {
       configurable: { thread_id: id }, recursionLimit, durability: "sync", ...(dependencies.signal === undefined ? {} : { signal: dependencies.signal }),
-    }, { folder: dependencies.paths.folder(id), log, ...dependencies.pause }, `Loop ${id}`) as Promise<LoopStateValue>;
+    }, { folder: dependencies.paths.folder(id), log, ...dependencies.pause }, `Loop ${id}`, "loop") as Promise<LoopStateValue>;
     let final: LoopStateValue;
     if (command.kind === "resume") {
       resumableLoop(dependencies.paths, command.loopId);
