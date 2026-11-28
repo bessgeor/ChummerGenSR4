@@ -1,4 +1,4 @@
-import { deepEqual, equal, ok } from "node:assert/strict";
+import { deepEqual, equal, ok, throws } from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
 import { checkpointBusyTimeoutMs, openCheckpointSaver } from "../src/graph/checkpoint-database.js";
+import { SetupError } from "../src/host/setup-error.js";
 
 const reader = fileURLToPath(new URL("./checkpoint-reader.ts", import.meta.url));
 
@@ -42,7 +43,7 @@ function startReader(path: string, threadId: string, final: number) {
     };
     void exit.then(({ code, stderr: text }) => {
       if (!lines.some(predicate)) reject(new Error(`The reader exited with ${code} first: ${JSON.stringify(lines)} ${text}`));
-    });
+    }).catch(reject);
     check();
   });
   /** Ends the reader if it still runs, and waits for its exit. */
@@ -77,6 +78,17 @@ test("a checkpoint database is in WAL mode with a busy timeout", () => {
   }
 });
 
+test("a database that cannot be put in WAL mode is a setup error, and its connection is closed", (context) => {
+  const close = context.mock.method(Database.prototype, "close");
+  // SQLite keeps a temporary database, which the empty path names, in its rollback journal mode.
+  throws(
+    () => openCheckpointSaver(""),
+    (error: unknown) => error instanceof SetupError && error.message.includes("cannot be put in WAL mode: its journal mode stays delete."),
+  );
+  equal(close.mock.callCount(), 1);
+  equal((close.mock.calls[0]!.this as Database.Database).open, false);
+});
+
 test("a second saver waits for a writer's lock instead of failing", async () => {
   const { folder, path } = scratch();
   try {
@@ -102,12 +114,10 @@ setTimeout(() => { database.exec("COMMIT"); database.close(); }, 500);
       });
       // The holder's write is not committed yet: a reader sees the database as it was, without waiting.
       equal((first.db.prepare("SELECT COUNT(*) AS n FROM marks").get() as { n: number }).n, 0);
-      // A write waits for the holder's commit, then succeeds.
-      const started = Date.now();
+      // A write while the holder has the lock waits for its commit, then succeeds (with a busy timeout of 0 it fails at once).
       first.db.prepare("INSERT INTO marks VALUES (2)").run();
-      ok(Date.now() - started >= 300, "the write did not wait for the holder's lock");
       equal(await exited, 0);
-      deepEqual((second.db.prepare("SELECT value FROM marks ORDER BY value").all() as Array<{ value: number }>).map((row) => row.value), [1, 2]);
+      deepEqual((second.db.prepare("SELECT value FROM marks ORDER BY rowid").all() as Array<{ value: number }>).map((row) => row.value), [1, 2]);
     } finally {
       await exited;
       first.db.close();

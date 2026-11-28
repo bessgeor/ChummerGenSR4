@@ -2,7 +2,7 @@ import { deepStrictEqual, equal, ok, rejects } from "node:assert/strict";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
+import { openCheckpointSaver } from "../src/graph/checkpoint-database.js";
 import { DatasetSchema, freezeDataset, type Dataset } from "../src/evals/dataset.js";
 import { runEvalCommand } from "../src/evals/eval-commands.js";
 import { listRecords, putRecord } from "../src/evals/eval-record.js";
@@ -101,7 +101,7 @@ async function stoppedTuning(stop: (call: JobCall) => boolean) {
   const { context: base, records } = await dueTuning(fake);
   const path = tuningCheckpoints(base.paths.evalsFolder);
   mkdirSync(join(base.paths.evalsFolder, "tuning"), { recursive: true });
-  const first = SqliteSaver.fromConnString(path);
+  const first = openCheckpointSaver(path);
   const context = { ...base, signal: controller.signal, tuningCheckpointer: () => first };
   try {
     await rejects(runEvalCommand(["tune", "auto"], context), (error: Error) => error instanceof SetupError && error.message.includes("resume it with npm run eval -- tune auto"));
@@ -114,7 +114,7 @@ async function stoppedTuning(stop: (call: JobCall) => boolean) {
 
 /** The node the stopped tuning thread waits at, read from fresh checkpoints as a new process would. */
 async function nextNodes(path: string, tuningIdValue: string): Promise<string[]> {
-  const saver = SqliteSaver.fromConnString(path);
+  const saver = openCheckpointSaver(path);
   try {
     const graph = compileTuningGraph(refusingSteps(), saver);
     return [...(await graph.getState({ configurable: { thread_id: tuningIdValue } })).next];
@@ -126,7 +126,7 @@ async function nextNodes(path: string, tuningIdValue: string): Promise<string[]>
 /** Resumes the stopped tuning in a fresh process: new checkpointer, new agents. */
 async function resume(context: Awaited<ReturnType<typeof stoppedTuning>>["context"], path: string) {
   const fake = agents([], "test", { "Cite the capture.": "all" });
-  const saver = SqliteSaver.fromConnString(path);
+  const saver = openCheckpointSaver(path);
   try {
     const resumed = { ...context, agents: () => fake, signal: new AbortController().signal, tuningCheckpointer: () => saver };
     const status = await runEvalCommand(["tune", "auto"], resumed);
@@ -336,7 +336,7 @@ test("a tune auto while another runs a tuning is a setup error that counts nothi
 });
 
 test("the tuning graph compiles from steps that do nothing until a node runs", async () => {
-  const graph = compileTuningGraph(refusingSteps(), SqliteSaver.fromConnString(":memory:"));
+  const graph = compileTuningGraph(refusingSteps(), openCheckpointSaver(":memory:"));
   const drawn = await graph.getGraphAsync();
   deepStrictEqual(Object.keys(drawn.nodes).filter((node) => !node.startsWith("__")).sort(),
     ["activate", "baseline", "commit", "conclude", "count", "freeze", "holdout", "merge", "propose", "test_baseline", "worktree"]);

@@ -1,6 +1,7 @@
 import { equal } from "node:assert/strict";
 import { test } from "node:test";
-import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
+import type { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
+import { openCheckpointSaver } from "../src/graph/checkpoint-database.js";
 import { emptyCheckpoint } from "@langchain/langgraph-checkpoint";
 import { sqliteCheckpointedThread } from "../src/graph/checkpointed-thread.js";
 
@@ -9,7 +10,7 @@ async function saved(checkpointer: SqliteSaver, threadId: string): Promise<void>
 }
 
 test("the stored thread whose ID matches without regard to case is found, and no other", async () => {
-  const checkpointer = SqliteSaver.fromConnString(":memory:");
+  const checkpointer = openCheckpointSaver(":memory:");
   try {
     await saved(checkpointer, "wf-ABC");
     await saved(checkpointer, "wf-other");
@@ -23,7 +24,7 @@ test("the stored thread whose ID matches without regard to case is found, and no
 });
 
 test("a checkpoint database that holds no checkpoint table yet holds no thread", () => {
-  const checkpointer = SqliteSaver.fromConnString(":memory:");
+  const checkpointer = openCheckpointSaver(":memory:");
   try {
     equal(sqliteCheckpointedThread(checkpointer, "wf-new"), null);
   } finally {
