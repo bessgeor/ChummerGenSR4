@@ -12,7 +12,7 @@ Each task names the tasks it builds on as `(after: …)`, by number in this list
 
 ## 3. Stop and resume
 
-- [ ] 3.1 (after: 2.1) Add `--stop` and `--resume`, checked before each step, and resume an interrupted thread or tuning. Evidence: workflow tests for a stop between steps, a resume after a setup error in a thread and in a tuning, and a resume of a loop that ended.
+- [x] 3.1 (after: 2.1) Add `--stop` and `--resume`, checked before each step, and resume an interrupted thread or tuning. Evidence: workflow tests for a stop between steps, a resume after a setup error in a thread and in a tuning, and a resume of a loop that ended.
 
 ## 4. Pause, state and activity
 
