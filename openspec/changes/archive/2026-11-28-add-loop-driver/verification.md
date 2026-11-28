@@ -264,3 +264,18 @@ Also unverified:
 
 - A live pause while a model job runs: the live pause of the loop took effect during a capture.
 - Thread 2 captured only the case `--case` planned; the admitted scenarios were captured only by their discovery runs, not in a later thread's suite.
+
+## Task 6.2: archive
+
+Before the archive every other task was checked off and this file held the evidence of Tasks 1.1 to 6.1 with what remains unverified; `npm run openspec:validate` passed (18 passed, 0 failed).
+
+| Command | Result |
+| --- | --- |
+| `npx openspec archive add-loop-driver --yes` | `Task status: ✓ Complete`; `desktop-lanes: + 1 added`, `workflow-loop: + 6 added` (new spec), `Totals: + 7, ~ 0, - 0, → 0`; `Change 'add-loop-driver' archived as '2026-11-28-add-loop-driver'.` |
+| `npm run openspec:validate`, right after the archive | **Failed** (exit 1): `Totals: 17 passed, 1 failed (18 items)`, `✗ spec/workflow-loop` with `[WARNING] overview: Purpose section is still a placeholder rather than a Purpose anyone wrote`. |
+| `npm run openspec:validate`, after writing the Purpose of `openspec/specs/workflow-loop/spec.md` | Passed strict validation: 18 passed, 0 failed (exit 0). |
+| `npm run workflow:typecheck`, first run in a fresh checkout | **Failed** (exit 2): `error TS2688: Cannot find type definition file for 'node'.`, as the dependencies were not installed. `npm run workflow:test` in the same state failed all 75 test files (`# tests 75`, `# fail 75`). |
+| `npm ci`, then `npm run workflow:typecheck` | Passed (exit 0). |
+| `npm run workflow:test` | Passed: 727 tests, 727 passed, 0 failed, 0 skipped (exit 0). |
+
+No live run: the archive changes only the change's documents and the specs.

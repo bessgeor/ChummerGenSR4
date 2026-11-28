@@ -1,4 +1,9 @@
-## ADDED Requirements
+# workflow-loop Specification
+
+## Purpose
+Defines `npm run loop`, which runs workflow threads one after another with the automatic tuning after each: how it decides to start the next thread or end (`converged`, `limit`, `stopped` or `failed`), its checkpointed graph and `loop.json`, stop and resume, pausing the loop and single desktop lanes through the control file, and the state, activity and graph files it writes for readers.
+
+## Requirements
 
 ### Requirement: npm run loop runs threads until nothing changes
 `npm run loop -- [options]` SHALL accept the options of `npm start` except `--only` and `--resume`, and `--max-runs <n>` (a positive integer, no limit by default); an unknown option, a missing value or an excluded option SHALL be a setup error before anything runs. It SHALL start a loop with an ID it prints, run a workflow thread with those options, then run an automatic tuning, which tunes only when it is due, and start the next thread when the last thread merged a fix, its discovery admitted a scenario, or the tuning activated a configuration. It SHALL end `converged` when a thread and the tuning after it changed none of these, `limit` when it ran `--max-runs` threads, and `failed` when a thread exited with 2 or the tuning after it failed (exit status 2). Each thread SHALL be started with the loop's options as `npm start` would start it then, so it plans the scenarios admitted so far and builds the source merged so far.
@@ -60,4 +65,4 @@ The loop SHALL be a LangGraph graph built by `buildLoopGraph` in `workflow/src/l
 
 #### Scenario: Graph files at start
 - **WHEN** `npm run loop` starts
-- **THEN** `out/loop/graphs/workflow.json` lists the workflow graph's nodes, `conclude` among them, and its edges, and `out/loop/graphs/loop.json` lists the loop graph's nodes, and `out/loop/graphs/loop.json` lists the loop graph's nodes
+- **THEN** `out/loop/graphs/workflow.json` lists the workflow graph's nodes, `conclude` among them, and its edges, and `out/loop/graphs/loop.json` lists the loop graph's nodes
