@@ -11,7 +11,7 @@ import { challengeAnswer, diagnosisHarness, FakeAgents, hypothesisAnswer, twoClu
 import { FakeRepairHost, patchedReply, repairedSource, type CheckBehaviour } from "./repair-fixtures.js";
 import { FakeWideningHost, type WideningScript } from "./widening-fixtures.js";
 import { repository } from "./diagnosis-fixtures.js";
-import type { BranchGit } from "../src/git/branch-git.js";
+import { GitCommandError, type BranchGit } from "../src/git/branch-git.js";
 
 const first = "d-0000000000000100";
 const second = "d-0000000000000400";
@@ -297,6 +297,10 @@ test("two promoted fixes are merged into the branch the thread started on, one m
   equal(git("status", "--porcelain=v1"), "");
   equal(existsSync(join(run.root, "threads", threadId, "merge")), false);
   ok(!git("worktree", "list", "--porcelain").includes(join(run.root, "threads", threadId, "merge").replace(/\\/g, "/")));
+  // The promoted widenings' worktrees are removed too, so no worktree is left, and each widening branch keeps its fix.
+  equal(git("worktree", "list", "--porcelain").split(/\r?\n/).filter((line) => line.startsWith("worktree ")).length, 1);
+  deepStrictEqual([first, second].map((cluster) => [existsSync(join(state.widenings[cluster]!.folder, "source")), git("rev-parse", `workflow/${threadId}/widening/${cluster}/attempt-1`)]),
+    [first, second].map((cluster) => [false, state.widenings[cluster]!.commit]));
   ok(run.lines.includes(`Merge: master ${start} -> ${after}; 2 of 2 fixes merged, kept on workflow/${threadId}/integration`));
   equal(outcome.outcome, "verified_for_scope");
 });
@@ -394,6 +398,33 @@ test("a fast-forward refused for a local edit of a merged file is a setup error,
   // The checkout gets its line endings from the machine's git settings.
   equal(readFileSync(join(root, "Chummer", "frmCreate.cs"), "utf8").replace(/\r\n/g, "\n"), lines("restored", "local edit"));
   equal(git("status", "--porcelain=v1"), "");
+});
+
+test("a widening worktree that cannot be removed at conclude is a setup error before the merges, and the resumed thread removes it and merges", async () => {
+  const checkpointer = new MemorySaver();
+  const store = new InMemoryStore();
+  const root = committedRepository();
+  const start = gitIn(root)("rev-parse", "master");
+  const run = harness({
+    // The worktree stays registered: git refuses to remove it, and its lock keeps the registration.
+    git: (git) => (args, options) => {
+      if (args[0] === "worktree" && args[1] === "remove" && args.at(-1)!.includes("widening")) {
+        git(["worktree", "lock", args.at(-1)!]);
+        throw new GitCommandError("git worktree remove failed: the folder is in use", 128, "", "in use");
+      }
+      return git(args, options);
+    },
+    extra: { checkpointer, store, repository: root },
+  });
+  equal(await run.start(), 3);
+  const threadId = run.threadId();
+  ok(run.lines.some((line) => line.startsWith("Setup error: git worktree remove failed: the folder is in use")), run.lines.join("\n"));
+  equal(gitIn(root)("rev-parse", "master"), start);
+
+  const resumed = harness({ extra: { checkpointer, store, root: run.root, repository: root } });
+  equal(await resumed.resume(threadId), 1);
+  deepStrictEqual(outcomeOf(run.root, threadId).clusters.map((item) => item.disposition), ["fixed"]);
+  equal(gitIn(root)("worktree", "list", "--porcelain").split(/\r?\n/).filter((line) => line.startsWith("worktree ")).length, 1);
 });
 
 test("a branch no worktree has checked out when the thread concludes is advanced by a ref update, and the checkout stays as it is", async () => {

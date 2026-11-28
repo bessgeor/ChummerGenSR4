@@ -16,5 +16,5 @@ Each task names the tasks it builds on as `(after: …)`, by number in this list
 
 ## 4. Verification and archive
 
-- [ ] 4.1 (after: 3.1) [desktop] Run `npm start` live on a scope with a confirmed cluster through repair, widening and conclude; record in `verification.md` the canonical hash before and after, the branches and merge commits made, execution outcomes apart from visual results, fixture-tested scope apart from live evidence, and what remains unverified.
+- [x] 4.1 (after: 3.1) [desktop] Run `npm start` live on a scope with a confirmed cluster through repair, widening and conclude; record in `verification.md` the canonical hash before and after, the branches and merge commits made, execution outcomes apart from visual results, fixture-tested scope apart from live evidence, and what remains unverified.
 - [ ] 4.2 (after: 4.1) Archive the change with `openspec archive add-repair-worktrees`. Evidence: `npm run openspec:validate` passes after the archive.

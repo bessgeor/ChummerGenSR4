@@ -42,6 +42,9 @@ function conclude(discovery: ThreadDiscovery | null, extra: Partial<ConcludeInpu
   try {
     const service = new LoopService({
       threadFolder: (threadId) => join(root, "threads", threadId), now: () => new Date("2026-10-01T12:00:00Z"),
+      removeWorktree: () => {
+        throw new Error("No worktree is removed here.");
+      },
       integrate: () => {
         throw new Error("Nothing is merged here.");
       },

@@ -13,6 +13,8 @@ export type GitOptions = {
    * ones: for a command that writes files into a person's own checkout, which must get them as git always gives them.
    */
   readonly userSettings?: boolean;
+  /** With `userSettings`, reads attributes from this tree instead of the working tree. */
+  readonly attributeSource?: string;
 };
 
 /** Runs git and returns its standard output; a non-zero exit throws `GitCommandError`. */
@@ -50,7 +52,9 @@ export function processBranchGit(repositoryRoot: string): BranchGit {
   const run = (args: readonly string[], options: GitOptions = {}) => {
     try {
       const user = options.userSettings === true;
-      const attributes = user || args.some((arg) => treeAttributesKept.has(arg)) ? [] : [`--attr-source=${emptyTree}`];
+      const attributes = user
+        ? (options.attributeSource === undefined ? [] : [`--attr-source=${options.attributeSource}`])
+        : args.some((arg) => treeAttributesKept.has(arg)) ? [] : [`--attr-source=${emptyTree}`];
       return execFileSync("git", [...(user ? ["-c", "core.quotepath=false"] : pinned), ...attributes, ...args], {
         cwd: options.cwd ?? repositoryRoot, env: { ...process.env, ...(user ? {} : { GIT_ATTR_NOSYSTEM: "1" }), ...options.env }, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, windowsHide: true,
         stdio: ["pipe", "pipe", "pipe"], ...(options.input === undefined ? {} : { input: options.input }),

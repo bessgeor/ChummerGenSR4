@@ -21,6 +21,8 @@ export type LoopDependencies = {
   readonly threadFolder: (threadId: string) => string;
   /** Merges commits into a branch of the repository (see `integrate`). */
   readonly integrate: (request: IntegrationRequest) => Integration;
+  /** Removes a worktree of the repository, keeping its branch; fails when it stays registered (see `Worktrees.remove`). */
+  readonly removeWorktree: (folder: string) => void;
   readonly now: () => Date;
 };
 
@@ -51,8 +53,9 @@ export type ConcludeInput = {
 export type Conclusion = { readonly document: OutcomeDocument; readonly path: string };
 
 /**
- * Ends a thread: merges its promoted fixes into the branch it started on, then decides every triage cluster's
- * disposition, the outcome and the measures, written to `outcome.json`.
+ * Ends a thread: removes the promoted widenings' worktrees (a rollback removed the others), merges its promoted fixes
+ * into the branch it started on, then decides every triage cluster's disposition, the outcome and the measures, written
+ * to `outcome.json`.
  */
 export class LoopService {
   constructor(private readonly dependencies: LoopDependencies) {}
@@ -96,9 +99,20 @@ export class LoopService {
     };
   }
 
+  /** Removes the worktree of every promoted widening, whose commit stays on its branch. */
+  private removeWideningWorktrees(input: ConcludeInput): void {
+    // A thread stored before widening worked in worktrees names no source commit, and its widened folders are no worktrees.
+    if (input.accepted?.sourceCommit === undefined) return;
+    for (const widening of Object.values(input.widenings)) {
+      if (widening.status === "promoted") this.dependencies.removeWorktree(join(widening.folder, "source"));
+    }
+  }
+
   conclude(input: ConcludeInput): Conclusion {
     const triage = readDocument(input.triagePath, TriageDocumentSchema);
     const { budget } = retryPlan(input.repairs, input.widenings, retryLimits(input.options, input.agentMilliseconds));
+    // Before the merges: a removal that fails leaves the thread to be resumed with nothing merged yet.
+    this.removeWideningWorktrees(input);
     const merge = this.merge(input);
     const ends = triage.clusters.map((cluster) => cluster.id).sort()
       .map((id) => clusterEnd(id, { clusters: input.clusters, check: input.check, repairs: input.repairs, widenings: input.widenings, budgetBlocked: budget, merges: merge.merges }));

@@ -152,3 +152,121 @@ None for this task.
 ## Unverified
 
 That the documented behaviour holds in a live `npm start` thread.
+
+## Task 4.1: a live thread through repair, widening, conclude and the merge
+
+### Setup
+
+The live threads ran in a separate worktree of this repository, on a local branch that adds one commit to this change's branch: `Move the metatype source caption for a live repair run` moves `lblMetatypeSourceLabel` in `Chummer/frmCreate.Designer.cs` from (628, 32) to (640, 32), so that the build-mode Common tab has one discrepancy to fix. A thread merges into the branch it starts on, so each started on that branch, whose checkout was clean and has `core.autocrlf=true`. The settings overlay held `settings/default.xml` with the fixture books. A local workflow profile set every job kind to Claude.
+
+Command, in PowerShell: `npm.cmd start -- --settings-overlay out/overlays/fixture-books --case Diego_v_alpha2_by_bessgeor --capture common`.
+
+Run 5 below is the live run of this change's code. It ran with that commit (`9cffd595ddbb2152bafd930ae76d9ce99d085d9b`) on the change's final source; the only later difference in the change's code and tests is one test added to `workflow/tests/loop-graph.test.ts`. Runs A, B and 1 to 4 ran on earlier states of the change and are kept as its history.
+
+### Earlier threads
+
+| Run | Thread | Result |
+| --- | --- | --- |
+| A | `wf-20261028T222819Z-765bb7a7` | Exit 2, outcome `findings_remaining`, 0 clusters. An execution failure: `candidate: FAILED after 15.8 s: startup: window-activation: window 69716 was not in the foreground after 10 attempts 200 ms apart`, the foreground held by a window of another `ChummerGenSR4` process. Coverage invalid; completeness 16 planned, 16 execution-lost; nothing was compared. |
+| B | `wf-20261028T222952Z-a819b1d0` | Exit 1: the cluster was confirmed, repaired, widened and promoted, then nothing was merged: `Loop d-14297e69d59676fd: merge_failed after 1 attempt; merge: the thread's source held edits of Chummer/clsMTRNG.cs, bin/data/armor.xml, bin/data/armor.xsd, …, bin/lang/language.xsd that live/add-repair-worktrees-4.1 lacks; commit them first (the fixes were verified on top of them)`, then `Merge: live/add-repair-worktrees-4.1 961228f1… -> 961228f1…; 0 of 1 fixes merged`. The checkout held none of these edits: the thread's source commit holds the checkout's bytes, which are CRLF under `core.autocrlf=true`, while the branch's blobs of those files are LF. The merge now stages the thread's commits as the person's own `git add` would before it compares or replays them. |
+| 1 | none | Exit 3 before any thread: `Setup error: The workflow profile … cannot be read: Bad escaped character in JSON at position 393 (line 13 column 21)`. The local profile's executable path had unescaped backslashes; it was rewritten with forward slashes. Nothing was launched. |
+| 2 | `wf-20261127T224508Z-68d4d6a3` | Exit 2, outcome `findings_remaining`. The cluster `d-ef565e590889cef8` was confirmed, its repair attempt passed the narrow check, and the widening passed its narrow level, then failed at the character level as an execution failure: `widen d-ef565e590889cef8 character: failed: execution failure in the level run: capture status 2, coverage invalid (failure:build-Diego_v_alpha2_by_bessgeor/candidate)`, caused by `candidate: FAILED after 3.2 s: startup: window-activation: window 1514030 was not in the foreground after 10 attempts 200 ms apart (foreground: window 6033636 'C:\Windows\system32\cmd.exe ' of class 'ConsoleWindowClass' in process 1244 (pwsh))` (capture run `20261127T230020Z-8d784441`). The cluster ended `widening_rejected` after 1 attempt; nothing was promoted or merged. |
+| 3 | `wf-20261127T230154Z-94dff1af` | Exit 2, outcome `findings_remaining`. Re-run to classify the failure: the same execution failure, this time in the diagnosis check (`candidate: FAILED after 3.3 s: startup: window-activation: window 1643740 …`, same foreground window, capture run `20261127T230246Z-fc89b193`), so the cluster ended `undecided` after 0 attempts. The window belonged to another program on the desktop. It was then minimized (its process was not touched), and it no longer held the foreground. |
+| 4 | `wf-20261127T230805Z-bf58a06e` | Exit 1, outcome `verified_for_scope`: 1 of 1 clusters fixed after 1 attempt, every capture run with valid coverage, widening 1, 13, 82 and 120 rows passed at its four levels, and the fix merged into `live/add-repair-worktrees-4.1` (`4634ef3f…` -> `d907d6b4…`). The promoted widening's worktree stayed registered after conclude, although the design has the end of the thread remove widening worktrees; fixed since (below). |
+
+The failures of runs A, 2 and 3 are execution failures on the desktop (a window that kept the foreground), not visual differences; none of those threads promoted or merged anything. Between run B and run 1, with the line-ending change of the merge, `npm run workflow:typecheck` passed, `npm run workflow:test` passed 647 of 647 tests and `npm run openspec:validate` passed 20 of 20.
+
+### Changes after run 4
+
+The merge now reads a source's uncommitted edits against the commit the source was captured on (before, a file the branch changed during the thread could count as an edit), leaves a conflicting fix's branch at the fix commit, names the replayed files literally, stages them whatever `core.safecrlf` says, keeps their modes whatever `core.filemode` says, stages a file the branch's tip lacks on its entry of the captured commit (before, a fix of a CRLF-stored file the branch renamed conflicted on every line), and removes its worktree before its temporary folder. `conclude` removes the promoted widenings' worktrees. The branch was rebased onto `master`, which had gained the loop driver.
+
+| Command | Result |
+| --- | --- |
+| `npm run workflow:typecheck` | Passed (exit 0) on the final code. |
+| `npm run workflow:test`, first full run on the rebased branch | Failed: 685 tests, 683 passed, 2 failed (exit 1); output below. |
+| `npm run workflow:test`, after the two tests read the fix commit | Passed: 685 tests, 685 passed, 0 failed (exit 0). |
+| `npm run workflow:test`, with the renamed-file change and its test | Passed: 686 tests, 686 passed, 0 failed (exit 0). |
+| `npm run workflow:test`, final code and tests | Passed: 687 tests, 687 passed, 0 failed, 0 skipped (exit 0). |
+| `npm run openspec:validate` | Passed strict validation: 20 passed, 0 failed. |
+
+The failures of the first full run (paths shortened to `<temp>` and the repository root):
+
+```
+not ok 661 - passed attempts are widened one after the other through the levels and promoted as commits on the accepted branch
+  error: "ENOENT: no such file or directory, open '<temp>\\workflow-diagnosis-UQq7RS\\threads\\wf-20261001T120000Z-a0d97ce8\\widening\\d-0000000000000400\\attempt-1\\source\\Chummer\\frmCreate.cs'"
+  code: 'ENOENT'
+  TestContext.<anonymous> (workflow\tests\widening-graph.test.ts:80:9)
+not ok 679 - of an attempt with two passed tries only the selected one is widened and promoted, and widening.json and the report name it
+  error: "ENOENT: no such file or directory, open '<temp>\\workflow-diagnosis-NwTf4H\\threads\\wf-20261001T120000Z-8f80cf9a\\widening\\d-0000000000000100\\attempt-1\\source\\Chummer\\frmCreate.cs'"
+  code: 'ENOENT'
+  TestContext.<anonymous> (workflow\tests\widening-tries.test.ts:65:9)
+```
+
+Both tests read the promoted widening's worktree after the thread had concluded, which now removes it.
+
+Before that run, four runs of the suite on the working tree were stopped partway because the source was edited under them; they are not results of the suite. Their logs list failures of `git` and other child processes that could not start (`Command failed: git … init -q`, exit code 3221225794), assertions that received that exit code or its consequence, and in the last of them the same two `ENOENT` failures as above.
+
+The new tests fail without their change: against the previous merge code, the tests of the moved branch, the conflicting converted fix, the staging and the temporary folder failed; removing the literal pathspecs, the `core.safecrlf` setting or the mode keeping one at a time failed the staging test; without the captured commit's entry the renamed-file test ends with a conflict.
+
+### Run 5: execution outcomes
+
+Thread `wf-20261128T004948Z-2757148c`: exit 1, outcome `verified_for_scope`, 1 of 1 clusters fixed after 1 attempt, model time 1.0 min, elapsed 24.9 min. Every capture run had valid coverage and no failed action or side.
+
+| Step | Capture run | Execution | Canonical side |
+| --- | --- | --- | --- |
+| Initial capture (reused from thread `wf-20261127T224508Z-68d4d6a3`) | `20261127T224516Z-3f12f9f0` | status 1, coverage valid (contiguous, 0 failures, 6 optional absent) | live |
+| Diagnosis check | `20261128T005032Z-90826b1c` | status 1, coverage valid, 0 failures | 2 cases from the cache, `career-facemage_Sam_career` live |
+| Repair narrow check | `20261128T005529Z-c5d0efc5` | status 0, coverage valid | cache |
+| Widening narrow | `20261128T005615Z-d8aff578` | status 0, coverage valid | cache |
+| Widening character | `20261128T005655Z-adfffe77` | status 0, coverage valid | cache |
+| Widening mode | `20261128T005756Z-cef8cd3e` | status 0, coverage valid | cache (7 cases) |
+| Widening suite | `20261128T010449Z-0dbd7a82` | status 0, coverage valid | cache (7 cases) |
+
+The cached canonical sides came from the shared canonical cache, stored by the live canonical sides of runs 2, 3 and 4. In this run the canonical executable ran for one case, `career-facemage_Sam_career` in the diagnosis check.
+
+### Run 5: visual results
+
+- Initial capture: 0 passed, 1 failed (`build-Diego_v_alpha2_by_bessgeor/common`); the comparer reported 1 discrepancy in 1 group, completeness 16 planned, 1 reported, 15 filtered, 0 analysis-failed, 0 execution-lost, 0 unaccounted. This is the seeded discrepancy and the reason for the exit status 1.
+- Diagnosis: hypothesis and challenge on Claude. The challenge found no alternative to the caption's designer location (640, 32); the check confirmed the cluster (`build-facemage_Sam/common` differs, `career-facemage_Sam_career/common` matches, `build-Diego_v_alpha2_by_bessgeor/skills` matches).
+- Repair: attempt 1 passed the narrow check (1 passed, 0 failed).
+- Widening: narrow 1 passed, character 13 passed, mode 82 passed, suite 120 passed, each with 0 failed and target, introduced, changed, pre-existing and unattributed 0; attempt 1 was promoted.
+
+### Run 5: branches, commits and the merge
+
+| Branch | Commit | Content |
+| --- | --- | --- |
+| `workflow/wf-20261128T004948Z-2757148c/source` | `3d4df320e0efcecaed877ebc6eafe2e14f48af63` | The thread's source on `9cffd595…`: 86 files differ from it, all by line endings only (the checkout's CRLF bytes). |
+| `workflow/wf-20261128T004948Z-2757148c/repair/d-ef565e590889cef8/attempt-1` | `f6c823bf2e78315aebf971f7414a97b514324f3b` | Repair attempt 1. |
+| `workflow/wf-20261128T004948Z-2757148c/widening/d-ef565e590889cef8/attempt-1`, `accepted/wf-20261128T004948Z-2757148c` | `c71dd3388fbec9c6413db6dbb706e408b3f32ced` | The fix commit, on the source commit. |
+| `workflow/wf-20261128T004948Z-2757148c/fix/d-ef565e590889cef8` | `2aea0442ba68f59a44ec4fa9bea0fd683fc800af` | The fix replayed onto the branch's tip `9cffd595…` (trailers `Workflow-Thread`, `Discrepancy`, `Repair-Record`): only `Chummer/frmCreate.Designer.cs`, 1 line, `Point(640, 32)` to `Point(628, 32)`. |
+| `workflow/wf-20261128T004948Z-2757148c/integration` and the start branch `live/add-repair-worktrees-4.1-b` | `0299d756e8ba6217801170985688cb6a7503ca00` | `Merge fix for discrepancy d-ef565e590889cef8`, parents `9cffd595…` and `2aea0442…`, trailers `Workflow-Thread: wf-20261128T004948Z-2757148c` and `Merged-Fix: wf-20261128T004948Z-2757148c/d-ef565e590889cef8`. |
+
+The report printed `Loop d-ef565e590889cef8: fixed after 1 attempt; c71dd338… merged as 0299d756…` and `Merge: live/add-repair-worktrees-4.1-b 9cffd595… -> 0299d756…; 1 of 1 fixes merged, kept on workflow/wf-20261128T004948Z-2757148c/integration`. `outcome.json` holds the same merge (`status: merged`, `reason: null`), the disposition `fixed` with the commit and merge commit, and the measures: 1 cluster, 1 fixed, fix rate 1, 1 attempt. The start branch was advanced by a fast-forward of its checkout: `git diff 9cffd595 HEAD` is that one line, the checkout's `Chummer/frmCreate.Designer.cs` is back to its bytes before the seeded commit (SHA-256 `b793470b8e68abb8215da51bd5cb88a82914db829abb357624b0675466ef4911`), and `git status` is empty. After conclude `git worktree list` held no worktree of the thread, the widening's folder held only its build, build log and `widening.json`, and every branch above was still there. Nothing was pushed.
+
+### Canonical executable
+
+The SHA-256 of the canonical executable was `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56` every time it was taken:
+
+| Run | Where it was taken |
+| --- | --- |
+| A, B, 2, 3 | The `Canonical SHA-256 before` and `after` lines that every candidate build and capture step of the run printed (the capture steps also for the staged copy), including the failed ones. |
+| 4, 5 | The same lines of every step, and `bin/ChummerGenSR4.exe` hashed before and after the whole run. |
+| 1 | Not taken: the run ended before anything was built or launched. |
+
+## Fixture-tested scope
+
+On temporary git repositories, not in a live thread: a source that captured a checkout that converts line endings holds no edit and its fixes are merged as the branch's own commits hold their files; a converted source's real edit still blocks its fixes; a file the branch deletes or commits with LF during the thread is no edit; a converted fix follows a file the branch renamed; a conflicting fix's branch keeps the fix commit; replayed files named literally, staged under `core.safecrlf=true` with their modes kept under `core.filemode=false`; a temporary folder that cannot be removed; and, in workflow graph tests with fake agents and captures, conclude removing the promoted widenings' worktrees, and a worktree it cannot remove ending the run with a setup error before the merges, which the resumed thread completes.
+
+## Live evidence
+
+Run 5 above: one thread on the desktop, with a confirmed cluster, through diagnosis, repair, widening at all four levels, promotion, conclude with the removal of the widening worktree, and the merge into the start branch, on a checkout that converts line endings. Run 4 is the same path on the earlier code. Runs A, 2 and 3 are recorded execution failures on the desktop.
+
+## Unverified
+
+- A live merge of more than one fix, a live conflicting rebase, a live refused fast-forward and its resume, and a live thread whose source held real uncommitted edits: covered by fixture tests only.
+- A live thread during which the branch moved, including a renamed, deleted or renormalized file.
+- A live thread with fix changes (`fixes/openspec/changes/archive/…` in the fix commit).
+- A live thread with planned subtasks.
+- A live merge into a branch whose checkout does not convert line endings.
+- In run 5 the canonical sides of every capture run but one case of the diagnosis check came from the cache (see above); they were not captured live in that run.
+- A live removal of a widening worktree that another process holds.

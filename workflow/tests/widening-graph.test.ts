@@ -77,8 +77,9 @@ test("passed attempts are widened one after the other through the levels and pro
   deepStrictEqual(run.wideningHost.captures.slice(0, 4).map((item) => `${item.request.cases.join(",")}/${item.request.captures?.join(",") ?? "all"}`),
     ["build-alpha/skills", "build-alpha/all", "build-gamma/all", "career-beta/all"]);
   // The second attempt is built on the source the first one left.
-  equal(readFileSync(join(run.wideningHost.builds[1]!.source, "Chummer", "frmCreate.cs"), "utf8"), repairedSource);
-  equal(readFileSync(join(run.wideningHost.builds[1]!.source, "Chummer", "untracked.cs"), "utf8"), "fixed");
+  equal(run.wideningHost.builtSources[1], repairedSource);
+  equal(git(repository, "show", `accepted/${threadId}:Chummer/frmCreate.cs`), repairedSource);
+  equal(git(repository, "show", `accepted/${threadId}:Chummer/untracked.cs`), "fixed");
   equal(git(repository, "log", "--format=%s", `accepted/${threadId}`), `Fix discrepancy ${second}\nFix discrepancy ${first}\nSource captured by thread ${threadId}\ninitial`);
   deepStrictEqual({ head: git(repository, "rev-parse", "HEAD"), status: git(repository, "status", "--porcelain=v1") }, before);
   const state = await run.state(threadId);
