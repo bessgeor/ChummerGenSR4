@@ -5,6 +5,7 @@
 import { randomBytes } from "node:crypto";
 import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { BaseCallbackHandler } from "@langchain/core/callbacks/base";
 import { AsyncLocalStorageProviderSingleton } from "@langchain/core/singletons";
 import { Command, interrupt, isGraphBubbleUp, isInterrupted, type LangGraphRunnableConfig } from "@langchain/langgraph";
 import { z } from "zod";
@@ -220,7 +221,10 @@ export function writeLoopState(loopFolder: string, state: LoopState): void {
   writeAtomically(statePath(loopFolder), LoopStateSchema.parse(state));
 }
 
-/** Appends a line to the loop's `activity.jsonl`; a reader skips a last line that does not end with a newline yet. */
+/**
+ * Appends a line to the loop's `activity.jsonl`; a reader skips a last line that does not end with a newline yet. A
+ * reader reads the loop's files at once and does not keep them open: `state.json` is replaced by a rename.
+ */
 export function appendActivity(loopFolder: string, line: ActivityLine): void {
   mkdirSync(loopFolder, { recursive: true });
   appendFileSync(activityPath(loopFolder), `${JSON.stringify(ActivityLineSchema.parse(line))}\n`);
@@ -260,17 +264,17 @@ export type TaskResult = { readonly id: string; readonly name: string; readonly 
 
 /**
  * What a loop learns while it runs its graphs: each graph invocation and its pauses, the tasks of its `tasks` stream
- * (with the namespace of the subgraph that runs them), the tasks whose node a loop's graph ran or that failed (by the
- * thread and checkpoint namespace of the task), and the desktop lane a task takes and gives back.
+ * (with the namespace of the subgraph that runs them), the tasks that ran or failed (by the thread and checkpoint
+ * namespace of the task, from their runs), and the desktop lane a task takes and gives back.
  */
 export interface LoopObserver {
   /** A graph's thread starts or resumes; `reason` says why a thread the loop starts started (null for the loop's own graph). */
   threadStarted(graph: GraphKind, thread: string, reason: string | null): void;
   taskStarted(graph: GraphKind, thread: string, namespace: readonly string[], task: TaskStart): void;
   taskFinished(graph: GraphKind, thread: string, namespace: readonly string[], task: TaskResult): void;
-  /** A node of the task ran: its pause check passed or it interrupted. */
+  /** The task ran, also when it stopped at an interrupt; a task restored from its checkpoint does not. */
   taskEntered(thread: string, checkpointNamespace: string): void;
-  /** The node of the task threw an error that is not an interrupt. */
+  /** The task failed with an error that is not an interrupt: of its node, its routers or a subgraph it runs. */
   taskFailed(thread: string, checkpointNamespace: string): void;
   /** The graph's invocation stopped at its pauses and waits for the unpause (`waiting`), or goes on. */
   pauseChanged(graph: GraphKind, thread: string, waiting: boolean): void;
@@ -316,33 +320,52 @@ export function loopFolderOf(config: LangGraphRunnableConfig | undefined): strin
  * A graph node that interrupts on entry, before it does anything, while the loop that runs its graph is paused. The
  * loop is named by `configurable.loopControl`, which a graph a loop does not run lacks: such a node never pauses. A
  * resumed node runs from its start and reads the control file again: what its interrupt returns is ignored, and a loop
- * paused again before the node ran interrupts it again. Once the loop is unpaused it does its work. The loop's observer,
- * if any, learns that the node ran and whether it failed.
+ * paused again before the node ran interrupts it again. Once the loop is unpaused it does its work.
  */
 export function pausable<S, R>(node: (state: S, config: LangGraphRunnableConfig) => R): (state: S, config: LangGraphRunnableConfig) => R {
   return (state, config) => {
     const folder = loopFolderOf(config);
-    if (folder === null) return node(state, config);
-    const observer = loopObserver(folder);
-    const thread = config.configurable?.["thread_id"];
-    const namespace = config.configurable?.["checkpoint_ns"];
-    const task = observer !== null && typeof thread === "string" && typeof namespace === "string" ? { observer, thread, namespace } : null;
-    task?.observer.taskEntered(task.thread, task.namespace);
-    const failed = (error: unknown): never => {
-      // A pause's interrupt is no failure.
-      if (task !== null && !isGraphBubbleUp(error)) task.observer.taskFailed(task.thread, task.namespace);
-      throw error;
-    };
-    let result: R;
-    try {
-      // Each call takes the next resume value, if any; the first call without one interrupts.
-      while (readControl(folder).paused) interrupt({ paused: true } satisfies PauseInterrupt);
-      result = node(state, config);
-    } catch (error) {
-      return failed(error);
-    }
-    return (result instanceof Promise ? result.catch(failed) : result) as R;
+    // Each call takes the next resume value, if any; the first call without one interrupts.
+    if (folder !== null) while (readControl(folder).paused) interrupt({ paused: true } satisfies PauseInterrupt);
+    return node(state, config);
   };
+}
+
+/**
+ * Tells the observer which tasks of a graph ran and which failed, from the runs LangChain reports for them: a task's run
+ * is the outermost run with its checkpoint namespace, and it fails with any error of the task, its node's, its
+ * routers' or a subgraph's, but not with an interrupt. A task restored from its checkpoint does not run.
+ */
+class TaskRuns extends BaseCallbackHandler {
+  name = "loop-task-runs";
+  /** Reported before the error leaves the task, so the task's result is read after its failure is known. */
+  override awaitHandlers = true;
+  private readonly runs = new Map<string, { readonly thread: string; readonly namespace: string; readonly task: boolean }>();
+
+  constructor(private readonly observer: LoopObserver) {
+    super();
+  }
+
+  override handleChainStart(_chain: unknown, _inputs: unknown, runId: string, _runType?: string, _tags?: string[], metadata?: Record<string, unknown>,
+    _runName?: string, parentRunId?: string): void {
+    const thread = metadata?.["thread_id"];
+    const namespace = metadata?.["langgraph_checkpoint_ns"];
+    if (typeof thread !== "string" || typeof namespace !== "string") return;
+    const parent = parentRunId === undefined ? undefined : this.runs.get(parentRunId);
+    const task = parent?.namespace !== namespace;
+    this.runs.set(runId, { thread, namespace, task });
+    if (task) this.observer.taskEntered(thread, namespace);
+  }
+
+  override handleChainEnd(_outputs: unknown, runId: string): void {
+    this.runs.delete(runId);
+  }
+
+  override handleChainError(error: Error, runId: string): void {
+    const run = this.runs.get(runId);
+    this.runs.delete(runId);
+    if (run?.task === true && !isGraphBubbleUp(error)) this.observer.taskFailed(run.thread, run.namespace);
+  }
 }
 
 /** A pause of a graph, from its interrupt until its resume. */
@@ -451,12 +474,16 @@ export async function invokePausable<G extends Invocable>(graph: G, input: unkno
   const observer = loopObserver(gate.folder);
   const thread = configured.configurable?.["thread_id"];
   if (observer !== null && typeof thread !== "string") throw new Error(`${label} is invoked without a thread ID.`);
+  if (observer !== null && configured.callbacks !== undefined && !Array.isArray(configured.callbacks)) throw new Error(`${label} is invoked with a callback manager.`);
+  const observed: InvokeConfig = observer === null ? configured
+    : { ...configured, callbacks: [...((configured.callbacks as BaseCallbackHandler[] | undefined) ?? []), new TaskRuns(observer)] };
   const run = (value: unknown) => (observer === null ? invokeAlone(graph, value, configured)
-    : streamAlone(graph, value, configured, (namespace, task, started) => (started
+    : streamAlone(graph, value, observed, (namespace, task, started) => (started
       ? observer.taskStarted(kind, thread as string, namespace, task as TaskStart)
       : observer.taskFinished(kind, thread as string, namespace, task as TaskResult))));
   observer?.threadStarted(kind, thread as string, gate.reason ?? null);
   let finished = false;
+  let failed = false;
   try {
     let result = await run(input);
     while (isInterrupted(result)) {
@@ -465,16 +492,34 @@ export async function invokePausable<G extends Invocable>(graph: G, input: unkno
         throw new SetupError(`${label} stopped at an interrupt that is not a pause: ${JSON.stringify(interrupts.map((item) => item.value))}.`);
       }
       observer?.pauseChanged(kind, thread as string, true);
+      let waited = false;
       try {
         await waitWhilePaused(gate, label, config.signal);
+        waited = true;
       } finally {
-        observer?.pauseChanged(kind, thread as string, false);
+        afterward(!waited, () => observer?.pauseChanged(kind, thread as string, false), gate, label);
       }
       result = await run(new Command({ resume: true }));
     }
     finished = true;
     return result as Awaited<ReturnType<G["invoke"]>>;
+  } catch (error) {
+    failed = true;
+    throw error;
   } finally {
-    observer?.threadStopped(kind, thread as string, finished);
+    afterward(failed, () => observer?.threadStopped(kind, thread as string, finished), gate, label);
+  }
+}
+
+/**
+ * Tells the observer what happened after a graph's run. Its own failure is thrown, unless the run already failed: then
+ * the run's error is the one thrown, and the observer's is logged.
+ */
+function afterward(runFailed: boolean, tell: () => void, gate: PauseGate, label: string): void {
+  try {
+    tell();
+  } catch (error) {
+    if (!runFailed) throw error;
+    gate.log(`${label}: the loop's state and activity could not be recorded after its failure: ${(error as Error).message}`);
   }
 }

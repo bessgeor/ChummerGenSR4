@@ -61,8 +61,8 @@ export function taskSubject(input: unknown): string | null {
  * Observes a loop's graphs while it runs. `paused` is set once the loop's control file pauses it and the innermost graph
  * it runs (a thread's graph runs inside a node of the loop's) waits at its pauses; `pausing` while it is paused and a
  * task still runs. A desktop lane is busy with the task whose command holds it, found through the task's configuration.
- * A task the stream started that neither finished nor ran when its invocation ended was a finished task replayed from
- * its checkpoint and gets no line; one that ran gets a `failed` line.
+ * A task the stream started that neither finished nor ran when its invocation stopped (at its pauses or its end) was
+ * a finished task restored from its checkpoint and gets no line; one that ran gets a `failed` line.
  */
 export class LoopMonitor implements LoopObserver {
   private readonly tasks = new Map<string, RunningTask>();
@@ -75,7 +75,7 @@ export class LoopMonitor implements LoopObserver {
   private pausedMilliseconds = 0;
   private pausedSince: number | null = null;
   private written: string | null = null;
-  /** A control file the poll could not read: the next event fails with it. */
+  /** A failure of a refresh that had no caller to fail (the poll's, or a lane's release): the next event fails with it. */
   private failure: unknown = null;
   private stopObserving: (() => void) | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -88,13 +88,7 @@ export class LoopMonitor implements LoopObserver {
   start(): void {
     this.stopObserving = observeLoop(this.options.folder, this);
     this.refresh();
-    this.timer = setInterval(() => {
-      try {
-        this.refresh();
-      } catch (error) {
-        this.failure ??= error;
-      }
-    }, this.options.pollMilliseconds ?? 1000);
+    this.timer = setInterval(() => this.refreshLater(), this.options.pollMilliseconds ?? 1000);
     this.timer.unref();
   }
 
@@ -107,6 +101,15 @@ export class LoopMonitor implements LoopObserver {
 
   private check(): void {
     if (this.failure !== null) throw this.failure;
+  }
+
+  /** Writes `state.json` where nothing may fail: its failure is raised by the next event. */
+  private refreshLater(): void {
+    try {
+      this.refresh();
+    } catch (error) {
+      this.failure ??= error;
+    }
   }
 
   /** The loop's paused time so far, a pause in progress included. */
@@ -134,13 +137,19 @@ export class LoopMonitor implements LoopObserver {
     this.check();
     if (graph !== "loop" && reason === null) throw new Error(`The loop started ${graph} thread ${thread} without a reason.`);
     this.invocations.push({ graph, thread, waiting: false });
-    if (graph !== "loop" && reason !== null) {
-      const index = this.threads.findIndex((entry) => entry.thread === thread);
-      if (index < 0) this.threads.push({ thread, graph, startedUtc: this.options.now().toISOString(), endedUtc: null, reason });
-      else this.threads[index] = { ...this.threads[index]!, endedUtc: null };
-      this.options.onThreads([...this.threads]);
+    try {
+      if (graph !== "loop" && reason !== null) {
+        const index = this.threads.findIndex((entry) => entry.thread === thread);
+        if (index < 0) this.threads.push({ thread, graph, startedUtc: this.options.now().toISOString(), endedUtc: null, reason });
+        else this.threads[index] = { ...this.threads[index]!, endedUtc: null };
+        this.options.onThreads([...this.threads]);
+      }
+      this.refresh();
+    } catch (error) {
+      // The graph does not run, so it never stops: the graph that invoked it is the innermost again.
+      this.invocations.pop();
+      throw error;
     }
-    this.refresh();
   }
 
   taskStarted(graph: GraphKind, thread: string, namespace: readonly string[], task: TaskStart): void {
@@ -181,7 +190,6 @@ export class LoopMonitor implements LoopObserver {
   }
 
   taskEntered(thread: string, checkpointNamespace: string): void {
-    this.check();
     this.entered.add(taskKey(thread, checkpointNamespace));
   }
 
@@ -193,6 +201,8 @@ export class LoopMonitor implements LoopObserver {
     const innermost = this.invocations.at(-1);
     if (innermost?.graph !== graph || innermost.thread !== thread) throw new Error(`The pause of ${graph} thread ${thread} changed while it is not the innermost graph.`);
     innermost.waiting = waiting;
+    // The resumed invocation restores the tasks that finished from its checkpoint and starts them again without running them.
+    if (waiting) this.endRound(thread);
     const now = this.options.now().getTime();
     if (waiting) {
       this.pausedSince = now;
@@ -207,14 +217,7 @@ export class LoopMonitor implements LoopObserver {
     const innermost = this.invocations.at(-1);
     if (innermost?.graph !== graph || innermost.thread !== thread) throw new Error(`${graph} thread ${thread} stopped while it is not the innermost graph.`);
     this.invocations.pop();
-    const prefix = `${thread}\u0000`;
-    // Tasks without a result: replays of finished tasks, or tasks the stopped invocation was running.
-    for (const key of [...this.tasks.keys()].filter((item) => item.startsWith(prefix)).sort((a, b) => b.length - a.length)) {
-      if (!this.tasks.has(key)) continue;
-      if (this.ranAt(key)) this.finish(key, "failed");
-      else this.tasks.delete(key);
-    }
-    for (const set of [this.entered, this.failed]) for (const item of [...set]) if (item.startsWith(prefix)) set.delete(item);
+    this.endRound(thread);
     if (graph !== "loop" && finished) {
       const index = this.threads.findIndex((entry) => entry.thread === thread);
       this.threads[index] = { ...this.threads[index]!, endedUtc: this.options.now().toISOString() };
@@ -223,10 +226,26 @@ export class LoopMonitor implements LoopObserver {
     this.refresh();
   }
 
+  /**
+   * Ends a run of the thread's graph, at its pauses or at its end: a task without a result either was restored from
+   * the checkpoint (it did not run, and gets no line) or ran when the invocation stopped with an error (`failed`). What
+   * the tasks did is forgotten, since a resumed run starts them again.
+   */
+  private endRound(thread: string): void {
+    const prefix = `${thread}\u0000`;
+    // A subgraph's tasks before the task that runs it.
+    for (const key of [...this.tasks.keys()].filter((item) => item.startsWith(prefix)).sort((a, b) => b.length - a.length)) {
+      if (this.ranAt(key)) this.finish(key, "failed");
+      else this.tasks.delete(key);
+    }
+    for (const set of [this.entered, this.failed]) for (const item of [...set]) if (item.startsWith(prefix)) set.delete(item);
+  }
+
   laneHeld(lane: string, held: boolean): void {
     if (!held) {
       this.busy.delete(lane);
-      this.refresh();
+      // The command has run: a failed write must not replace its result or its error.
+      this.refreshLater();
       return;
     }
     this.check();

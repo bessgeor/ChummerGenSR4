@@ -1,5 +1,5 @@
-import { deepStrictEqual, equal, ok } from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { deepStrictEqual, equal, ok, throws } from "node:assert/strict";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { InMemoryStore, MemorySaver } from "@langchain/langgraph";
@@ -14,7 +14,7 @@ import { controlFilePauses } from "../src/lanes/host-lanes.js";
 import { LanePool } from "../src/lanes/lane-pool.js";
 import type { LaneDefinition } from "../src/lanes/lane-settings.js";
 import {
-  activityPath, ActivityLineSchema, LoopStateSchema, readActivity, readLoopState, setPaused, statePath, type ActivityLine, type LoopState, type PauseGate,
+  activityPath, ActivityLineSchema, controlPath, LoopStateSchema, readActivity, readLoopState, setPaused, statePath, type ActivityLine, type LoopState, type PauseGate,
 } from "../src/loop/loop-control.js";
 import { LoopMonitor, taskSubject } from "../src/loop/loop-monitor.js";
 import type { Conclusion, ConcludeInput } from "../src/loop/loop-service.js";
@@ -340,6 +340,124 @@ test("a failed capture gives failed lines for its task, its stage and the loop's
   ]);
   deepStrictEqual(readLoopDocument(run.paths.document(loopId)).threads.map((thread) => [thread.thread, thread.endedUtc]), [["wf-1", null]]);
   deepStrictEqual(readLoopState(run.paths.folder(loopId))!.lanes, { desktop: { paused: false, busy: null } });
+});
+
+test("a resumed loop keeps the threads loop.json holds, records the resumed thread's end, and gives a capture restored from its checkpoint no second line", async () => {
+  const root = scratch("workflow-loop-activity-");
+  const run = workflowOn(root, ["desktop", "vm"], ["a", "b"]);
+  const folder = run.paths.folder(loopId);
+  const captures = (thread: string) => readActivity(folder)
+    .filter((line) => line.thread === thread && line.node === "capture" && line.namespace !== "").map((line) => `${line.subject} ${line.status}`);
+  // The second thread's capture of b fails once its capture of a has ended.
+  const times = new Map<string, number>();
+  run.steps.during = async (name) => {
+    times.set(name, (times.get(name) ?? 0) + 1);
+    if (name !== "b" || times.get(name) !== 2) return;
+    await until(() => captures("wf-2").includes("a succeeded"));
+    throw new SetupError("capture b exited with 3");
+  };
+  // The first thread merges a fix, so a second one starts.
+  const quiet = quietSteps(run.paths, run.workflow, run.log);
+  const steps = (id: string): LoopSteps => {
+    const loop = quiet(id);
+    return { ...loop, threadSummary: (threadId) => (threadId === "wf-1" ? { ...loop.threadSummary(threadId), merged: ["d-1"], sourceChanged: true } : loop.threadSummary(threadId)) };
+  };
+  const later = new Date("2026-11-01T11:00:00Z");
+  equal(await loopOn(run, startOf([]), steps, { lanes: ["desktop", "vm"] }), 3, run.lines.join("\n"));
+  equal(await loopOn(run, { kind: "resume", loopId }, steps, { lanes: ["desktop", "vm"], now: () => later }), 0, run.lines.join("\n"));
+  deepStrictEqual(readLoopDocument(run.paths.document(loopId)).threads, [
+    { thread: "wf-1", graph: "workflow", startedUtc: now().toISOString(), endedUtc: now().toISOString(), reason: "the loop started" },
+    { thread: "wf-2", graph: "workflow", startedUtc: now().toISOString(), endedUtc: later.toISOString(), reason: "thread wf-1 merged d-1" },
+  ]);
+  deepStrictEqual(captures("wf-2"), ["a succeeded", "b failed", "b succeeded"]);
+  deepStrictEqual(readLoopState(folder)!.lanes, { desktop: { paused: false, busy: null }, vm: { paused: false, busy: null } });
+});
+
+test("a task whose router fails after its node succeeded gets a failed line", async () => {
+  const root = scratch("workflow-loop-activity-");
+  // With no case planned, the router after the start stage fails the thread.
+  const run = workflowOn(root, ["desktop"], []);
+  equal(await loopOn(run, startOf([]), quietSteps(run.paths, run.workflow, run.log)), 3, run.lines.join("\n"));
+  ok(run.lines.some((line) => line.includes("No case is planned")), run.lines.join("\n"));
+  deepStrictEqual(readActivity(run.paths.folder(loopId)).map(brief), [
+    "loop start_thread/start_thread - - succeeded", "workflow start/build - - succeeded", "workflow start/start - - failed", "loop run_thread/run_thread - - failed",
+  ]);
+});
+
+test("a task that finished beside an interrupted one is restored, not run, when its graph resumes: it keeps its one line", () => {
+  const folder = scratch("workflow-loop-folder-");
+  const monitor = new LoopMonitor({ folder, lanes: [], now, onThreads: () => {} });
+  monitor.start();
+  try {
+    const stage = { id: "s", name: "diagnose", input: null };
+    const inner = (id: string) => ({ id, name: "hypothesize", input: { clusterId: `d-${id}` } });
+    monitor.threadStarted("workflow", "wf-1", "the loop started");
+    // The first run: both tasks run, a finishes and b stops at the pause.
+    monitor.taskStarted("workflow", "wf-1", [], stage);
+    monitor.taskEntered("wf-1", "diagnose:s");
+    for (const id of ["a", "b"]) {
+      monitor.taskStarted("workflow", "wf-1", ["diagnose:s"], inner(id));
+      monitor.taskEntered("wf-1", `diagnose:s|hypothesize:${id}`);
+    }
+    monitor.taskFinished("workflow", "wf-1", ["diagnose:s"], { id: "a", name: "hypothesize", interrupts: [] });
+    monitor.taskFinished("workflow", "wf-1", ["diagnose:s"], { id: "b", name: "hypothesize", interrupts: [{ value: { paused: true } }] });
+    monitor.taskFinished("workflow", "wf-1", [], { id: "s", name: "diagnose", interrupts: [{ value: { paused: true } }] });
+    monitor.pauseChanged("workflow", "wf-1", true);
+    monitor.pauseChanged("workflow", "wf-1", false);
+    // The resumed run restores a from its checkpoint and runs b again.
+    monitor.taskStarted("workflow", "wf-1", [], stage);
+    monitor.taskEntered("wf-1", "diagnose:s");
+    for (const id of ["a", "b"]) monitor.taskStarted("workflow", "wf-1", ["diagnose:s"], inner(id));
+    monitor.taskEntered("wf-1", "diagnose:s|hypothesize:b");
+    monitor.taskFinished("workflow", "wf-1", ["diagnose:s"], { id: "b", name: "hypothesize", interrupts: [] });
+    monitor.taskFinished("workflow", "wf-1", [], { id: "s", name: "diagnose", interrupts: [] });
+    monitor.threadStopped("workflow", "wf-1", true);
+  } finally {
+    monitor.stop();
+  }
+  deepStrictEqual(readActivity(folder).map(brief), [
+    "workflow diagnose/hypothesize d-a - succeeded", "workflow diagnose/hypothesize d-b - interrupted", "workflow diagnose/diagnose - - interrupted",
+    "workflow diagnose/hypothesize d-b - succeeded", "workflow diagnose/diagnose - - succeeded",
+  ]);
+});
+
+test("a lane given back while the control file cannot be read does not fail the command; the next event does, and the task that ran keeps its failed line", () => {
+  const folder = scratch("workflow-loop-folder-");
+  // Only the release meets the unreadable file: the poll does not run during the test.
+  const monitor = new LoopMonitor({ folder, lanes: ["desktop"], now, onThreads: () => {}, pollMilliseconds: 60_000 });
+  monitor.start();
+  try {
+    const task = { id: "s", name: "start", input: null };
+    monitor.threadStarted("workflow", "wf-1", "the loop started");
+    monitor.taskStarted("workflow", "wf-1", [], task);
+    writeFileSync(controlPath(folder), "{");
+    monitor.laneHeld("desktop", false);
+    rmSync(controlPath(folder));
+    // LangChain does not raise what its callback handler throws, so the report that the task ran must not fail.
+    monitor.taskEntered("wf-1", "start:s");
+    throws(() => monitor.taskFinished("workflow", "wf-1", [], { id: "s", name: "start", interrupts: [] }), (error) => error instanceof SetupError && error.message.includes("control.json"));
+    monitor.threadStopped("workflow", "wf-1", false);
+  } finally {
+    monitor.stop();
+  }
+  deepStrictEqual(readActivity(folder).map(brief), ["workflow start/start - - failed"]);
+});
+
+test("a thread whose record in loop.json cannot be written does not start: the loop's graph stays the innermost and stops as usual", () => {
+  const folder = scratch("workflow-loop-folder-");
+  const monitor = new LoopMonitor({
+    folder, lanes: [], now, onThreads: () => {
+      throw new SetupError("loop.json cannot be written");
+    },
+  });
+  monitor.start();
+  try {
+    monitor.threadStarted("loop", loopId, null);
+    throws(() => monitor.threadStarted("workflow", "wf-1", "the loop started"), /loop\.json cannot be written/);
+    monitor.threadStopped("loop", loopId, false);
+  } finally {
+    monitor.stop();
+  }
 });
 
 const act = (type: string, fields: Record<string, unknown> = {}) => ({ type, name: null, label: null, milliseconds: null, optional: null, ...fields });
