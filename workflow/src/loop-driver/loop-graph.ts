@@ -13,7 +13,7 @@ const threadSetupErrorStatus = 3;
 export interface LoopSteps {
   /** A new workflow thread ID. */
   newThreadId(): string;
-  /** Whether the workflow thread `threadId` was checkpointed, and whether it finished. */
+  /** Whether the workflow thread `threadId` started, and whether it finished. */
   threadProgress(threadId: string): Promise<ThreadProgress>;
   /** Starts the workflow thread `threadId` as `npm start` would with `args`, and returns its exit status. */
   runThread(threadId: string, args: Arguments): Promise<number>;
@@ -101,9 +101,9 @@ export function decide(document: LoopDocument): Decision {
  * thread that exited with 2, and `failed`, `converged` or `limit` at `decide`. Every node writes `loop.json` before it returns: the
  * thread's ID before the thread starts and the tuning's before the tuning runs. A thread stopped by a setup error or an
  * interruption fails `run_thread`, and the loop stays `running`; resumed, `run_thread` resumes that thread (or starts it
- * when it was never checkpointed, under a new ID when a start left the old one in use) and `tune` the tuning in
- * progress. A stop request is read before each thread (`start_thread`, `decide` after an iteration, and `run_thread`
- * while the thread has no checkpoint) and each tuning (`tune` while none that started is recorded) and ends the loop
+ * when it had not started, under a new ID when the old one is in use) and `tune` the tuning in progress. A stop request
+ * is read before each thread (`start_thread`, `decide` after an iteration, and `run_thread` while the thread has not
+ * started) and each tuning (`tune` while none that started is recorded) and ends the loop
  * `stopped` without starting that step; a step that started runs to its end first.
  */
 export function buildLoopGraph(steps: LoopSteps) {
@@ -136,18 +136,18 @@ export function buildLoopGraph(steps: LoopSteps) {
       let document = steps.readLoop();
       let { thread } = current(document);
       const progress = await steps.threadProgress(thread);
-      // A thread that never checkpointed has not started: a stop request still keeps it from starting.
+      // A stop request still keeps a thread that has not started from starting.
       if (progress.kind === "new" && steps.stopRequested()) {
         const decision: Decision = { next: "stopped", reasons: [stopReason(`thread ${thread}`)] };
         steps.log(`Loop ${state.loopId}: stopped; ${decision.reasons.join("; ")}.`);
         return { document: recordIteration(steps, document, { decision }, "stopped") };
       }
-      // A start stopped before its first checkpoint leaves its ID in use, so the step starts under a new ID.
+      // A start stopped early may leave its ID in use, so the step starts under a new ID.
       if (progress.kind === "new" && progress.traces.length > 0) {
         const replaced = thread;
         thread = steps.newThreadId();
         document = recordIteration(steps, document, { thread, startedUtc: steps.now().toISOString() });
-        steps.log(`Loop ${state.loopId}: thread ${replaced} stopped before its first checkpoint and its ID is in use (${progress.traces.join("; ")}); the thread starts as ${thread}.`);
+        steps.log(`Loop ${state.loopId}: thread ${replaced} stopped before it started and its ID is in use (${progress.traces.join("; ")}); the thread starts as ${thread}.`);
       }
       let exitStatus: number;
       if (progress.kind === "finished") {

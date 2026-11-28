@@ -445,7 +445,7 @@ test("a resumed thread that stopped before its first checkpoint, leaving its ID 
   equal(await loop.run(["--resume", loopId]), 0, loop.lines.join("\n"));
   deepStrictEqual(loop.runs.map((run) => [run.threadId, run.kind, run.recorded]), [["wf-1", "start", true], ["wf-2", "start", true]]);
   deepStrictEqual([loop.document().status, loop.document().iterations.map((iteration) => [iteration.thread, iteration.exitStatus])], ["converged", [["wf-2", 0]]]);
-  ok(loop.lines.includes(`Loop ${loopId}: thread wf-1 stopped before its first checkpoint and its ID is in use (its folder threads/wf-1); the thread starts as wf-2.`), loop.lines.join("\n"));
+  ok(loop.lines.includes(`Loop ${loopId}: thread wf-1 stopped before it started and its ID is in use (its folder threads/wf-1); the thread starts as wf-2.`), loop.lines.join("\n"));
 });
 
 test("a replacement thread that stops with a setup error is the thread the next resume resumes", async () => {
@@ -533,6 +533,32 @@ test("a loop interrupted while it is paused stays running, and its resume waits 
     },
   }), 0, loop.lines.join("\n"));
   deepStrictEqual([waited, loop.runs.map((run) => run.kind), loop.document().status], [1, ["start"], "converged"]);
+});
+
+test("a loop whose resumed step failed, then was paused again and interrupted, still resumes", async () => {
+  const loop = fakeLoop([{ status: 0 }], ["setup-error", "setup-error", notDue]);
+  equal(await loop.run([]), 3);
+  const pause = () => setPaused(loop.paths.folder(loopId), null, true, now());
+  const unpause = () => setPaused(loop.paths.folder(loopId), null, false, now());
+  // Resumed while paused and unpaused, the step runs and fails again: its checkpoint keeps the value it was resumed with.
+  pause();
+  equal(await loop.run(["--resume", loopId], { pause: { pollMilliseconds: 1, sleep: async () => { unpause(); } } }), 3, loop.lines.join("\n"));
+  // Paused again, the step is interrupted again, and the process is interrupted while it waits.
+  pause();
+  const interrupt = new AbortController();
+  equal(await loop.run(["--resume", loopId], {
+    signal: interrupt.signal,
+    pause: {
+      pollMilliseconds: 1,
+      sleep: async () => {
+        interrupt.abort();
+        throw new Error("interrupted");
+      },
+    },
+  }), 3, loop.lines.join("\n"));
+  unpause();
+  equal(await loop.run(["--resume", loopId]), 0, loop.lines.join("\n"));
+  deepStrictEqual([loop.document().status, loop.runs.length, loop.tuneCalls.length], ["converged", 1, 3]);
 });
 
 test("a loop run by another process does not resume, and nothing runs", async () => {

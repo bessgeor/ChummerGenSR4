@@ -3,6 +3,7 @@ import type { BaseCheckpointSaver, BaseStore } from "@langchain/langgraph-checkp
 import type { AgentRunners } from "../agents/agent-runners.js";
 import type { QuotaWaiter } from "../diagnosis/quota-waiter.js";
 import type { Git } from "../diagnosis/source-snapshot.js";
+import { graphEnded } from "../graph/graph-ended.js";
 import { threadConfig } from "../graph/run-workflow.js";
 import type { HostSteps } from "../host-steps.js";
 import type { HostRunner } from "../host/host-runner.js";
@@ -89,7 +90,7 @@ export function discoveryRunner(graph: DiscoveryGraph, now: () => Date): Discove
     const snapshot = await graph.getState({ configurable: { thread_id: threadId } });
     const values = snapshot.values as Partial<DiscoveryStateValue>;
     if (snapshot.config.configurable?.["checkpoint_id"] === undefined || values.options === undefined) return { kind: "absent" };
-    if (snapshot.next.length > 0) return { kind: "unfinished", options: values.options };
+    if (!graphEnded(snapshot)) return { kind: "unfinished", options: values.options };
     return { kind: "finished", options: values.options, concluded: conclusionOf(values as DiscoveryStateValue) };
   };
   return {

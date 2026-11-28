@@ -3,6 +3,7 @@ import type { BaseCheckpointSaver } from "@langchain/langgraph-checkpoint";
 import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
 import type { ComposedWorkflow } from "../compose-workflow.js";
 import type { EvalContext } from "../evals/eval-context.js";
+import { graphEnded } from "../graph/graph-ended.js";
 import { newThreadId, recursionLimit, setupErrorStatus } from "../graph/run-workflow.js";
 import { acquireExclusiveLock } from "../host/exclusive-lock.js";
 import { SetupError } from "../host/setup-error.js";
@@ -162,9 +163,9 @@ export async function runLoop(command: Extract<LoopCommand, { kind: "start" | "r
       composition = dependencies.compose(command.loopId);
       const snapshot = await graphOf(composition).getState({ configurable: { thread_id: command.loopId } });
       if (snapshot.config.configurable?.["checkpoint_id"] === undefined) throw new SetupError(`Loop ${command.loopId} has no checkpoint in ${dependencies.paths.checkpoints}.`);
-      if (snapshot.next.length === 0) throw new SetupError(`Loop ${command.loopId}'s graph has ended, but its loop.json says it is running.`);
+      if (graphEnded(snapshot)) throw new SetupError(`Loop ${command.loopId}'s graph has ended, but its loop.json says it is running.`);
       loopId = command.loopId;
-      log(`Resuming loop ${loopId} at ${snapshot.next.join(", ")}: ${dependencies.paths.document(loopId)}`);
+      log(`Resuming loop ${loopId} at ${snapshot.tasks.map((task) => task.name).join(", ")}: ${dependencies.paths.document(loopId)}`);
       final = await invoke(composition, null, loopId);
     } else {
       const startedUtc = dependencies.now();

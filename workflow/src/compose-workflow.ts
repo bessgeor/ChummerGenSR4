@@ -53,7 +53,7 @@ import { WideningService } from "./widening/widening-service.js";
 export type ComposedWorkflow = {
   /** Runs or resumes a thread as `npm start` does and returns its exit status; a start given `request.threadId` runs its new thread under that ID. */
   readonly run: (command: Exclude<Command, { kind: "help" }>, request?: RunRequest) => Promise<number>;
-  /** Whether the thread `threadId` was checkpointed, and the exit status of one that finished. */
+  /** Whether the thread `threadId` started, and the exit status of one that finished. */
   readonly progress: (threadId: string) => Promise<ThreadProgress>;
   /** Closes the store and the checkpoint databases. */
   readonly close: () => void;

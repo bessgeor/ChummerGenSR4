@@ -297,6 +297,28 @@ test("a thread's progress is new without a checkpoint, unfinished after a setup 
   deepStrictEqual(await threadProgress(run.dependencies.graph, given.toUpperCase(), run.dependencies.threadTraces), { kind: "new", traces: [] });
 });
 
+test("a workflow thread stopped before its input was applied has not started: its progress is new, with its checkpoint among its traces", async () => {
+  const interrupted = new AbortController();
+  /** Interrupts the run just after the checkpoint of its input is saved. */
+  class InterruptedAtItsInput extends MemorySaver {
+    override async put(...args: Parameters<MemorySaver["put"]>): ReturnType<MemorySaver["put"]> {
+      const saved = await super.put(...args);
+      if (args[2].source === "input") interrupted.abort();
+      return saved;
+    }
+  }
+  const given = "wf-20261001T120000Z-input";
+  const run = harness(["a"], new FakeSteps(), new InterruptedAtItsInput(), interrupted.signal);
+  equal(await runWorkflow({ kind: "start", arguments: baseArguments }, run.dependencies, { threadId: given }), 3);
+  const state = await run.dependencies.graph.getState({ configurable: { thread_id: given } });
+  deepStrictEqual([state.config.configurable?.["checkpoint_id"] !== undefined, run.steps.calls], [true, []]);
+  // Its ID holds a checkpoint nothing can resume.
+  const { signal: _interrupted, ...uninterrupted } = run.dependencies;
+  equal(await runWorkflow({ kind: "resume", threadId: given }, uninterrupted), 3);
+  ok(run.lines.includes(`Setup error: There is no thread ${given} to resume.`), run.lines.join("\n"));
+  deepStrictEqual(await threadProgress(run.dependencies.graph, given, run.dependencies.threadTraces), { kind: "new", traces: ["its checkpoint without its input"] });
+});
+
 test("a start given a new thread ID runs its thread under that ID", async () => {
   const run = harness(["a"]);
   const given = "wf-20261001T120000Z-given";
