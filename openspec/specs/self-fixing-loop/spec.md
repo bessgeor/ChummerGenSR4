@@ -42,11 +42,11 @@ A next attempt SHALL start from the thread's source snapshot like the first. Its
 - **THEN** the run ends with a setup error naming the missing file, and the model job does not start
 
 ### Requirement: Every cluster ends at a disposition
-When the run concludes, every cluster of the thread's `triage.json` SHALL have exactly one disposition: `fixed` when its widening was promoted; else `budget_exhausted` when its diagnosis or repair is `budget_exhausted` or it was retryable but for the spent budget; else `not_diagnosed`, `diagnosis_failed`, `abstained`, `refuted`, `undecided` (also without a check), `not_repaired`, `repair_failed`, `repair_rejected`, `not_widened` or `widening_rejected` after the stage where it stopped. Each disposition SHALL carry the cluster's number of attempts, the stage and reason of its latest rejection (none for a `fixed` cluster, which carries the commit of its fix instead; its earlier rejections stay in `repair.json`).
+When the run concludes, every cluster of the thread's `triage.json` SHALL have exactly one disposition: `fixed` when its widening was promoted and its fix was merged into the branch the thread started on (or was promoted in a thread stored before merging existed); `merge_failed` when its widening was promoted and its fix was not merged; else `budget_exhausted` when its diagnosis or repair is `budget_exhausted` or it was retryable but for the spent budget; else `not_diagnosed`, `diagnosis_failed`, `abstained`, `refuted`, `undecided` (also without a check), `not_repaired`, `repair_failed`, `repair_rejected`, `not_widened` or `widening_rejected` after the stage where it stopped. Each disposition SHALL carry the cluster's number of attempts, the stage and reason of its latest rejection or failure (none for a `fixed` cluster, which carries the commit of its fix and its merge commit instead; its earlier rejections stay in `repair.json`); a `merge_failed` cluster SHALL carry the stage `merge`, the reason and the commit of its fix.
 
 #### Scenario: Refuted and fixed clusters
-- **WHEN** a thread's check refutes one cluster and another cluster's attempt is promoted
-- **THEN** the first cluster's disposition is `refuted` with 0 attempts and the second's is `fixed` with its commit
+- **WHEN** a thread's check refutes one cluster and another cluster's attempt is promoted and merged
+- **THEN** the first cluster's disposition is `refuted` with 0 attempts and the second's is `fixed` with its commit and merge commit
 
 #### Scenario: A next attempt refused at the budget
 - **WHEN** a cluster's first attempt was rejected at stage `check` and its next attempt is refused because the run budget is spent
@@ -76,11 +76,11 @@ Every run whose graph triaged SHALL end in a `conclude` step that decides the th
 - **THEN** the outcome is `findings_remaining`
 
 ### Requirement: The outcome is documented and reported
-`conclude` SHALL write `outcome.json` in the thread's folder with the thread, the outcome, the scope (the planned cases and captures), the scope's problems, each cluster's disposition, attempts, stage, reason and commit, the accepted branch and commit, and the measures: clusters, fixed, fix rate (null without clusters), attempts, the thread's charged model time and the elapsed time since the thread started (null when the thread does not record its start). The end-of-run report SHALL print one line per cluster with its disposition and an `Outcome:` line with the outcome, the counts and the document's path, after the widening lines.
+`conclude` SHALL write `outcome.json` in the thread's folder with the thread, the outcome, the scope (the planned cases and captures), the scope's problems, each cluster's disposition, attempts, stage, reason, commit and merge commit, the accepted branch and commit, the merge (the branch the thread started on, its commit before and after, and each merged or failed cluster with its fix branch and merge commit or reason; null when nothing was promoted) and the measures: clusters, fixed, fix rate (null without clusters), attempts, the thread's charged model time and the elapsed time since the thread started (null when the thread does not record its start). The end-of-run report SHALL print one line per cluster with its disposition, a `Merge:` line with the branch and its commits before and after when anything was promoted, and an `Outcome:` line with the outcome, the counts and the document's path, after the widening lines.
 
 #### Scenario: Report of a thread with a fix after two attempts
-- **WHEN** a cluster is fixed by its second attempt
-- **THEN** the report prints that the cluster is `fixed` after 2 attempts with the commit, and `outcome.json` counts 2 attempts and 1 fixed of 1 cluster
+- **WHEN** a cluster is fixed by its second attempt and merged
+- **THEN** the report prints that the cluster is `fixed` after 2 attempts with the commit, a `Merge:` line with the branch's commits before and after, and `outcome.json` counts 2 attempts and 1 fixed of 1 cluster
 
 ### Requirement: The outcome records the thread's discovery
 `outcome.json` SHALL hold `discovery`: null when the thread did not discover, else the discovery thread, its exit status, the scenarios it admitted, those of them that differ and the path of its `discovery.json`. The thread's outcome SHALL stay about its planned scope: a scenario admitted by its discovery SHALL NOT change it.
@@ -88,3 +88,42 @@ Every run whose graph triaged SHALL end in a `conclude` step that decides the th
 #### Scenario: Clean scope with an admitted scenario
 - **WHEN** a thread's planned scope has no finding and its discovery admits a scenario that differs
 - **THEN** the outcome is `verified_for_scope` and `outcome.json` lists the admitted scenario as differing
+
+### Requirement: Fixed clusters are merged into the branch the thread started on
+A thread SHALL record, when it starts, the branch its repository's `HEAD` names and that branch's commit; a thread with repair and widening whose `HEAD` is detached SHALL end with a setup error before the build. When the thread concludes, each cluster whose widening was promoted SHALL be merged into that branch, in the order of the promotions, in a worktree of the thread outside the repository's working tree: its fix commit SHALL be rebased from its parent onto the current tip as the branch `workflow/<thread>/fix/<cluster>`, and merged into the tip with a merge commit of its own whose message names the cluster and carries the trailers `Workflow-Thread` and `Merged-Fix: <thread>/<cluster>`. A rebase that conflicts SHALL be aborted, its cluster SHALL NOT be merged, and every cluster promoted after it SHALL NOT be merged either; so SHALL every cluster when the thread's source held uncommitted edits of files that the branch does not hold in the same state, because the fixes were verified on top of those edits (a resumed merge checks this against the state of the last fix merged before). The source's uncommitted edits SHALL be the files the person's own `git add` on the commit the source was captured on would hold otherwise than that commit (with their line-ending settings and that commit's attributes), whatever the branch gained since, so a file captured from a clean checkout that converts line endings is no uncommitted edit. The thread's commits SHALL be compared with the branch, and their files replayed onto it, as the person's own `git add` on the branch's tip would stage them (with their line-ending settings and the tip's attributes), each file named literally and with the mode it has in the thread's commit, so a merged fix holds each file in the form the branch holds it; a file the tip lacks SHALL be staged on its entry at the commit the source was captured on, so a fix of a file the branch renamed meanwhile follows the rename. The branch `workflow/<thread>/fix/<cluster>` SHALL hold the rebased fix, or the fix commit itself when the rebase conflicts or drops it. A fix whose change the branch holds already SHALL still get its merge commit, which records the fix without changing the branch's tree, also when the branch holds the fix commit itself (the commit the fix was made on is then the second parent). The merged tip SHALL be kept on `workflow/<thread>/integration`; then the branch SHALL be advanced to it by a fast-forward of the worktree that has it checked out, or by a compare-and-swap ref update when none has. A branch that is no longer an ancestor of the merged tip, or a fast-forward git refuses, SHALL be a setup error that names the integration branch, and the resumed thread SHALL try the merges again, skipping each cluster whose `Merged-Fix` trailer is already reachable from the branch. No branch SHALL be pushed or deleted. A thread stored before the start branch was recorded SHALL conclude without merging and say so.
+
+#### Scenario: Two fixes merged
+- **WHEN** a thread started on `master` promotes the fixes of clusters `a` and `b`, in that order, and `master` did not move
+- **THEN** `master` gains a merge commit of `workflow/<thread>/fix/a` followed by a merge commit of `workflow/<thread>/fix/b`, and its working tree holds both fixes
+
+#### Scenario: A fix that does not rebase
+- **WHEN** `master` moved during the thread and the rebase of cluster `a`'s fix onto it conflicts in `Chummer/frmCreate.cs`
+- **THEN** neither `a` nor the later `b` is merged, `master` keeps its commit, `workflow/<thread>/fix/a` holds `a`'s fix commit, and both clusters end `merge_failed`, `a` naming the file and `b` naming `a`
+
+#### Scenario: Fixes verified on uncommitted edits
+- **WHEN** the thread's source held an uncommitted edit of `Core/XmlManager.cs` that `master` lacks, and a cluster's fix changes another file
+- **THEN** that cluster and every later one end `merge_failed` naming `Core/XmlManager.cs`, and `master` keeps its commit
+
+#### Scenario: A checkout that converts line endings
+- **WHEN** the person's checkout has `core.autocrlf=true`, so the thread's source holds CRLF for files `master` holds with LF, and a cluster's fix changes `Chummer/frmCreate.cs`
+- **THEN** the fix is merged, `master` gains only the change to `Chummer/frmCreate.cs`, with LF line endings, and the working tree stays clean
+
+#### Scenario: A file the branch changed while the thread ran
+- **WHEN** the person's checkout has `core.autocrlf=true`, holds a file the thread's start commit holds with CRLF, and `master` deletes it or commits it with LF while the thread runs
+- **THEN** that file is no uncommitted edit, and a cluster's fix of another file is merged
+
+#### Scenario: A fixed file the branch renamed
+- **WHEN** the person's checkout has `core.autocrlf=true`, and `master` renames, while the thread runs, a file it holds with CRLF that a cluster's fix changes
+- **THEN** the fix is merged into the renamed file, which keeps CRLF line endings
+
+#### Scenario: A fix the branch has already
+- **WHEN** `master` gained the same change as a cluster's fix while the thread ran
+- **THEN** the rebase drops the fix, a merge commit with the `Merged-Fix` trailer and `master`'s own tree is made, and the cluster ends `fixed` with that merge commit
+
+#### Scenario: Local edits in a merged file
+- **WHEN** the working tree has an uncommitted edit of a file the merged fixes change
+- **THEN** the fast-forward is refused, the run ends with a setup error naming `workflow/<thread>/integration`, and after the edit is committed and the thread resumed, the merges are not made twice
+
+#### Scenario: Detached HEAD
+- **WHEN** `npm start` starts a repairing thread while `HEAD` is detached
+- **THEN** the run ends with a setup error before the build and no thread state is written

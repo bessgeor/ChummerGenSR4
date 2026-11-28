@@ -21,18 +21,18 @@ After repair, the workflow SHALL widen every cluster whose latest repair attempt
 - **THEN** the second attempt is widened on the source with the promoted patch, and the promoted cluster is not widened again
 
 ### Requirement: The widened candidate is the accepted source plus the patch
-The widened source SHALL be a copy of the accepted source's `Chummer/` and `Core/` in the thread's folder, and an accepted source that lacks either folder SHALL be a setup error, since the candidate cannot be built without it. The attempt's patch SHALL be applied from its archive, and only when every file the patch changes has, in the accepted source, the content the patch was made from (an added file SHALL not exist there). Otherwise the attempt SHALL be rejected at stage `apply` naming each such file, and nothing SHALL be merged. The widened source SHALL be built with the candidate build script through the host runner's CPU pool into the thread's folder, never into `bin/` or `out/candidate/`; exit 1 SHALL reject the attempt at stage `build` and any other non-zero status SHALL be a setup error.
+The widened source SHALL be a git worktree in `widening/<cluster>/attempt-<n>/source/` of the thread's folder on the branch `workflow/<thread>/widening/<cluster>/attempt-<n>`, started at the accepted commit: the accepted branch's commit after a promotion, else the thread's source commit. A source commit or accepted commit without `Chummer/` or `Core/` SHALL be a setup error, since the candidate cannot be built without it, and a passed attempt whose archive names no attempt commit SHALL be a setup error. The attempt commit SHALL be applied only when every file it changes has, in the accepted commit, the blob it has in the attempt commit's parent (an added file SHALL not exist there). Otherwise the attempt SHALL be rejected at stage `apply` naming each such file, and nothing SHALL be merged. The change SHALL be applied with git into the worktree without a commit. The widened worktree SHALL be built with the candidate build script through the host runner's CPU pool into the thread's folder, never into `bin/` or `out/candidate/`; exit 1 SHALL reject the attempt at stage `build` and any other non-zero status SHALL be a setup error.
 
 #### Scenario: Accepted source without the class library
-- **WHEN** the accepted source holds `Chummer/` but no `Core/`
+- **WHEN** the accepted commit holds `Chummer/` but no `Core/`
 - **THEN** preparing the widened source ends with a setup error naming `Core/`, and nothing is built or captured
 
 #### Scenario: An earlier promotion changed the same file
-- **WHEN** an attempt's patch changes `Chummer/frmCreate.cs` and an attempt promoted earlier in the thread changed that file
+- **WHEN** an attempt commit changes `Chummer/frmCreate.cs` and an attempt promoted earlier in the thread changed that file
 - **THEN** the attempt is rejected at stage `apply` naming `Chummer/frmCreate.cs`, and nothing is built or captured for it
 
 #### Scenario: The widened source does not build
-- **WHEN** the build script exits with 1 for the widened source
+- **WHEN** the build script exits with 1 for the widened worktree
 - **THEN** the attempt is rejected at stage `build` and no level runs
 
 ### Requirement: Levels widen from the narrow scenario to the full suite
@@ -78,18 +78,22 @@ A level run with status 2 or invalid coverage SHALL fail the level as an executi
 - **THEN** the level is not captured and the run ends with a setup error
 
 ### Requirement: An attempt whose levels pass is promoted on the accepted branch
-When all four levels pass, the attempt SHALL be promoted as a commit on the local branch `accepted/<thread>`. On the first promotion the branch SHALL start at the commit the thread's snapshot was taken on, followed by a commit with the snapshot's `Chummer/` and `Core/` when they differ from that commit's. A widened source that lacks `Chummer/` or `Core/` SHALL be a setup error and make no commit. The fix commit SHALL hold the widened source's `Chummer/` and `Core/` with the repository's filters applied as `git add` applies them (the ignore rules of the repository's root are not applied to the widened source, so every file of it is committed) and SHALL name the thread, the cluster and the repair record in its message. It SHALL be written with a private index and a compare-and-swap ref update, without changing the repository's working tree, index or checked-out branch. A tip that already carries the attempt's repair record SHALL be taken as the promotion after a resume; any other unexpected tip SHALL be a setup error that names the branch, which a thread that can still be resumed needs where it left it. A widened source whose staged tree is the accepted tree (nothing to commit, for example a patch that differs only in line endings the repository normalises) SHALL fail the widening at stage `promote`, which the rollback then completes, without removing anything before the failure is checkpointed. The promoted widened source and build SHALL become the accepted source and build, and its level runs the baseline, for the next cluster.
+When all four levels pass, the attempt SHALL be promoted as a commit on the local branch `accepted/<thread>`. The fix commit SHALL be made in the widened worktree on its branch, with the accepted commit as its parent, holding every change of the worktree that git does not ignore, and SHALL name the thread, the cluster and the repair record in its message. The accepted branch SHALL then be moved to it by a compare-and-swap ref update from the accepted commit (on the first promotion: from not existing), without changing the repository's working tree, index or checked-out branch. A widened worktree that lacks `Chummer/` or `Core/` SHALL be a setup error and make no commit. A tip that already carries the attempt's repair record SHALL be taken as the promotion after a resume, and a worktree branch whose tip carries it SHALL be taken as the fix commit; any other unexpected tip SHALL be a setup error that names the branch, which a thread that can still be resumed needs where it left it. A worktree whose staged `Chummer/` and `Core/` equal the accepted commit's (nothing to commit, for example a patch that differs only in line endings the repository normalises) SHALL fail the widening at stage `promote`, which the rollback then completes, without removing anything before the failure is checkpointed. The promoted worktree and build SHALL become the accepted source and build, and its level runs the baseline, for the next cluster. When the thread concludes, every promoted widening's worktree SHALL be removed before the fixes are merged, keeping its branch; a worktree that stays registered SHALL be a setup error, and the resumed thread SHALL try again.
 
 #### Scenario: First promotion of a thread whose working tree had uncommitted changes
 - **WHEN** the thread's snapshot was taken with an uncommitted edit under `Core/` and its first attempt passes all levels
-- **THEN** `accepted/<thread>` holds the snapshot commit, then a commit with the edit, then the fix commit, and `git status` of the repository is unchanged
+- **THEN** `accepted/<thread>` holds the snapshot commit, then the source commit with the edit, then the fix commit, and `git status` of the repository is unchanged
+
+#### Scenario: A thread that promoted fixes concludes
+- **WHEN** a thread that promoted two fixes concludes
+- **THEN** neither widened worktree is registered or left in the thread's folder, and both widening branches stay at their fix commits
 
 #### Scenario: Widened source without the class library
-- **WHEN** a promotion's widened source holds `Chummer/` but no `Core/`
+- **WHEN** a promotion's widened worktree holds `Chummer/` but no `Core/`
 - **THEN** it ends with a setup error naming `Core/`, and no commit is made
 
 #### Scenario: Nothing to commit
-- **WHEN** every level passes and the widened source stages the same tree as the accepted source
+- **WHEN** every level passes and the widened worktree stages the same `Chummer/` and `Core/` as the accepted commit
 - **THEN** the attempt is rejected at stage `promote`, no commit is made, and the next cluster is widened
 
 #### Scenario: Killed after the commit
@@ -97,11 +101,11 @@ When all four levels pass, the attempt SHALL be promoted as a commit on the loca
 - **THEN** the promotion takes the existing commit and no second commit is made
 
 ### Requirement: A failed attempt is rolled back
-When a widening fails at stage `apply`, `build`, a level or `promote`, the attempt SHALL be rolled back: its widened source and build SHALL be removed, the accepted branch SHALL not be read or changed, and the accepted source, build and baseline SHALL stay as they were, so the next cluster is widened as if the attempt had not been made. Baseline captures made during the failed widening SHALL be kept as runs of the accepted source.
+When a widening fails at stage `apply`, `build`, a level or `promote`, the attempt SHALL be rolled back: its worktree and build SHALL be removed, its widening branch SHALL be kept, the accepted branch SHALL not be read or changed, and the accepted source, build and baseline SHALL stay as they were, so the next cluster is widened as if the attempt had not been made. Baseline captures made during the failed widening SHALL be kept as runs of the accepted source.
 
 #### Scenario: The second of two attempts introduces a difference
 - **WHEN** the first attempt is promoted and the second fails its `mode` level with an `introduced` row
-- **THEN** the branch stays at the first attempt's commit, the second attempt's widened source and build are removed, and a third cluster would widen on the first attempt's source
+- **THEN** the accepted branch stays at the first attempt's commit, the second attempt's worktree and build are removed while its widening branch stays, and a third cluster would widen on the first attempt's commit
 
 ### Requirement: Every widening is documented and labelled
 Each final widening SHALL write `widening/<cluster>/attempt-<n>/widening.json` in the thread's folder, `n` being the attempt's number, with the attempt and its record, every level (its selection, run folder, execution outcome, rows passed and failed, each failing row's attribution and baseline run, and the baseline capture's run and execution outcome), the outcome `promoted` or `rejected`, the stage and reason of a rejection, and the commit of a promotion. A widening SHALL work only in its attempt's folder, so a next attempt's widening never removes an earlier one's document. The thread's `widening.json` SHALL list every current widening, the earlier widenings of clusters that got a next attempt, the accepted branch and commit, and totals. The repair record of a widened attempt SHALL get the automatic `widening` label with the outcome, stage, reason and commit.
@@ -116,7 +120,7 @@ Each final widening SHALL write `widening/<cluster>/attempt-<n>/widening.json` i
 - **AND** the thread's `widening.json` lists both
 
 ### Requirement: With fix changes the fix commit holds the fix change
-In a thread with fix changes, promoting a verified attempt SHALL complete the fix change drafted by its repair with the widening's levels, archive it through the OpenSpec CLI in a staging root under the attempt's widening folder, copy the archived folder into the widened source at `fixes/openspec/changes/archive/<archived name>/`, and stage that folder together with `Chummer/` and `Core/` in the fix commit. The staging root SHALL be made anew on every try. A promotion resumed after its commit was made SHALL take that commit and archive nothing again. A passed attempt without a draft SHALL be a setup error. The fix change SHALL NOT make a commit by itself: a widened source whose `Chummer/` and `Core/` stage the accepted trees SHALL be rejected at stage `promote` as in a thread without fix changes.
+In a thread with fix changes, promoting a verified attempt SHALL complete the fix change drafted by its repair with the widening's levels, archive it through the OpenSpec CLI in a staging root under the attempt's widening folder, copy the archived folder into the widened worktree at `fixes/openspec/changes/archive/<archived name>/`, and commit it together with the change of `Chummer/` and `Core/` in the fix commit. The staging root SHALL be made anew on every try. A promotion resumed after its commit was made SHALL take that commit and archive nothing again. A passed attempt without a draft SHALL be a setup error. The fix change SHALL NOT make a commit by itself: a widened worktree whose `Chummer/` and `Core/` stage the accepted trees SHALL be rejected at stage `promote` as in a thread without fix changes.
 
 #### Scenario: Promotion with a fix change
 - **WHEN** a verified attempt of a thread with fix changes is promoted
