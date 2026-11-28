@@ -1,3 +1,4 @@
+import { pausable } from "../../loop/loop-control.js";
 import { END, START, StateGraph } from "@langchain/langgraph";
 import type { LoopSteps } from "../workflow-graph.js";
 import { WorkflowState, type WorkflowStateValue } from "../workflow-state.js";
@@ -5,7 +6,7 @@ import { WorkflowState, type WorkflowStateValue } from "../workflow-state.js";
 /** The `conclude` stage: the merges of the promoted fixes, every cluster's disposition, the thread's outcome and `outcome.json`. */
 export function buildConcludeStage(loop: LoopSteps) {
   return new StateGraph(WorkflowState)
-    .addNode("conclude", (state: WorkflowStateValue) => {
+    .addNode("conclude", pausable((state: WorkflowStateValue) => {
       if (state.triageSummary === null) throw new Error("The thread concluded before triage.");
       const { document, path } = loop.conclude({
         threadId: state.threadId, options: state.options, plan: state.plan, captures: state.captures, compares: state.compares,
@@ -14,7 +15,7 @@ export function buildConcludeStage(loop: LoopSteps) {
         startedUtc: state.startedUtc ?? null, discovery: state.threadDiscovery ?? null,
       });
       return { outcome: document, outcomePath: path };
-    })
+    }))
     .addEdge(START, "conclude")
     .addEdge("conclude", END);
 }

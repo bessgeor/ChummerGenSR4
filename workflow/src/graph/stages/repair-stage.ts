@@ -1,3 +1,4 @@
+import { pausable } from "../../loop/loop-control.js";
 import { END, Send, START, StateGraph, type LangGraphRunnableConfig } from "@langchain/langgraph";
 import { nextRepairRoute } from "../../repair/cluster-repair.js";
 import type { RepairInput } from "../../repair/repair-service.js";
@@ -23,19 +24,19 @@ function repairInput(state: ClusterTask, config: LangGraphRunnableConfig): Repai
  */
 export function buildRepairStage(repair: RepairSteps) {
   return new StateGraph(WorkflowState)
-    .addNode("prepare_repair", (state: WorkflowStateValue) => ({ repairs: repair.prepare(state.threadId, state.clusters, state.diagnosisCheck) }))
-    .addNode("route_repair", () => ({}))
-    .addNode("repair", async (state: ClusterTask, config: LangGraphRunnableConfig) => {
+    .addNode("prepare_repair", pausable((state: WorkflowStateValue) => ({ repairs: repair.prepare(state.threadId, state.clusters, state.diagnosisCheck) })))
+    .addNode("route_repair", pausable(() => ({})))
+    .addNode("repair", pausable(async (state: ClusterTask, config: LangGraphRunnableConfig) => {
       const step = await repair.repair(repairInput(state, config), requireStore(config));
       return { repairs: { [step.update.clusterId]: step.update }, agentMilliseconds: step.chargedMs };
-    })
-    .addNode("wait_for_repair_quota", async (state: WorkflowStateValue, config: LangGraphRunnableConfig) => {
+    }))
+    .addNode("wait_for_repair_quota", pausable(async (state: WorkflowStateValue, config: LangGraphRunnableConfig) => {
       const waiting = Object.values(state.repairs).filter((item) => item.waiting !== null);
       await repair.waitForQuota(waiting.map((item) => item.waiting!), config.signal);
       return { repairs: Object.fromEntries(waiting.map((item) => [item.clusterId, { clusterId: item.clusterId, waiting: null }])) };
-    })
-    .addNode("finish_repair", (state: WorkflowStateValue) => ({ repairPath: repair.finish(state.threadId, state.repairs) }))
-    .addNode("retry_repair", retryRepair)
+    }))
+    .addNode("finish_repair", pausable((state: WorkflowStateValue) => ({ repairPath: repair.finish(state.threadId, state.repairs) })))
+    .addNode("retry_repair", pausable(retryRepair))
     // `repair.json` is written at the end of every entry, so a thread that has one was prepared before.
     .addConditionalEdges(START, (state: WorkflowStateValue) => ((state.repairPath ?? null) === null ? "prepare_repair" : "route_repair"), ["prepare_repair", "route_repair"])
     .addEdge("prepare_repair", "route_repair")

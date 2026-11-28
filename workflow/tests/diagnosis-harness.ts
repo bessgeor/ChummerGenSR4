@@ -31,6 +31,8 @@ import { Worktrees } from "../src/git/worktrees.js";
 import { headBranch, integrate } from "../src/git/integration.js";
 import { WideningService, type WideningDependencies } from "../src/widening/widening-service.js";
 import { LoopService } from "../src/loop/loop-service.js";
+import { recordThreadPause } from "../src/loop/thread-pauses.js";
+import type { PauseGate } from "../src/loop/loop-control.js";
 import { fixesRootOf, openSpecArchiver, processOpenSpecCli, type FixChangeArchiver } from "../src/fixes/fix-archiver.js";
 import { plannedCase, readReport, repository, runFolders, scratch, triageDocument, type Spot } from "./diagnosis-fixtures.js";
 import type { DispatchedTuning } from "../src/tuning/tuning.js";
@@ -315,6 +317,7 @@ export function diagnosisHarness(options: HarnessOptions) {
     certificateProblems: unattendedProblems,
     threadTraces: () => [],
     checkpointedThread: (threadId) => memoryCheckpointedThread(checkpointer, threadId),
+    recordPause: (threadId, pause) => recordThreadPause(join(root, "threads", threadId), pause),
     head: () => headBranch(plainGit),
     log,
     now: () => new Date("2026-10-01T12:00:00Z"),
@@ -322,7 +325,8 @@ export function diagnosisHarness(options: HarnessOptions) {
   };
   return {
     root, agents, sleeps, checks, reportReads, lines, prepared, store, checkpointer, graph, repairHost, wideningHost, sourceRepository,
-    start: (overrides: Partial<Arguments> = {}) => runWorkflow({ kind: "start", arguments: { ...baseArguments, ...overrides } }, dependencies),
+    start: (overrides: Partial<Arguments> = {}, loopControl?: PauseGate) =>
+      runWorkflow({ kind: "start", arguments: { ...baseArguments, ...overrides } }, dependencies, loopControl === undefined ? {} : { loopControl }),
     resume: (threadId: string) => runWorkflow({ kind: "resume", threadId }, dependencies),
     threadId: () => /Thread (wf-\S+):/.exec(lines.join("\n"))?.[1] ?? "",
     /** The thread's latest state: a thread stopped inside a stage holds it in that stage's checkpoint. */

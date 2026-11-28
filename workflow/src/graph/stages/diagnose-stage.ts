@@ -1,3 +1,4 @@
+import { pausable } from "../../loop/loop-control.js";
 import { END, Send, START, StateGraph, type LangGraphRunnableConfig } from "@langchain/langgraph";
 import { isWaiting, nextDiagnosisRoute } from "../../diagnosis/cluster-diagnosis.js";
 import type { JobInput, JobStep } from "../../diagnosis/diagnosis-service.js";
@@ -29,28 +30,28 @@ function applyJob(step: JobStep) {
  */
 export function buildDiagnoseStage(diagnosis: DiagnosisSteps) {
   return new StateGraph(WorkflowState)
-    .addNode("prepare_diagnosis", async (state: WorkflowStateValue) => {
+    .addNode("prepare_diagnosis", pausable(async (state: WorkflowStateValue) => {
       if (state.triageSummary === null || state.fingerprints === null) throw new Error("Diagnosis ran before triage.");
       const clusters = await diagnosis.prepare({
         threadId: state.threadId, triagePath: state.triageSummary.path, caseFile: state.options.caseFile, candidate: state.fingerprints.candidate, candidateSource: state.fingerprints.candidateSource,
         fixChanges: usesFixChanges(state.options), hypotheses: hypothesesOf(state.options),
       });
       return { clusters };
-    })
-    .addNode("route_diagnosis", () => ({}))
-    .addNode("hypothesize", async (state: VariantTask, config: LangGraphRunnableConfig) =>
-      applyJob(await diagnosis.hypothesize(jobInput(state, config), requireStore(config))))
-    .addNode("challenge", async (state: VariantTask, config: LangGraphRunnableConfig) =>
-      applyJob(await diagnosis.challenge(jobInput(state, config), requireStore(config))))
-    .addNode("wait_for_quota", async (state: WorkflowStateValue, config: LangGraphRunnableConfig) => {
+    }))
+    .addNode("route_diagnosis", pausable(() => ({})))
+    .addNode("hypothesize", pausable(async (state: VariantTask, config: LangGraphRunnableConfig) =>
+      applyJob(await diagnosis.hypothesize(jobInput(state, config), requireStore(config)))))
+    .addNode("challenge", pausable(async (state: VariantTask, config: LangGraphRunnableConfig) =>
+      applyJob(await diagnosis.challenge(jobInput(state, config), requireStore(config)))))
+    .addNode("wait_for_quota", pausable(async (state: WorkflowStateValue, config: LangGraphRunnableConfig) => {
       await diagnosis.waitForQuota(Object.values(state.clusters).filter(isWaiting).map((cluster) => cluster.waiting!), config.signal);
       const marked = Object.values(state.clusters).filter((cluster) => cluster.waiting !== null);
       return { clusters: Object.fromEntries(marked.map((cluster) => [cluster.clusterId, { clusterId: cluster.clusterId, waiting: null }])) };
-    })
-    .addNode("check", async (state: WorkflowStateValue, config: LangGraphRunnableConfig) => ({
-      diagnosisCheck: await diagnosis.check({ options: state.options, clusters: state.clusters, ...(config.signal === undefined ? {} : { signal: config.signal }) }, requireStore(config)),
     }))
-    .addNode("finish_diagnosis", (state: WorkflowStateValue) => ({ diagnosisPath: diagnosis.finish(state.threadId, state.clusters, state.diagnosisCheck) }))
+    .addNode("check", pausable(async (state: WorkflowStateValue, config: LangGraphRunnableConfig) => ({
+      diagnosisCheck: await diagnosis.check({ options: state.options, clusters: state.clusters, ...(config.signal === undefined ? {} : { signal: config.signal }) }, requireStore(config)),
+    })))
+    .addNode("finish_diagnosis", pausable((state: WorkflowStateValue) => ({ diagnosisPath: diagnosis.finish(state.threadId, state.clusters, state.diagnosisCheck) })))
     .addEdge(START, "prepare_diagnosis")
     .addEdge("prepare_diagnosis", "route_diagnosis")
     .addConditionalEdges("route_diagnosis", (state: WorkflowStateValue) => {

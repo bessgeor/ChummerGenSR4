@@ -1,4 +1,5 @@
 import { END, START, StateGraph, type LangGraphRunnableConfig } from "@langchain/langgraph";
+import { loopFolderOf, pausable } from "../../loop/loop-control.js";
 import type { ThreadDiscoverySteps } from "../../discovery/thread-discovery.js";
 import { WorkflowState, type WorkflowStateValue } from "../workflow-state.js";
 
@@ -8,9 +9,9 @@ import { WorkflowState, type WorkflowStateValue } from "../workflow-state.js";
  */
 export function buildDiscoveryStage(discovery: ThreadDiscoverySteps) {
   return new StateGraph(WorkflowState)
-    .addNode("discover", async (state: WorkflowStateValue, config: LangGraphRunnableConfig) => ({
-      threadDiscovery: await discovery.discover({ threadId: state.threadId, options: state.options }, config.signal),
-    }))
+    .addNode("discover", pausable(async (state: WorkflowStateValue, config: LangGraphRunnableConfig) => ({
+      threadDiscovery: await discovery.discover({ threadId: state.threadId, options: state.options }, config.signal, loopFolderOf(config)),
+    })))
     .addEdge(START, "discover")
     .addEdge("discover", END);
 }

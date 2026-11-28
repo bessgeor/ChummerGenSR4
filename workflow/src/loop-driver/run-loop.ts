@@ -5,6 +5,7 @@ import type { ComposedWorkflow } from "../compose-workflow.js";
 import type { EvalContext } from "../evals/eval-context.js";
 import { newThreadId, recursionLimit, setupErrorStatus } from "../graph/run-workflow.js";
 import { SetupError } from "../host/setup-error.js";
+import { invokePausable, type PauseGate } from "../loop/loop-control.js";
 import { runAutoTuning } from "../tuning/tune-commands.js";
 import type { LoopCommand } from "./loop-arguments.js";
 import { readThreadSummary, writeLoopDocument, type LoopDocument, type LoopPaths } from "./loop-document.js";
@@ -32,12 +33,14 @@ export type LoopHost = {
  */
 export function hostLoopSteps(loopId: string, host: LoopHost): LoopSteps {
   const { paths, workflow, evalContext, now, log } = host;
+  // The loop's threads and tunings pause with it.
+  const gate: PauseGate = { folder: paths.folder(loopId), log };
   const treeOf = (commit: string) => evalContext.branchGit(["rev-parse", "--verify", `${commit}^{tree}`]).trim();
   return {
     newThreadId: () => newThreadId(now()),
-    runThread: (threadId, args) => workflow.run({ kind: "start", arguments: args }, { threadId }),
+    runThread: (threadId, args) => workflow.run({ kind: "start", arguments: args }, { threadId, loopControl: gate }),
     threadSummary: (threadId) => readThreadSummary(threadId, host.threadFolder(threadId), treeOf),
-    tune: (onStart) => runAutoTuning(evalContext, false, onStart),
+    tune: (onStart) => runAutoTuning(evalContext, false, onStart, gate),
     writeLoop: (document) => writeLoopDocument(paths.document(loopId), document),
     now,
     log,
@@ -53,6 +56,8 @@ export type LoopDependencies = {
   readonly now: () => Date;
   readonly log: (line: string) => void;
   readonly signal?: AbortSignal;
+  /** How the loop graph waits while the loop is paused; by default it reads the control file every second. */
+  readonly pause?: Omit<PauseGate, "folder" | "log">;
 };
 
 /** Exit status of a loop that ended: 0 converged or limit, 2 failed. */
@@ -77,9 +82,10 @@ export async function runLoop(command: Extract<LoopCommand, { kind: "start" }>, 
   try {
     steps.writeLoop(document);
     const graph = buildLoopGraph(steps).compile({ checkpointer: dependencies.checkpointer });
-    const final = await graph.invoke(loopInput(document, command.arguments), {
+    // The loop's own nodes pause with it too: a paused loop starts no further thread or tuning until it is unpaused.
+    const final = await invokePausable(graph, loopInput(document, command.arguments), {
       configurable: { thread_id: loopId }, recursionLimit, durability: "sync", ...(dependencies.signal === undefined ? {} : { signal: dependencies.signal }),
-    }) as LoopStateValue;
+    }, { folder: dependencies.paths.folder(loopId), log, ...dependencies.pause }, `Loop ${loopId}`) as LoopStateValue;
     const status = loopExitStatus(final.document);
     log(`Loop ${loopId} ${final.document.status} after ${final.document.iterations.length} threads: exit ${status}.`);
     return status;

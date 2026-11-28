@@ -1,3 +1,4 @@
+import { pausable } from "../loop/loop-control.js";
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
 import { SetupError } from "../host/setup-error.js";
 import type { Arguments } from "../options/arguments.js";
@@ -86,7 +87,7 @@ export function decide(document: LoopDocument): Decision {
  */
 export function buildLoopGraph(steps: LoopSteps) {
   return new StateGraph(LoopState)
-    .addNode("start_thread", (state: LoopStateValue) => {
+    .addNode("start_thread", pausable((state: LoopStateValue) => {
       const iteration: Iteration = {
         thread: steps.newThreadId(), startedUtc: steps.now().toISOString(), endedUtc: null, exitStatus: null, summary: null, tuning: null, decision: null,
       };
@@ -94,14 +95,14 @@ export function buildLoopGraph(steps: LoopSteps) {
       steps.writeLoop(document);
       steps.log(`Loop ${state.loopId}: thread ${document.iterations.length} is ${iteration.thread}.`);
       return { document, exitStatus: null };
-    })
-    .addNode("run_thread", async (state: LoopStateValue) => {
+    }))
+    .addNode("run_thread", pausable(async (state: LoopStateValue) => {
       const { thread } = current(state.document);
       const exitStatus = await steps.runThread(thread, state.arguments);
       if (exitStatus === threadSetupErrorStatus) throw new SetupError(`Thread ${thread} of loop ${state.loopId} stopped with exit status ${exitStatus}; the loop stays running.`);
       return { exitStatus };
-    })
-    .addNode("decide_thread", (state: LoopStateValue) => {
+    }))
+    .addNode("decide_thread", pausable((state: LoopStateValue) => {
       const iteration = current(state.document);
       const exitStatus = state.exitStatus;
       if (exitStatus === null) throw new Error(`decide_thread ran before thread ${iteration.thread} ended.`);
@@ -113,8 +114,8 @@ export function buildLoopGraph(steps: LoopSteps) {
         return { document: recordIteration(steps, state.document, { ...ended, decision }, "failed") };
       }
       return { document: recordIteration(steps, state.document, ended) };
-    })
-    .addNode("tune", async (state: LoopStateValue) => {
+    }))
+    .addNode("tune", pausable(async (state: LoopStateValue) => {
       const result = await steps.tune((start) => {
         recordIteration(steps, state.document, { tuning: { kind: "tuning", tuningId: start.tuningId, cycle: start.cycleId, outcome: null, exitStatus: null } });
       });
@@ -122,13 +123,13 @@ export function buildLoopGraph(steps: LoopSteps) {
         ? { kind: "not_due" as const, count: result.count, every: result.every }
         : { kind: "tuning" as const, tuningId: result.tuningId, cycle: result.cycleId, outcome: result.outcome, exitStatus: result.status };
       return { document: recordIteration(steps, state.document, { tuning }) };
-    })
-    .addNode("decide", (state: LoopStateValue) => {
+    }))
+    .addNode("decide", pausable((state: LoopStateValue) => {
       const decision = decide(state.document);
       const status = decision.next === "thread" ? "running" : decision.next;
       steps.log(`Loop ${state.loopId}: ${decision.next === "thread" ? "next thread" : decision.next}; ${decision.reasons.join("; ")}.`);
       return { document: recordIteration(steps, state.document, { decision }, status) };
-    })
+    }))
     .addEdge(START, "start_thread")
     .addEdge("start_thread", "run_thread")
     .addEdge("run_thread", "decide_thread")

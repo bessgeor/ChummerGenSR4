@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { resolve } from "node:path";
+import type { PauseGate } from "../loop/loop-control.js";
 import { CommandOptions } from "../evals/command-options.js";
 import { runDependencies, type EvalContext } from "../evals/eval-context.js";
 import { newEvalRunId, summaryLines } from "../evals/eval-run.js";
@@ -242,9 +243,10 @@ export type AutoTuningStart = { readonly tuningId: string; readonly cycleId: str
  * Counts the new hypothesis records. Not due prints the count and changes nothing. A due tuning runs as a new tuning
  * thread: it records the tuning as in progress with the records it counts, freezes the next version of the automatic
  * dataset and runs a cycle on it. A tuning in progress is continued first, without counting or freezing again.
- * `onStart` learns the tuning before its thread runs. This is `tune auto`; a setup error is thrown.
+ * `onStart` learns the tuning before its thread runs; with the gate of the loop that runs it, the tuning pauses with the loop. This is `tune auto`; a setup error is thrown.
  */
-export async function runAutoTuning(context: EvalContext, force: boolean, onStart: (start: AutoTuningStart) => void = () => {}): Promise<AutoTuningResult> {
+export async function runAutoTuning(context: EvalContext, force: boolean, onStart: (start: AutoTuningStart) => void = () => {},
+  gate: PauseGate | null = null): Promise<AutoTuningResult> {
   const settings = context.autoTuning();
   const evalsFolder = context.paths.evalsFolder;
   const notDue = (trigger: Extract<AutoTuningTrigger, { kind: "not_due" }>): AutoTuningResult => {
@@ -263,7 +265,7 @@ export async function runAutoTuning(context: EvalContext, force: boolean, onStar
       const folders = { tuningFolder: context.tuningFolder(), certificatesFolder: context.certificatesFolder() };
       if (repositoryPaths(context.paths.repositoryRoot, folders).length > 0) requireWorkspaceStart(context.branchGit, context.paths.repositoryRoot, folders);
     }
-    return tuneNow(context, locked, settings, onStart);
+    return tuneNow(context, locked, settings, onStart, gate);
   });
 }
 
@@ -275,7 +277,7 @@ const auto: TuneCommand = async (args, context) => {
 
 /** Starts the due tuning, or continues the one in progress, and returns its cycle's outcome with the exit status it gives. */
 async function tuneNow(context: EvalContext, trigger: Exclude<AutoTuningTrigger, { kind: "not_due" }>, settings: AutoTuningSettings,
-  onStart: (start: AutoTuningStart) => void): Promise<AutoTuningResult> {
+  onStart: (start: AutoTuningStart) => void, gate: PauseGate | null): Promise<AutoTuningResult> {
   const evalsFolder = context.paths.evalsFolder;
   let input: TuningStateValue;
   if (trigger.kind === "due") {
@@ -293,7 +295,7 @@ async function tuneNow(context: EvalContext, trigger: Exclude<AutoTuningTrigger,
   onStart({ tuningId: input.tuningId, cycleId: autoCycleId(input.tuningId) });
   const { graph, steps } = tuningGraph(context, null);
   // A thread that concluded before its tuning ended (stopped between the two) is not run again: its conclusion ends the tuning.
-  const cycle = await concludedTuning(graph, input.tuningId) ?? await runTuningThread(graph, steps, input, "npm run eval -- tune auto", context.signal);
+  const cycle = await concludedTuning(graph, input.tuningId) ?? await runTuningThread(graph, steps, input, "npm run eval -- tune auto", context.signal, gate);
   if (cycle.outcome === "running") throw new SetupError(`Tuning cycle ${cycle.cycleId} concluded while it is still running.`);
   const ended = finishAutoTuning(evalsFolder, input.tuningId, cycle.outcome, context.now());
   for (const line of cycleLines(cycle)) context.log(line);

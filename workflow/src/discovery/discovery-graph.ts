@@ -1,3 +1,4 @@
+import { pausable } from "../loop/loop-control.js";
 import type { BaseStore } from "@langchain/langgraph-checkpoint";
 import { END, Send, START, StateGraph, type LangGraphRunnableConfig } from "@langchain/langgraph";
 import type { QuotaWaitMark } from "../diagnosis/cluster-diagnosis.js";
@@ -44,31 +45,31 @@ export function scenarioRoute(scenarios: Readonly<Record<string, ScenarioJob>>):
  */
 export function buildDiscoveryGraph(steps: DiscoverySteps) {
   return new StateGraph(DiscoveryState)
-    .addNode("prepare", async (state: DiscoveryStateValue, config: LangGraphRunnableConfig) => ({ prepared: await steps.prepare(state.threadId, state.options, config.signal) }))
-    .addNode("route_rank", () => ({}))
-    .addNode("rank", async (state: DiscoveryStateValue, config: LangGraphRunnableConfig) => {
+    .addNode("prepare", pausable(async (state: DiscoveryStateValue, config: LangGraphRunnableConfig) => ({ prepared: await steps.prepare(state.threadId, state.options, config.signal) })))
+    .addNode("route_rank", pausable(() => ({})))
+    .addNode("rank", pausable(async (state: DiscoveryStateValue, config: LangGraphRunnableConfig) => {
       const step = await steps.rank(state, requireStore(config), config.signal);
       return { rankJob: step.rank, agentMilliseconds: step.chargedMs };
-    })
-    .addNode("wait_for_rank_quota", async (state: DiscoveryStateValue, config: LangGraphRunnableConfig) => {
+    }))
+    .addNode("wait_for_rank_quota", pausable(async (state: DiscoveryStateValue, config: LangGraphRunnableConfig) => {
       await steps.waitForQuota([state.rankJob.waiting!], config.signal);
       return { rankJob: { ...state.rankJob, waiting: null } };
-    })
-    .addNode("select", async (state: DiscoveryStateValue) => steps.select(state))
-    .addNode("route_scenarios", () => ({}))
-    .addNode("scenario", async (state: TargetTask, config: LangGraphRunnableConfig) => {
+    }))
+    .addNode("select", pausable(async (state: DiscoveryStateValue) => steps.select(state)))
+    .addNode("route_scenarios", pausable(() => ({})))
+    .addNode("scenario", pausable(async (state: TargetTask, config: LangGraphRunnableConfig) => {
       const step = await steps.scenario(state, state.targetId, requireStore(config), config.signal);
       return { scenarios: { [state.targetId]: step.update }, agentMilliseconds: step.chargedMs };
-    })
-    .addNode("wait_for_scenario_quota", async (state: DiscoveryStateValue, config: LangGraphRunnableConfig) => {
+    }))
+    .addNode("wait_for_scenario_quota", pausable(async (state: DiscoveryStateValue, config: LangGraphRunnableConfig) => {
       const waiting = Object.values(state.scenarios).filter((job) => job.waiting !== null);
       await steps.waitForQuota(waiting.map((job) => job.waiting!), config.signal);
       return { scenarios: Object.fromEntries(waiting.map((job) => [job.targetId, { targetId: job.targetId, waiting: null }])) };
-    })
-    .addNode("validate", (state: DiscoveryStateValue) => ({ scenarios: steps.validate(state) }))
-    .addNode("execute", async (state: DiscoveryStateValue, config: LangGraphRunnableConfig) => ({ execution: await steps.execute(state, config.signal) }))
-    .addNode("register", async (state: DiscoveryStateValue, config: LangGraphRunnableConfig) => ({ registered: await steps.register(state, requireStore(config)) }))
-    .addNode("conclude", (state: DiscoveryStateValue) => ({ concluded: steps.conclude(state) }))
+    }))
+    .addNode("validate", pausable((state: DiscoveryStateValue) => ({ scenarios: steps.validate(state) })))
+    .addNode("execute", pausable(async (state: DiscoveryStateValue, config: LangGraphRunnableConfig) => ({ execution: await steps.execute(state, config.signal) })))
+    .addNode("register", pausable(async (state: DiscoveryStateValue, config: LangGraphRunnableConfig) => ({ registered: await steps.register(state, requireStore(config)) })))
+    .addNode("conclude", pausable((state: DiscoveryStateValue) => ({ concluded: steps.conclude(state) })))
     .addEdge(START, "prepare")
     .addConditionalEdges("prepare", (state: DiscoveryStateValue) => (state.prepared?.rankContext == null ? "conclude" : "route_rank"), ["route_rank", "conclude"])
     .addConditionalEdges("route_rank", (state: DiscoveryStateValue) => rankRoute(state.rankJob), ["rank", "wait_for_rank_quota", "select", "conclude"])

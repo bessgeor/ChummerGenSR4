@@ -15,6 +15,7 @@ import { threadBranches } from "../git/thread-source.js";
 import { clusterEnd, type ClusterMerge } from "./disposition.js";
 import { threadOutcome, type MergeDocument, type MergedFix, type OutcomeDocument, type ScopeProblem } from "./outcome.js";
 import { retryLimits, retryPlan } from "./retry.js";
+import { threadPausedMilliseconds } from "./thread-pauses.js";
 
 export type LoopDependencies = {
   readonly threadFolder: (threadId: string) => string;
@@ -108,6 +109,7 @@ export class LoopService {
     });
     const problems = { cases, otherFindings: input.otherFindings };
     const now = this.dependencies.now();
+    const pausedMilliseconds = threadPausedMilliseconds(this.dependencies.threadFolder(input.threadId));
     const fixed = ends.filter((end) => end.disposition === "fixed").length;
     const document: OutcomeDocument = {
       threadId: input.threadId,
@@ -120,7 +122,8 @@ export class LoopService {
         clusters: ends.length, fixed, fixRate: ends.length === 0 ? null : fixed / ends.length,
         attempts: ends.reduce((sum, end) => sum + end.attempts, 0),
         modelMilliseconds: input.agentMilliseconds,
-        elapsedMilliseconds: input.startedUtc === null ? null : now.getTime() - Date.parse(input.startedUtc),
+        elapsedMilliseconds: input.startedUtc === null ? null : now.getTime() - Date.parse(input.startedUtc) - pausedMilliseconds,
+        pausedMilliseconds,
       },
       discovery: input.discovery,
       concludedUtc: now.toISOString(),

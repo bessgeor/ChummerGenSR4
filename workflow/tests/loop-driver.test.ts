@@ -244,7 +244,7 @@ function outcomeDocument(threadId: string, clusters: ClusterEnd[], merge: Pick<M
     threadId, outcome: clusters.every((cluster) => cluster.disposition === "fixed") ? "verified_for_scope" : "findings_remaining",
     scope: { cases: ["build-a"], captures: null }, problems: { cases: [], otherFindings: 0 }, clusters, accepted: null,
     merge: merge === null ? null : { branch: "master", integrationBranch: null, skipped: null, ...merge },
-    measures: { clusters: clusters.length, fixed: 0, fixRate: null, attempts: 0, modelMilliseconds: 0, elapsedMilliseconds: null },
+    measures: { clusters: clusters.length, fixed: 0, fixRate: null, attempts: 0, modelMilliseconds: 0, elapsedMilliseconds: null, pausedMilliseconds: 0 },
     discovery: admitted === null ? null : { threadId: `disc-${threadId}`, exitStatus: 0, admitted, differing: [], documentPath: "discovery.json" },
     concludedUtc: "2026-10-29T09:00:00.000Z",
   };
@@ -274,12 +274,12 @@ test("on this machine's steps, threads start through the composed workflow with 
   const root = scratch("workflow-loop-");
   const paths = loopPaths(root);
   const threadFolder = (threadId: string) => join(root, "threads", threadId);
-  const runs: { command: unknown; request: unknown; outcome: boolean }[] = [];
+  const runs: { command: unknown; request: unknown; loopFolder: string | undefined; outcome: boolean }[] = [];
   const workflow: ComposedWorkflow = {
     run: async (command, request) => {
       const threadId = request!.threadId!;
-      // A start given an ID that exists is refused, so the loop's thread is new when it starts.
-      runs.push({ command, request, outcome: existsSync(join(threadFolder(threadId), "outcome.json")) });
+      // A start given an ID that exists is refused, so the loop's thread is new when it starts; it pauses with the loop.
+      runs.push({ command, request: { threadId: request!.threadId }, loopFolder: request!.loopControl?.folder, outcome: existsSync(join(threadFolder(threadId), "outcome.json")) });
       writeOutcome(threadFolder(threadId), outcomeDocument(threadId, [end("d-1", "refuted")], null, null));
       return 1;
     },
@@ -301,7 +301,7 @@ test("on this machine's steps, threads start through the composed workflow with 
   equal(document.status, "converged");
   equal(runs.length, 2);
   for (const [index, run] of runs.entries()) {
-    deepStrictEqual(run, { command: { kind: "start", arguments: argumentsOf(["--case", "a", "--no-repair"]) }, request: { threadId: document.iterations[index]!.thread }, outcome: false });
+    deepStrictEqual(run, { command: { kind: "start", arguments: argumentsOf(["--case", "a", "--no-repair"]) }, request: { threadId: document.iterations[index]!.thread }, loopFolder: paths.folder(loopId), outcome: false });
     ok(/^wf-\d{8}T\d{6}Z-[0-9a-f]{8}$/.test(document.iterations[index]!.thread), document.iterations[index]!.thread);
   }
   const ended = readAutoTuning(context.paths.evalsFolder).tunings[0]!;
