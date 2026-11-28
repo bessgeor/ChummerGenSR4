@@ -167,3 +167,16 @@ A checkpoint database opened with `SqliteSaver.fromConnString` already switched 
 | A writer that waits | A process holds the write lock with an uncommitted row: a saver reads the database as it was without waiting, and a write waits for the commit and succeeds; with the busy timeout set to 0 this test fails. |
 
 The busy timeout does not cover the switch to WAL itself. In a probe, `journal_mode = WAL` on a database not yet in WAL mode, while another connection held a write transaction, failed with `SQLITE_BUSY` at once; that error is passed on as it is, not as a setup error. On a database already in WAL mode, the same pragma returned at once while another connection held a write transaction.
+
+## Task 5.1: docs
+
+| Command | Result |
+| --- | --- |
+| `npm run workflow:typecheck` | Passed (exit 0) before and after the corrections of the review. |
+| `npm run workflow:test`, run 1 | Passed on the first draft of the docs: 727 tests, 727 passed, 0 failed, 0 skipped (exit 0). |
+| `npm run workflow:test`, run 2 | Passed after the corrections of the review: 727 tests, 727 passed, 0 failed, 0 skipped (exit 0). |
+| `npm run workflow:test`, run 3 | Passed on the final source, after the wording in `README.md` of when a run makes the loop end `failed` was corrected: 727 tests, 727 passed, 0 failed, 0 skipped (exit 0). `npm run workflow:typecheck` and `npm run openspec:validate` (18 passed, 0 failed) passed on it too. |
+| `npm run openspec:validate` | Passed strict validation: 18 passed, 0 failed. |
+| SHA-256 of `bin/ChummerGenSR4.exe` | `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`; the executable was not built, launched or touched. |
+
+No live run: the task changes only `AGENTS.md` and `README.md`. The section "Loop driver" of `AGENTS.md` and the paragraph of `README.md` were checked against `workflow/src/loop-driver/` and `workflow/src/loop/` (options, files, schemas, statuses and exit statuses, when a loop goes on and how it ends, resume, stop, pause of the loop and of a lane, and what it writes for readers); a review against the source corrected when a loop ends `limit`, what a failed tuning is, a merge that does not change the branch, `--stop` of a loop that has ended or does not exist, and what `state.json`'s `paused` means.
