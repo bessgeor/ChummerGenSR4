@@ -173,7 +173,7 @@ function fakeLoop(threads: readonly ThreadScript[], tunings: readonly TuneScript
       const checkpointer = openLoopCheckpointer(paths);
       return { checkpointer, steps: steps(id), close: () => { closed++; checkpointer.db.close(); } };
     };
-    return runLoop(command, { paths, compose, newLoopId: () => loopId, now, log: (line) => lines.push(line), ...pausing });
+    return runLoop(command, { paths, compose, newLoopId: () => loopId, now, log: (line) => lines.push(line), lanes: ["desktop"], ...pausing });
   };
   const stop = () => equal(stopLoop(loopId, paths, now, (line) => lines.push(line)), 0);
   const compositions = () => ({ composed, closed });
@@ -346,7 +346,7 @@ test("--stop names a loop that exists: an unknown loop or an invalid ID is a set
   ok(lines.includes("Setup error: 'loop-../x' is not a loop ID (loop-<time>-<suffix>)."), lines.join("\n"));
   equal(existsSync(paths.root), false);
   writeLoopDocument(paths.document(loopId), {
-    schemaVersion: 1, loopId, startedUtc: now().toISOString(), options: { arguments: [], maxRuns: null }, status: "running", iterations: [],
+    schemaVersion: 1, loopId, startedUtc: now().toISOString(), options: { arguments: [], maxRuns: null }, status: "running", iterations: [], threads: [],
   });
   equal(stopLoop(loopId, paths, now, (line) => lines.push(line)), 0);
   equal(stopRequested(paths, loopId), true);
@@ -716,7 +716,7 @@ test("on this machine's steps, threads start through the composed workflow with 
   };
   const lines: string[] = [];
   const status = await runLoop(startOf(["--case", "a", "--no-repair"]), {
-    paths, now, newLoopId: () => loopId, log: (line) => lines.push(line),
+    paths, now, newLoopId: () => loopId, log: (line) => lines.push(line), lanes: ["desktop"],
     compose: (id) => {
       const checkpointer = openLoopCheckpointer(paths);
       return {
@@ -744,7 +744,7 @@ test("on this machine's steps, threads start through the composed workflow with 
   const host = hostLoopSteps(loopId, { paths, workflow: resuming, threadFolder, evalContext: context, now, log: () => {} });
   deepStrictEqual([host.tuningStarted(ended.tuningId), host.tuningStarted("tune-never")], [true, false]);
   // A resumed thread pauses with the loop too.
-  equal(await host.resumeThread("wf-1"), 0);
+  equal(await host.resumeThread("wf-1", "the loop started"), 0);
   deepStrictEqual(requests, [{ command: { kind: "resume", threadId: "wf-1" }, loopFolder: paths.folder(loopId) }]);
   deepStrictEqual(document.iterations.map((iteration) => iteration.tuning), [
     { kind: "tuning", tuningId: ended.tuningId, cycle: ended.cycle, outcome: "activated", exitStatus: 0 },

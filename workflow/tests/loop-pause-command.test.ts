@@ -32,7 +32,7 @@ test("--pause and --unpause write the loop's flag or a lane's, and an agent lane
   throws(() => pauseLoop({ kind: "pause", loopId, paused: true, lane: null }, dependencies), (error: Error) => error instanceof SetupError && error.message.includes(`There is no loop ${loopId}`));
   throws(() => pauseLoop({ kind: "pause", loopId: "../x", paused: true, lane: null }, dependencies), SetupError);
   writeLoopDocument(paths.document(loopId), {
-    schemaVersion: 1, loopId, startedUtc: now().toISOString(), options: { arguments: [], maxRuns: null }, status: "running", iterations: [],
+    schemaVersion: 1, loopId, startedUtc: now().toISOString(), options: { arguments: [], maxRuns: null }, status: "running", iterations: [], threads: [],
   });
   throws(() => pauseLoop({ kind: "pause", loopId, paused: true, lane: "other" }, dependencies),
     (error: Error) => error instanceof SetupError && error.message.includes("declares no desktop lane other; its lanes are desktop, vm"));

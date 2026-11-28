@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { newThreadId } from "../graph/run-workflow.js";
 import { SetupError } from "../host/setup-error.js";
+import { LoopThreadSchema } from "../loop/loop-control.js";
 import { threadOutcomes } from "../loop/outcome.js";
 import { readDocument } from "../steps/read-document.js";
 import { writeDocument } from "../steps/write-document.js";
@@ -11,6 +12,8 @@ import { writeDocument } from "../steps/write-document.js";
 export type LoopPaths = {
   readonly root: string;
   readonly checkpoints: string;
+  /** The drawings of the graphs a loop runs, written when a loop starts. */
+  readonly graphs: string;
   folder(loopId: string): string;
   document(loopId: string): string;
   /** The stop request `--stop` writes into the loop's folder. */
@@ -24,6 +27,7 @@ export function loopPaths(repositoryRoot: string): LoopPaths {
   return {
     root,
     checkpoints: join(root, "checkpoints.sqlite"),
+    graphs: join(root, "graphs"),
     folder: (loopId) => join(root, loopId),
     document: (loopId) => join(root, loopId, "loop.json"),
     stopRequest: (loopId) => join(root, loopId, "stop"),
@@ -114,8 +118,13 @@ export const LoopDocumentSchema = z.strictObject({
   options: z.strictObject({ arguments: z.array(z.string()), maxRuns: z.number().int().positive().nullable() }),
   status: z.enum(loopStatuses),
   iterations: z.array(IterationSchema),
+  /** The threads the loop ran, in the order they started: workflow threads, their discovery threads and tunings. */
+  threads: z.array(LoopThreadSchema),
 });
 export type LoopDocument = z.infer<typeof LoopDocumentSchema>;
+
+/** What the loop graph keeps of `loop.json`: everything but its threads, which the loop learns from the graphs it runs. */
+export type LoopProgress = Omit<LoopDocument, "threads">;
 
 export function writeLoopDocument(path: string, document: LoopDocument): void {
   writeDocument(path, LoopDocumentSchema.parse(document));

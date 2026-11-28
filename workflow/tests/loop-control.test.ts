@@ -222,7 +222,7 @@ test("a paused loop starts no thread: its graph is interrupted on entry, and aft
   let status;
   try {
     status = await runLoop({ kind: "start", options: [], arguments: parseStart(), maxRuns: null }, {
-      paths, compose: (id) => ({ checkpointer, steps: steps(id), close: () => {} }), newLoopId: () => loopId, now, log: (line) => lines.push(line),
+      paths, compose: (id) => ({ checkpointer, steps: steps(id), close: () => {} }), newLoopId: () => loopId, now, log: (line) => lines.push(line), lanes: ["desktop"],
       pause: {
         pollMilliseconds: 1,
         sleep: async () => {
