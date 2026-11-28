@@ -13,6 +13,10 @@ export type LoopPaths = {
   readonly checkpoints: string;
   folder(loopId: string): string;
   document(loopId: string): string;
+  /** The stop request `--stop` writes into the loop's folder. */
+  stopRequest(loopId: string): string;
+  /** The lock a process running the loop holds. */
+  lock(loopId: string): string;
 };
 
 export function loopPaths(repositoryRoot: string): LoopPaths {
@@ -22,7 +26,30 @@ export function loopPaths(repositoryRoot: string): LoopPaths {
     checkpoints: join(root, "checkpoints.sqlite"),
     folder: (loopId) => join(root, loopId),
     document: (loopId) => join(root, loopId, "loop.json"),
+    stopRequest: (loopId) => join(root, loopId, "stop"),
+    lock: (loopId) => join(root, loopId, "run.lock"),
   };
+}
+
+/**
+ * The loop ID a command names, as a folder of `out/loop/`: `loop-` followed by letters, digits, dots, underscores and
+ * hyphens, without `..`; anything else is a setup error.
+ */
+export function checkLoopId(loopId: string): string {
+  if (!/^loop-[A-Za-z0-9][A-Za-z0-9._-]*$/.test(loopId) || loopId.includes("..")) throw new SetupError(`'${loopId}' is not a loop ID (loop-<time>-<suffix>).`);
+  return loopId;
+}
+
+const StopRequestSchema = z.strictObject({ requestedUtc: z.string() });
+
+/** Writes the stop request of a loop. */
+export function writeStopRequest(paths: LoopPaths, loopId: string, now: Date): void {
+  writeDocument(paths.stopRequest(loopId), StopRequestSchema.parse({ requestedUtc: now.toISOString() }));
+}
+
+/** Whether the loop was asked to stop. */
+export function stopRequested(paths: LoopPaths, loopId: string): boolean {
+  return existsSync(paths.stopRequest(loopId));
 }
 
 /** `loop-<time>-<suffix>`. */
@@ -59,7 +86,7 @@ export type TuningStep = z.infer<typeof TuningStepSchema>;
 
 /** What the loop decided after an iteration, with why. */
 const DecisionSchema = z.strictObject({
-  next: z.enum(["thread", "converged", "limit", "failed"]),
+  next: z.enum(["thread", "converged", "limit", "failed", "stopped"]),
   reasons: z.array(z.string().min(1)),
 });
 export type Decision = z.infer<typeof DecisionSchema>;

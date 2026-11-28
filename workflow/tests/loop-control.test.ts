@@ -199,13 +199,20 @@ test("a paused loop starts no thread: its graph is interrupted on entry, and aft
   const runs: string[] = [];
   const steps = (id: string): LoopSteps => ({
     newThreadId: () => `wf-${runs.length + 1}`,
+    threadProgress: async () => ({ kind: "new", traces: [] }),
     runThread: async (threadId) => {
       runs.push(threadId);
       return 0;
     },
+    resumeThread: async () => {
+      throw new Error("no thread to resume");
+    },
     threadSummary: () => ({ outcome: "verified_for_scope", fixed: [], merged: [], sourceChanged: false, admitted: [] }),
+    tuningStarted: () => false,
     tune: async () => ({ kind: "not_due", count: 0, every: 12 }),
     writeLoop: (document) => writeLoopDocument(paths.document(id), document),
+    readLoop: () => readLoopDocument(paths.document(id)),
+    stopRequested: () => false,
     now,
     log: (line) => lines.push(line),
   });
@@ -215,7 +222,7 @@ test("a paused loop starts no thread: its graph is interrupted on entry, and aft
   let status;
   try {
     status = await runLoop({ kind: "start", options: [], arguments: parseStart(), maxRuns: null }, {
-      paths, checkpointer, steps, newLoopId: () => loopId, now, log: (line) => lines.push(line),
+      paths, compose: (id) => ({ checkpointer, steps: steps(id), close: () => {} }), newLoopId: () => loopId, now, log: (line) => lines.push(line),
       pause: {
         pollMilliseconds: 1,
         sleep: async () => {

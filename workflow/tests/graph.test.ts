@@ -285,14 +285,16 @@ test("a thread's progress is new without a checkpoint, unfinished after a setup 
   steps.captureStatus = { a: 1 };
   const run = harness(["a", "b"], steps);
   const given = "wf-20261001T120000Z-progress";
-  deepStrictEqual(await threadProgress(run.dependencies.graph, given), { kind: "new" });
+  const traces = (threadId: string) => [`its folder threads/${threadId}`];
+  deepStrictEqual(await threadProgress(run.dependencies.graph, given, run.dependencies.threadTraces), { kind: "new", traces: [] });
+  deepStrictEqual(await threadProgress(run.dependencies.graph, given, traces), { kind: "new", traces: [`its folder threads/${given}`] });
   equal(await runWorkflow({ kind: "start", arguments: baseArguments }, run.dependencies, { threadId: given }), 3);
-  deepStrictEqual(await threadProgress(run.dependencies.graph, given), { kind: "unfinished" });
+  deepStrictEqual(await threadProgress(run.dependencies.graph, given, traces), { kind: "unfinished" });
   steps.failCapture = null;
   equal(await runWorkflow({ kind: "resume", threadId: given }, run.dependencies), 1);
-  deepStrictEqual(await threadProgress(run.dependencies.graph, given), { kind: "finished", exitStatus: 1 });
+  deepStrictEqual(await threadProgress(run.dependencies.graph, given, traces), { kind: "finished", exitStatus: 1 });
   // The ID is exact: another case is another thread.
-  deepStrictEqual(await threadProgress(run.dependencies.graph, given.toUpperCase()), { kind: "new" });
+  deepStrictEqual(await threadProgress(run.dependencies.graph, given.toUpperCase(), run.dependencies.threadTraces), { kind: "new", traces: [] });
 });
 
 test("a start given a new thread ID runs its thread under that ID", async () => {

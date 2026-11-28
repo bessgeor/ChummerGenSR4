@@ -145,7 +145,7 @@ export function composeWorkflow(repositoryRoot: string, profile: Profile, log: (
       now,
       ...(signal === undefined ? {} : { signal }),
     };
-    return { run: (command, request = {}) => runWorkflow(command, dependencies, request), progress: (threadId) => threadProgress(graph, threadId), close };
+    return { run: (command, request = {}) => runWorkflow(command, dependencies, request), progress: (threadId) => threadProgress(graph, threadId, dependencies.threadTraces), close };
   } catch (error) {
     close();
     throw error;
