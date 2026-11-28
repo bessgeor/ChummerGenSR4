@@ -81,6 +81,8 @@ test("a commit that does not rebase cleanly is not merged, nor any after it", ()
   const before = repo.run("rev-parse", "main");
   const result = integrate(repo.git, repo.worktrees, repo.request([repo.item("d-1", first), repo.item("d-2", second)]));
   deepStrictEqual(result.items.map((item) => [item.name, item.status, item.files]), [["d-1", "conflict", ["Chummer/frmCreate.cs"]], ["d-2", "blocked", []]]);
+  // The conflicting fix's branch holds the fix commit.
+  equal(repo.run("rev-parse", "workflow/wf-1/fix/d-1"), first);
   ok(result.items[0]!.reason!.includes("Chummer/frmCreate.cs"));
   ok(result.items[1]!.reason!.startsWith("d-1 did not merge"));
   deepStrictEqual([result.after, result.integrationBranch], [before, null]);
@@ -349,4 +351,87 @@ test("a converted source's real edit still keeps its fixes from a branch that la
   deepStrictEqual(merged.items.map((item) => item.status), ["merged"]);
   equal(execFileSync("git", ["-C", repo.root, "cat-file", "blob", "main:Chummer/frmCreate.cs"], { encoding: "utf8" }), "create\nfixed\n");
   equal(repo.run("status", "--porcelain=v1"), "");
+});
+
+test("a source's edits are read against the commit it was captured on, so a file the branch changed meanwhile is no edit", () => {
+  for (const change of ["deleted", "committed with LF"] as const) {
+    const repo = repositoryOnMain();
+    // The branch holds a file with CRLF and the checkout converts line endings: the file is checked out as it is.
+    write(repo.root, "Chummer/frmCreate.Designer.cs", "designer\r\n");
+    repo.run("add", "Chummer/frmCreate.Designer.cs");
+    repo.run("commit", "-q", "-m", "designer");
+    repo.run("config", "core.autocrlf", "true");
+    const source = repo.commitOn(repo.run("rev-parse", "main"), "Source captured by thread wf-1", { "Chummer/frmCreate.cs": "create\r\n" });
+    const fix = repo.commitOn(source, "Fix d-1", { "Core/XmlManager.cs": "xml fixed\r\n" });
+    // While the thread runs, the branch moves.
+    if (change === "deleted") repo.run("rm", "-q", "Chummer/frmCreate.Designer.cs");
+    else {
+      write(repo.root, "Chummer/frmCreate.Designer.cs", "designer\n");
+      repo.run("-c", "core.autocrlf=false", "add", "--renormalize", "Chummer/frmCreate.Designer.cs");
+    }
+    repo.run("commit", "-q", "-m", `the designer file is ${change}`);
+    const result = integrate(repo.git, repo.worktrees, repo.request([repo.item("d-1", fix)]));
+    deepStrictEqual(result.items.map((item) => [item.status, item.reason]), [["merged", null]], change);
+    equal(execFileSync("git", ["-C", repo.root, "cat-file", "blob", "main:Core/XmlManager.cs"], { encoding: "utf8" }), "xml fixed\n", change);
+    equal(repo.run("diff", "--name-only", "main~1", "main"), "Core/XmlManager.cs", change);
+  }
+});
+
+test("a converted fix that conflicts leaves its branch at the fix commit", () => {
+  const repo = repositoryOnMain();
+  repo.run("config", "core.autocrlf", "true");
+  const source = repo.commitOn(repo.start, "Source captured by thread wf-1", { "Chummer/frmCreate.cs": "create\r\n" });
+  const fix = repo.commitOn(source, "Fix d-1", { "Chummer/frmCreate.cs": "create fixed\r\n" });
+  write(repo.root, "Chummer/frmCreate.cs", "create changed on main\n");
+  repo.run("commit", "-q", "-am", "main changed the same line");
+  const result = integrate(repo.git, repo.worktrees, repo.request([repo.item("d-1", fix)]));
+  deepStrictEqual(result.items.map((item) => [item.status, item.files]), [["conflict", ["Chummer/frmCreate.cs"]]]);
+  equal(repo.run("rev-parse", "workflow/wf-1/fix/d-1"), fix);
+  equal(repo.worktrees.list().length, 1);
+});
+
+test("replayed files are named literally, staged whatever core.safecrlf says, and keep the fix's file modes", () => {
+  const repo = repositoryOnMain();
+  write(repo.root, "Core/ab.cs", "ab\n");
+  write(repo.root, "Core/run.sh", "run\n");
+  repo.run("add", "Core");
+  repo.run("commit", "-q", "-m", "more files");
+  repo.run("config", "core.autocrlf", "true");
+  repo.run("config", "core.safecrlf", "true");
+  repo.run("config", "core.filemode", "false");
+  const base = repo.run("rev-parse", "main");
+  // A fix that adds a file whose name is also a pattern matching another file, leaves one with mixed line endings, which
+  // `core.safecrlf` would refuse to stage, and makes a file it changes executable.
+  const folder = join(scratch(), "fix");
+  repo.worktrees.add(folder, "workflow/wf-1/attempt", base);
+  write(folder, "Core/a[b].cs", "bracket\r\n");
+  write(folder, "Chummer/frmCreate.cs", "create\r\nfixed\n");
+  write(folder, "Core/run.sh", "run fixed\r\n");
+  repo.worktrees.stage(folder);
+  execFileSync("git", ["-C", folder, "update-index", "--chmod=+x", "Core/run.sh"]);
+  const fix = repo.worktrees.commitStaged(folder, "Fix d-1\n");
+  repo.worktrees.remove(folder);
+  const result = integrate(repo.git, repo.worktrees, repo.request([repo.item("d-1", fix)]));
+  deepStrictEqual(result.items.map((item) => [item.status, item.reason]), [["merged", null]]);
+  deepStrictEqual(repo.run("diff", "--name-status", base, "main").split("\n"), ["M\tChummer/frmCreate.cs", "A\tCore/a[b].cs", "M\tCore/run.sh"]);
+  equal(repo.run("ls-tree", "main", "Core/run.sh").split(" ")[0], "100755");
+  equal(execFileSync("git", ["-C", repo.root, "cat-file", "blob", "main:Chummer/frmCreate.cs"], { encoding: "utf8" }), "create\nfixed\n");
+  // The executable file is converted like the others.
+  equal(execFileSync("git", ["-C", repo.root, "cat-file", "blob", "main:Core/run.sh"], { encoding: "utf8" }), "run fixed\n");
+});
+
+test("a temporary folder that cannot be removed is named and keeps neither the merge worktree nor the result", () => {
+  const repo = repositoryOnMain();
+  const fix = repo.commitOn(repo.start, "Fix d-1", { "Chummer/frmCreate.cs": "create fixed\n" });
+  const folder = scratch("workflow-stuck-");
+  const lines: string[] = [];
+  const request = repo.request([repo.item("d-1", fix)]);
+  const result = integrate(repo.git, repo.worktrees, request, {
+    log: (line) => lines.push(line),
+    createScratchFolder: () => ({ path: folder, remove: () => { throw new Error("the folder is in use"); } }),
+  });
+  equal(result.items[0]!.status, "merged");
+  equal(repo.run("rev-parse", "main"), result.after);
+  equal(repo.worktrees.list().length, 1);
+  deepStrictEqual(lines, [`The scratch copy ${folder} could not be removed: the folder is in use`]);
 });

@@ -1,6 +1,6 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { createScratchFolder, removalFailure, type ScratchFolder } from "../host/scratch-folder.js";
 import { SetupError } from "../host/setup-error.js";
 import { GitCommandError, type BranchGit } from "./branch-git.js";
 import { sourceSubjectPrefix } from "./thread-source.js";
@@ -52,6 +52,13 @@ export type IntegrationRequest = {
   readonly integrationBranch: string;
 };
 
+/** What the merges take from their host besides git. */
+export type IntegrationHost = {
+  /** Where a temporary folder that could not be removed is named; standard error by default. */
+  readonly log?: (line: string) => void;
+  readonly createScratchFolder?: typeof createScratchFolder;
+};
+
 /** The values of a trailer on the commits `tip` reaches, each with the newest commit that carries it. */
 function reachableTrailers(git: BranchGit, tip: string, key: string): Map<string, string> {
   const found = new Map<string, string>();
@@ -67,53 +74,74 @@ function reachableTrailers(git: BranchGit, tip: string, key: string): Map<string
 }
 
 /**
- * The trees of commits as a person's own `git add` on `reference` would have staged their files: with the machine's and
- * the repository's line-ending settings, the attributes of `reference` and its index entries. A thread's commits hold the
- * bytes of the checkout the candidate was built from, and a clean checkout may hold other bytes than the branch's blobs
- * (CRLF for LF with `core.autocrlf=true`). Only the files a commit holds otherwise than `reference` are staged again;
- * without any conversion a commit's tree stays as it is.
+ * The trees of commits as a person's own `git add` on a reference commit would have staged their files: with the machine's
+ * and the repository's line-ending settings, the attributes of the reference and its index entries. The reference is the
+ * branch's tip unless another is named. A thread's commits hold the bytes of the checkout the candidate was built from,
+ * and a clean checkout may hold other bytes than the repository's blobs (CRLF for LF with `core.autocrlf=true`). Only the
+ * files a commit holds otherwise than the reference are staged again; without any conversion a commit's tree stays as it
+ * is. A commit's file modes are kept.
  */
 class Normalizer {
   private readonly trees = new Map<string, string>();
-  private folder: string | null = null;
+  private scratch: ScratchFolder | null = null;
   private count = 0;
 
-  constructor(private readonly git: BranchGit, private readonly reference: string) {}
+  constructor(private readonly git: BranchGit, private readonly branchTip: string, private readonly createFolder: typeof createScratchFolder) {}
 
-  tree(commit: string): string {
-    const known = this.trees.get(commit);
+  tree(commit: string, reference: string = this.branchTip): string {
+    const key = `${reference} ${commit}`;
+    const known = this.trees.get(key);
     if (known !== undefined) return known;
     const removed: string[] = [];
     const special: string[] = [];
     const files: string[] = [];
-    const fields = this.git(["diff-tree", "-r", "-z", "--no-renames", "--no-commit-id", this.reference, commit]).split("\0").filter((field) => field.length > 0);
+    // The files whose mode is, or was, executable: their mode in the commit, by path.
+    const modes = new Map<string, string>();
+    const fields = this.git(["diff-tree", "-r", "-z", "--no-renames", "--no-commit-id", reference, commit]).split("\0").filter((field) => field.length > 0);
     for (let index = 0; index + 1 < fields.length; index += 2) {
       // `:<mode> <mode> <blob> <blob> <status>` then the path.
-      const [, mode, , blob] = fields[index]!.slice(1).split(" ");
+      const [referenceMode, mode, , blob] = fields[index]!.slice(1).split(" ");
       const path = fields[index + 1]!;
       if (mode === "000000") removed.push(path);
-      else if (mode === "100644" || mode === "100755") files.push(path);
-      else special.push(`${mode} ${blob}\t${path}`);
+      else if (mode === "100644" || mode === "100755") {
+        files.push(path);
+        if (mode === "100755" || referenceMode === "100755") modes.set(path, mode);
+      } else special.push(`${mode} ${blob}\t${path}`);
     }
     let tree = this.git(["rev-parse", `${commit}^{tree}`]).trim();
     if (files.length > 0) {
-      this.folder ??= mkdtempSync(join(tmpdir(), "workflow-normalize-"));
+      this.scratch ??= this.createFolder("workflow-normalize-");
       const count = ++this.count;
-      const staged = join(this.folder, `files-${count}`);
+      const staged = join(this.scratch.path, `files-${count}`);
       mkdirSync(staged);
-      const env = { GIT_INDEX_FILE: join(this.folder, `index-${count}`) };
+      const env = { GIT_INDEX_FILE: join(this.scratch.path, `index-${count}`) };
       // The commit's bytes as they are, then staged on the reference's index as the person's checkout would stage them.
       this.git(["read-tree", commit], { env });
       this.git(["checkout-index", "--force", "-z", "--stdin", `--prefix=${staged.replace(/\\/g, "/")}/`], { env, input: files.join("\0") });
-      this.git(["read-tree", this.reference], { env });
+      this.git(["read-tree", reference], { env });
       if (removed.length > 0) this.git(["update-index", "-z", "--force-remove", "--stdin"], { env, input: removed.join("\0") });
       if (special.length > 0) this.git(["update-index", "-z", "--index-info"], { env, input: special.join("\0") });
-      this.git([`--work-tree=${staged}`, "add", "--force", "--pathspec-from-file=-", "--pathspec-file-nul"],
-        { cwd: staged, env, input: files.join("\0"), userSettings: true, attributeSource: this.reference });
+      // The paths are file names, not patterns; and a conversion `core.safecrlf` would refuse stages the same bytes.
+      this.git(["--literal-pathspecs", "-c", "core.safecrlf=false", `--work-tree=${staged}`, "add", "--force", "--pathspec-from-file=-", "--pathspec-file-nul"],
+        { cwd: staged, env, input: files.join("\0"), userSettings: true, attributeSource: reference });
+      if (modes.size > 0) this.keepModes(modes, env);
       tree = this.git(["write-tree"], { env }).trim();
     }
-    this.trees.set(commit, tree);
+    this.trees.set(key, tree);
     return tree;
+  }
+
+  /**
+   * Gives the staged entries their commit's mode: `add` keeps the index's mode or takes the file system's. The entries
+   * are rewritten by blob, so no file is read, and so converted, again.
+   */
+  private keepModes(modes: ReadonlyMap<string, string>, env: Record<string, string>): void {
+    const entries = this.git(["--literal-pathspecs", "ls-files", "--stage", "-z", "--", ...modes.keys()], { env }).split("\0").filter((entry) => entry.length > 0)
+      .map((entry) => {
+        const path = entry.slice(entry.indexOf("\t") + 1);
+        return `${modes.get(path)!} ${entry.split(" ")[1]!}\t${path}`;
+      });
+    this.git(["update-index", "-z", "--index-info"], { env, input: entries.join("\0") });
   }
 
   /** `commit` on `parent`, or when either one's tree converts, commits of the converted trees with `commit`'s message and author. */
@@ -122,7 +150,7 @@ class Normalizer {
     const tree = this.tree(commit);
     const own = (of: string) => this.git(["rev-parse", `${of}^{tree}`]).trim();
     if (parentTree === own(parent) && tree === own(commit)) return { commit, parent };
-    const convertedParent = this.git(["commit-tree", parentTree, "-p", parent, "-F", "-"], { input: `Convert ${parent} as ${this.reference} stages it\n` }).trim();
+    const convertedParent = this.git(["commit-tree", parentTree, "-p", parent, "-F", "-"], { input: `Convert ${parent} as ${this.branchTip} stages it\n` }).trim();
     const [name, email, date] = this.git(["log", "-1", "--format=%an%x00%ae%x00%aI", commit]).trim().split("\0");
     const converted = this.git(["commit-tree", tree, "-p", convertedParent, "-F", "-"], {
       input: this.git(["log", "-1", "--format=%B", commit]), env: { GIT_AUTHOR_NAME: name!, GIT_AUTHOR_EMAIL: email!, GIT_AUTHOR_DATE: date! },
@@ -130,9 +158,11 @@ class Normalizer {
     return { commit: converted, parent: convertedParent };
   }
 
-  dispose(): void {
-    if (this.folder !== null) rmSync(this.folder, { recursive: true, force: true });
-    this.folder = null;
+  /** Removes the temporary folder; the error naming it when it stays. */
+  dispose(): SetupError | null {
+    const scratch = this.scratch;
+    this.scratch = null;
+    return scratch === null ? null : removalFailure(scratch);
   }
 }
 
@@ -143,12 +173,14 @@ function differing(git: BranchGit, from: string, to: string): string[] {
 
 /**
  * The files the thread's source commit changed on its parent when it captured working-tree edits, as the person's own
- * commit would hold them, so a file the checkout held unchanged is no edit; none for a commit of the repository's own.
+ * `git add` on that parent would hold them, whatever the branch gained since: a file the checkout held unchanged is no
+ * edit. None for a commit of the repository's own.
  */
 function sourceEdits(git: BranchGit, normalized: Normalizer, source: string): string[] {
   const subject = git(["log", "-1", "--format=%s", source]).trim();
   if (!subject.startsWith(sourceSubjectPrefix)) return [];
-  return differing(git, `${source}^`, normalized.tree(source));
+  const parent = git(["rev-parse", `${source}^`]).trim();
+  return differing(git, parent, normalized.tree(source, parent));
 }
 
 /**
@@ -173,9 +205,10 @@ function message(item: MergeItem): string[] {
  * merged. An item whose trailer the branch already reaches was merged before (a resumed merge) and is not merged again.
  * The merged tip is kept on the integration branch, then the branch is advanced to it: by a fast-forward of the worktree
  * that has it checked out, or by a compare-and-swap ref update. A branch that moved meanwhile, or a fast-forward git
- * refuses, is a setup error naming the integration branch.
+ * refuses, is a setup error naming the integration branch. An item's branch only ever holds its commit or the rebased one.
  */
-export function integrate(git: BranchGit, worktrees: Worktrees, request: IntegrationRequest): Integration {
+export function integrate(git: BranchGit, worktrees: Worktrees, request: IntegrationRequest, host: IntegrationHost = {}): Integration {
+  const log = host.log ?? ((line: string) => void process.stderr.write(`${line}\n`));
   const ref = `refs/heads/${request.branch}`;
   const before = worktrees.resolve(ref);
   if (before === null) throw new SetupError(`The branch ${request.branch} does not exist, so nothing can be merged into it.`);
@@ -192,7 +225,7 @@ export function integrate(git: BranchGit, worktrees: Worktrees, request: Integra
   // A resumed merge checks it again, against the state its last merged fix was verified on, since that fix may have changed an edited file.
   const lastMerged = request.items.map((item) => mergedBefore(item) !== null).lastIndexOf(true);
   // The thread's commits are compared and replayed as the branch's own commits would hold their files.
-  const normalized = new Normalizer(git, before);
+  const normalized = new Normalizer(git, before, host.createScratchFolder ?? createScratchFolder);
   const inWorktree = (args: readonly string[]) => git(args, { worktree: request.worktree });
   try {
     const unmergedEdits = request.items.every((item) => mergedBefore(item) !== null)
@@ -218,7 +251,9 @@ export function integrate(git: BranchGit, worktrees: Worktrees, request: Integra
       }
       const parent = worktrees.parent(item.commit);
       const replayed = normalized.pair(item.commit, parent);
-      inWorktree(["checkout", "--quiet", "-B", item.branch, replayed.commit]);
+      // The rebase runs detached: the item's branch keeps its commit unless the rebase succeeds, never a converted one.
+      inWorktree(["checkout", "--quiet", "-B", item.branch, item.commit]);
+      inWorktree(["checkout", "--quiet", "--detach", replayed.commit]);
       try {
         // Pinned against the user's configuration: no other branch that points at the commit may move with it.
         inWorktree(["rebase", "--quiet", "--no-autosquash", "--no-update-refs", "--onto", tip, replayed.parent]);
@@ -234,19 +269,18 @@ export function integrate(git: BranchGit, worktrees: Worktrees, request: Integra
         continue;
       }
       const rebased = worktrees.head(request.worktree);
-      inWorktree(["checkout", "--quiet", "--detach", tip]);
       if (rebased === tip) {
         // The replay was dropped: the branch has the change. The fix still gets a merge commit of its own with the
         // branch's tree, so that the trailer marks the merge. Its second parent is the fix commit, or the commit the
-        // fix was made on when the branch is at the fix commit itself (a merge needs two parents that differ). The
-        // fix's branch goes back to the fix commit, which the rebase moved.
-        git(["update-ref", "-m", `workflow: keep ${item.commit} on ${item.branch}`, `refs/heads/${item.branch}`, item.commit, rebased]);
+        // fix was made on when the branch is at the fix commit itself (a merge needs two parents that differ).
         const recorded = inWorktree(["commit-tree", `${tip}^{tree}`, "-p", tip, "-p", item.commit === tip ? parent : item.commit, ...message(item)]).trim();
         inWorktree(["checkout", "--quiet", "--detach", recorded]);
         tip = recorded;
         items.push({ name: item.name, status: "merged", branch: item.branch, mergeCommit: recorded, reason: `${request.branch} has the change already; the merge commit records the fix without changing the tree`, files: [] });
         continue;
       }
+      inWorktree(["checkout", "--quiet", "-B", item.branch, rebased]);
+      inWorktree(["checkout", "--quiet", "--detach", tip]);
       inWorktree(["merge", "--quiet", "--no-ff", "--no-edit", ...message(item), item.branch]);
       tip = worktrees.head(request.worktree);
       // A commit hook may have rewritten the message: without its trailer a repeated merge would not find this one.
@@ -256,8 +290,13 @@ export function integrate(git: BranchGit, worktrees: Worktrees, request: Integra
       items.push({ name: item.name, status: "merged", branch: item.branch, mergeCommit: tip, reason: null, files: [] });
     }
   } finally {
-    normalized.dispose();
-    worktrees.remove(request.worktree);
+    // The worktree first: a temporary folder that stays must not keep it registered, nor replace the result or the error.
+    try {
+      worktrees.remove(request.worktree);
+    } finally {
+      const leftover = normalized.dispose();
+      if (leftover !== null) log(leftover.message);
+    }
   }
   if (tip === before) return { branch: request.branch, before, after: before, integrationBranch: null, items };
   git(["update-ref", "-m", `workflow: merges into ${request.branch}`, `refs/heads/${request.integrationBranch}`, tip]);
