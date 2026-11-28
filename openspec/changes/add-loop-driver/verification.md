@@ -115,3 +115,32 @@ No live run: the evidence the task names is fixture-tested over fake agents, fak
 | A paused lane and the checks before captures | `loop-lane-pause.test.ts`: a paused lane is still asked for its identity and still runs a command that names it without taking its desktop, as the environment reading of a capture step does. |
 | A graph run without a loop | `loop-control.test.ts`: a pausable node of a graph run without a loop's gate never pauses. |
 | A graph invoked by another graph's node | `loop-control.test.ts`: a graph invoked inside another graph's node keeps its own checkpointer and thread (the caller's checkpointer holds nothing of it), its pause interrupts only its own invocation, and the calling node waits and resumes it. Without that, LangGraph runs such a graph as a subgraph of the calling node, with its checkpoints in the caller's checkpointer and its interrupts ending the caller's node; workflow threads a loop runs, their discovery threads and tunings are invoked as graphs of their own. `thread-discovery.test.ts`: a workflow thread a loop runs gives its discovery thread the loop's gate, whose pauses are recorded as the workflow thread's. |
+
+## Task 4.3: checkpoint databases for readers
+
+| Command | Result |
+| --- | --- |
+| `npm run workflow:typecheck` | Passed (exit 0) on the final source. |
+| `npm run workflow:test`, run 1 | Passed with every checkpoint database opened through `openCheckpointSaver`: 682 tests, 682 passed, 0 failed, 0 skipped (exit 0). |
+| `npm run workflow:test`, run 2 | Failed after the review changes (a 10 s busy timeout, a setup error for a database that cannot be put in WAL mode, the lock test without a timing bound, the tuning and thread-lookup tests opening their savers through the helper): 682 tests, 681 passed, 1 failed (exit 1). `not ok 273 - a running owner is waited for and announced once` (`host.test.ts:58`, `failureType: 'testCodeFailure'`): `Expected values to be strictly equal: 0 !== 1` (`expected: 1`, `actual: 0`): no `Waiting` line had been printed when the test looked, 60 ms after it started waiting for a desktop lane lock. The test is in a file this task does not touch. Run alone once afterwards (`node --import tsx --test --test-name-pattern="a running owner is waited for and announced once" workflow/tests/host.test.ts`), it passed (1 passed, 0 failed, exit 0). |
+| `npm run workflow:test`, run 3 | Passed on the same source as run 2: 682 tests, 682 passed, 0 failed, 0 skipped (exit 0). |
+| `npm run workflow:test`, run 4 | Passed on the final source, with the test of the setup error: 683 tests, 683 passed, 0 failed, 0 skipped (exit 0). |
+| `node --import tsx --test workflow/tests/checkpoint-database.test.ts` with `openCheckpointSaver` changed to return `SqliteSaver.fromConnString(path)`, then restored | Run before the test of the setup error was added: 3 tests, 2 passed, 1 failed (exit 1). `not ok 1 - a checkpoint database is in WAL mode with a busy timeout` (`expected: 'wal'`, `actual: 'delete'`). The waiting writer and the concurrent reader passed. |
+| The test of the setup error with, in turn, the close removed and a plain `Error` thrown, then restored | Failed both times (exit 1). |
+| `npm run openspec:validate` | Passed strict validation: 20 passed, 0 failed. |
+| SHA-256 of `bin/ChummerGenSR4.exe` | `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`; the executable was not built, launched or touched. |
+
+No live run: the task changes how the checkpoint databases are opened, which the tests show on real SQLite files; no capture depends on it.
+
+A checkpoint database opened with `SqliteSaver.fromConnString` already switched to WAL at the saver's first operation and had better-sqlite3's default busy timeout of 5 s. What `openCheckpointSaver` changes is that the database is in WAL mode as soon as it is opened, that the busy timeout is set to 10 s, and that a database that cannot be put in WAL mode is a setup error. So the waiting writer and the concurrent reader below show the behaviour a reader relies on, and do not tell the two ways of opening apart.
+
+| Evidence named by the task | Source check and tests (`checkpoint-database.test.ts`) |
+| --- | --- |
+| Every checkpoint database opened by `openCheckpointSaver` | Shown by a search of the source, not by a test: the loop (`openLoopCheckpointer`), workflow and discovery (`compose-workflow.ts`, `discover-main.ts`) and tuning (`compose-eval-context.ts`) checkpoint databases are opened by it, and `workflow/` holds no `SqliteSaver.fromConnString` and no other `new SqliteSaver`. No test fails if one of these places opens its database another way. |
+| WAL mode with a busy timeout | A database `openCheckpointSaver` opens is in WAL mode with the busy timeout set before any saver operation, and a plain connection opened later finds it in WAL mode. |
+| A database that cannot be put in WAL mode | A temporary database, which SQLite keeps in its rollback journal mode, is a setup error that names the mode, and its connection is closed. |
+| A reader through a second saver while a graph writes | A reader in a process of its own opens the database through a second saver before the graph starts and reads the thread's latest checkpoint and its whole history until it sees the last step; halfway the graph waits until the reader has seen one of its checkpoints, so reads overlap writes. The reader ends with exit 0 and no error, its counts never go back and the history it lists never shrinks, it saw a checkpoint written while the graph ran and then the final one. |
+| Every write committed | After the 120-step graph ends, a fresh saver lists every checkpoint of the thread: the input's (count 0) and one per step (1 to 120), and the latest holds 120. |
+| A writer that waits | A process holds the write lock with an uncommitted row: a saver reads the database as it was without waiting, and a write waits for the commit and succeeds; with the busy timeout set to 0 this test fails. |
+
+The busy timeout does not cover the switch to WAL itself. In a probe, `journal_mode = WAL` on a database not yet in WAL mode, while another connection held a write transaction, failed with `SQLITE_BUSY` at once; that error is passed on as it is, not as a setup error. On a database already in WAL mode, the same pragma returned at once while another connection held a write transaction.
