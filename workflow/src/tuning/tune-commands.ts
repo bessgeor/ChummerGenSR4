@@ -176,8 +176,8 @@ function tuningGraph(context: EvalContext, guardedBy: string | null): { graph: T
 }
 
 /** Exit status of a finished cycle: 0 activated or no improvement, 1 rejected, 2 failed. */
-function cycleStatus(cycle: Cycle): number {
-  return cycle.outcome === "rejected" ? 1 : cycle.outcome === "failed" ? 2 : 0;
+export function cycleStatus(outcome: Cycle["outcome"]): number {
+  return outcome === "rejected" ? 1 : outcome === "failed" ? 2 : 0;
 }
 
 const cycleCommand: TuneCommand = async (args, context) => {
@@ -215,7 +215,7 @@ const cycleCommand: TuneCommand = async (args, context) => {
   const cycle = await runTuningThread(graph, steps, input, `npm run eval -- tune cycle --resume ${input.tuningId}`, context.signal);
   for (const line of cycleLines(cycle)) context.log(line);
   context.log(`Cycle folder: ${cycleFolder(context.paths.evalsFolder, cycle.cycleId)}`);
-  return cycleStatus(cycle);
+  return cycleStatus(cycle.outcome);
 };
 
 /** The cycle's runs, comparisons and outcome, with n and the 95% interval of every difference. */
@@ -302,7 +302,7 @@ async function tuneNow(context: EvalContext, trigger: Exclude<AutoTuningTrigger,
   context.log(`Cycle folder: ${cycleFolder(evalsFolder, cycle.cycleId)}`);
   if (ended.branch !== null) context.log(`Automatic tuning ${input.tuningId}: branch ${ended.branch}, commit ${ended.commit ?? "none"}, merge ${ended.merge ?? "none"}.`);
   context.log(`Automatic tuning ${input.tuningId}: ${cycle.outcome}; dataset ${cycle.options.dataset}; state ${autoTuningPath(evalsFolder)}`);
-  return { kind: "tuned", tuningId: input.tuningId, cycleId: cycle.cycleId, outcome: cycle.outcome, status: cycleStatus(cycle) };
+  return { kind: "tuned", tuningId: input.tuningId, cycleId: cycle.cycleId, outcome: cycle.outcome, status: cycleStatus(cycle.outcome) };
 }
 
 const commands: Readonly<Record<string, TuneCommand>> = { add, propose, holdout, activate: activateCommand, rollback: rollbackCommand, cycle: cycleCommand, auto };
