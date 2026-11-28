@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
+import { openCheckpointSaver } from "../graph/checkpoint-database.js";
 import { agentRunners } from "../agents/agent-runners.js";
 import { QuotaWaiter } from "../diagnosis/quota-waiter.js";
 import { processGit } from "../diagnosis/source-snapshot.js";
@@ -66,7 +66,7 @@ async function main(): Promise<number> {
   const hostSteps = new HostSteps(paths, host,
     new CaptureStep({ paths, host, store: stepStore, log, now, createScratchFolder, changedInputs }),
     new CompareStep({ paths, host, store: stepStore, log, now, changedInputs }), stepStore, now, createScratchFolder);
-  const checkpointer = SqliteSaver.fromConnString(folders.checkpoints);
+  const checkpointer = openCheckpointSaver(folders.checkpoints);
   const store = new SqliteStore(paths.store);
   try {
     const runner = composeDiscovery({

@@ -2,7 +2,8 @@
 import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
+import type { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
+import { openCheckpointSaver } from "../graph/checkpoint-database.js";
 import { agentRunners } from "../agents/agent-runners.js";
 import { resolveAgentSettings } from "../agents/agent-settings.js";
 import { QuotaWaiter } from "../diagnosis/quota-waiter.js";
@@ -36,7 +37,7 @@ export function composeEvalContext(repositoryRoot: string, log: (line: string) =
       if (checkpointer === null) {
         const path = tuningCheckpoints(paths.evalsFolder);
         mkdirSync(dirname(path), { recursive: true });
-        checkpointer = SqliteSaver.fromConnString(path);
+        checkpointer = openCheckpointSaver(path);
       }
       return checkpointer;
     },

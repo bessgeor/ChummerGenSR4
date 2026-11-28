@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import type { BaseCheckpointSaver } from "@langchain/langgraph-checkpoint";
-import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
+import type { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
+import { openCheckpointSaver } from "../graph/checkpoint-database.js";
 import type { ComposedWorkflow } from "../compose-workflow.js";
 import type { EvalContext } from "../evals/eval-context.js";
 import { graphEnded } from "../graph/graph-ended.js";
@@ -20,7 +21,7 @@ import { buildLoopGraph, loopInput, type LoopStateValue, type LoopSteps } from "
 /** The loop's checkpointer, `out/loop/checkpoints.sqlite`. */
 export function openLoopCheckpointer(paths: LoopPaths): SqliteSaver {
   mkdirSync(paths.root, { recursive: true });
-  return SqliteSaver.fromConnString(paths.checkpoints);
+  return openCheckpointSaver(paths.checkpoints);
 }
 
 export type LoopHost = {
