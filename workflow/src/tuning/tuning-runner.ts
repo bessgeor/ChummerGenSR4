@@ -1,5 +1,6 @@
 import type { BaseCheckpointSaver } from "@langchain/langgraph-checkpoint";
 import { join } from "node:path";
+import { graphEnded } from "../graph/graph-ended.js";
 import { invokePausable, type PauseGate } from "../loop/loop-control.js";
 import { SetupError } from "../host/setup-error.js";
 import type { Cycle } from "./cycle.js";
@@ -21,7 +22,7 @@ export function compileTuningGraph(steps: TuningSteps, checkpointer: BaseCheckpo
 export async function tuningThread(graph: TuningGraph, tuningId: string): Promise<"absent" | "unfinished" | "finished"> {
   const snapshot = await graph.getState({ configurable: { thread_id: tuningId } });
   if (snapshot.config.configurable?.["checkpoint_id"] === undefined) return "absent";
-  return snapshot.next.length > 0 ? "unfinished" : "finished";
+  return graphEnded(snapshot) ? "finished" : "unfinished";
 }
 
 /** The conclusion of a thread that finished, or null while it has none: a finished thread is not run again. */

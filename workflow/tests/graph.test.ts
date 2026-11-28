@@ -14,7 +14,7 @@ import { inventoryLines, type InventorySummary } from "../src/inventory/inventor
 import type { WorkflowStateValue } from "../src/graph/workflow-state.js";
 import type { Conclusion, ConcludeInput } from "../src/loop/loop-service.js";
 import type { OutcomeDocument } from "../src/loop/outcome.js";
-import { exitStatus, runWorkflow, type RunDependencies, type RunRequest } from "../src/graph/run-workflow.js";
+import { exitStatus, runWorkflow, threadProgress, type RunDependencies, type RunRequest } from "../src/graph/run-workflow.js";
 import type { Pause } from "../src/loop/loop-control.js";
 import { SetupError } from "../src/host/setup-error.js";
 import type { Arguments, NodeName } from "../src/options/arguments.js";
@@ -277,6 +277,46 @@ test("a finished or unknown thread cannot be resumed", async () => {
   equal(await runWorkflow({ kind: "resume", threadId: "wf-unknown" }, run.dependencies), 3);
   ok(run.lines.some((line) => line.includes("no thread wf-unknown")));
   equal(run.steps.calls.length, calls);
+});
+
+test("a thread's progress is new without a checkpoint, unfinished after a setup error and finished with its run's exit status", async () => {
+  const steps = new FakeSteps();
+  steps.failCapture = "b";
+  steps.captureStatus = { a: 1 };
+  const run = harness(["a", "b"], steps);
+  const given = "wf-20261001T120000Z-progress";
+  const traces = (threadId: string) => [`its folder threads/${threadId}`];
+  deepStrictEqual(await threadProgress(run.dependencies.graph, given, run.dependencies.threadTraces), { kind: "new", traces: [] });
+  deepStrictEqual(await threadProgress(run.dependencies.graph, given, traces), { kind: "new", traces: [`its folder threads/${given}`] });
+  equal(await runWorkflow({ kind: "start", arguments: baseArguments }, run.dependencies, { threadId: given }), 3);
+  deepStrictEqual(await threadProgress(run.dependencies.graph, given, traces), { kind: "unfinished" });
+  steps.failCapture = null;
+  equal(await runWorkflow({ kind: "resume", threadId: given }, run.dependencies), 1);
+  deepStrictEqual(await threadProgress(run.dependencies.graph, given, traces), { kind: "finished", exitStatus: 1 });
+  // The ID is exact: another case is another thread.
+  deepStrictEqual(await threadProgress(run.dependencies.graph, given.toUpperCase(), run.dependencies.threadTraces), { kind: "new", traces: [] });
+});
+
+test("a workflow thread stopped before its input was applied has not started: its progress is new, with its checkpoint among its traces", async () => {
+  const interrupted = new AbortController();
+  /** Interrupts the run just after the checkpoint of its input is saved. */
+  class InterruptedAtItsInput extends MemorySaver {
+    override async put(...args: Parameters<MemorySaver["put"]>): ReturnType<MemorySaver["put"]> {
+      const saved = await super.put(...args);
+      if (args[2].source === "input") interrupted.abort();
+      return saved;
+    }
+  }
+  const given = "wf-20261001T120000Z-input";
+  const run = harness(["a"], new FakeSteps(), new InterruptedAtItsInput(), interrupted.signal);
+  equal(await runWorkflow({ kind: "start", arguments: baseArguments }, run.dependencies, { threadId: given }), 3);
+  const state = await run.dependencies.graph.getState({ configurable: { thread_id: given } });
+  deepStrictEqual([state.config.configurable?.["checkpoint_id"] !== undefined, run.steps.calls], [true, []]);
+  // Its ID holds a checkpoint nothing can resume.
+  const { signal: _interrupted, ...uninterrupted } = run.dependencies;
+  equal(await runWorkflow({ kind: "resume", threadId: given }, uninterrupted), 3);
+  ok(run.lines.includes(`Setup error: There is no thread ${given} to resume.`), run.lines.join("\n"));
+  deepStrictEqual(await threadProgress(run.dependencies.graph, given, run.dependencies.threadTraces), { kind: "new", traces: ["its checkpoint without its input"] });
 });
 
 test("a start given a new thread ID runs its thread under that ID", async () => {

@@ -13,6 +13,7 @@ import { describeCase } from "./case-report.js";
 import { describeDiagnosis, diagnosisStatus } from "./diagnosis-report.js";
 import type { HeadBranch } from "../git/integration.js";
 import { stageIds, widens, type buildWorkflowGraph } from "./workflow-graph.js";
+import { graphEnded } from "./graph-ended.js";
 import type { WorkflowStateValue } from "./workflow-state.js";
 import { invokePausable, type Pause, type PauseGate } from "../loop/loop-control.js";
 
@@ -179,7 +180,7 @@ async function checkResumable(threadId: string, dependencies: RunDependencies): 
   if (snapshot.config.configurable?.["checkpoint_id"] === undefined || values.plan === undefined || values.options === undefined) {
     throw new SetupError(`There is no thread ${threadId} to resume.`);
   }
-  if (snapshot.next.length === 0) {
+  if (graphEnded(snapshot)) {
     throw new SetupError(`Thread ${threadId} already finished; start a new run instead.`);
   }
   requireCertificates(values.options, dependencies);
@@ -196,6 +197,30 @@ async function storedByFlatGraph(threadId: string, dependencies: RunDependencies
   const triggered = Object.keys(tuple.checkpoint.channel_versions).flatMap((channel) => (channel.startsWith("branch:to:") ? [channel.slice("branch:to:".length)] : []));
   const nodes = [...Object.keys(tuple.checkpoint.versions_seen), ...triggered];
   return nodes.some((node) => !node.startsWith("__") && !(stageIds as readonly string[]).includes(node));
+}
+
+/**
+ * Whether a thread has started, and the exit status of one whose graph ran to its end. A thread that has not lists what
+ * uses its ID (a start that stopped early leaves its folder, or the checkpoint of its input): a start under that ID is
+ * refused while any is left.
+ */
+export type ThreadProgress =
+  | { readonly kind: "new"; readonly traces: readonly string[] }
+  | { readonly kind: "unfinished" }
+  | { readonly kind: "finished"; readonly exitStatus: number };
+
+/**
+ * The progress of the thread `threadId` (its exact ID) in the graph's checkpoints: `new` without a checkpoint, or with
+ * only the one of an input that was not applied, which no resume takes; `finished` with the exit status its run gave
+ * when its graph ran to its end, else `unfinished` (a resume continues it).
+ */
+export async function threadProgress(graph: WorkflowGraph, threadId: string, threadTraces: (threadId: string) => readonly string[]): Promise<ThreadProgress> {
+  const snapshot = await graph.getState({ configurable: { thread_id: threadId } });
+  if (snapshot.config.configurable?.["checkpoint_id"] === undefined) return { kind: "new", traces: threadTraces(threadId) };
+  const values = snapshot.values as Partial<WorkflowStateValue>;
+  if (values.plan === undefined) return { kind: "new", traces: ["its checkpoint without its input", ...threadTraces(threadId)] };
+  if (!graphEnded(snapshot)) return { kind: "unfinished" };
+  return { kind: "finished", exitStatus: exitStatus(values as WorkflowStateValue) };
 }
 
 /** Reports a thread whose graph ran to its end; a result that cannot be read is a setup error, and the finished thread has nothing to resume. */

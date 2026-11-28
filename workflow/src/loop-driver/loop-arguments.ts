@@ -1,20 +1,33 @@
 import { SetupError } from "../host/setup-error.js";
 import { parseArguments, type Arguments } from "../options/arguments.js";
+import { checkLoopId } from "./loop-document.js";
 
-/** `npm run loop`: the options every thread is started with, and the most threads the loop runs (null: no limit). */
+/**
+ * `npm run loop`: a start with the options every thread is started with and the most threads the loop runs (null: no
+ * limit), a resume of a loop that stopped, or a stop request for a loop.
+ */
 export type LoopCommand =
   | { readonly kind: "help" }
   | { readonly kind: "start"; readonly options: readonly string[]; readonly arguments: Arguments; readonly maxRuns: number | null }
+  | { readonly kind: "resume"; readonly loopId: string }
+  | { readonly kind: "stop"; readonly loopId: string }
   /** `--pause` or `--unpause` of a loop, or of one of its desktop lanes (`lane`). */
   | { readonly kind: "pause"; readonly loopId: string; readonly paused: boolean; readonly lane: string | null };
 
-/** Options of `npm start` a loop does not take: every thread runs the whole workflow, and the loop starts its threads itself. */
+/** Options of `npm start` a loop does not take: every thread runs the whole workflow. */
 const excluded = new Map([
   ["--only", "every thread of a loop runs the whole workflow"],
-  ["--resume", "a loop starts its threads itself"],
 ]);
 
+/** The options that name a loop and take no other option. */
+const loopOptions = new Map([
+  ["--resume", "a loop keeps the options it was started with"],
+  ["--stop", "a stop request names only its loop"],
+] as const);
+
 export const loopUsage = `Usage: npm run loop -- [options]
+       npm run loop -- --resume <loop>
+       npm run loop -- --stop <loop>
        npm run loop -- --pause <loop> | --unpause <loop> [--lane <lane>]
 
 Runs workflow threads one after another, each started as npm start would start it with these options, and after each
@@ -23,16 +36,22 @@ one merged a fix or admitted a scenario, or the tuning activated a configuration
 out/loop/<loop>/loop.json and checkpointed in out/loop/checkpoints.sqlite.
 
   --max-runs <n>               run at most n threads (default: no limit)
+  --resume <loop>              continue a loop that stopped with a setup error or Ctrl+C, with the options it was
+                               started with: the thread or tuning it was running is resumed, then the loop goes on
+  --stop <loop>                ask a loop to stop: it ends stopped before its next thread or tuning, after the step
+                               that is running; a paused loop once it is unpaused
   --pause <loop>               pause the loop: running jobs and captures finish, and nothing new starts until --unpause
   --unpause <loop>             go on with the paused loop
   --lane <lane>                with --pause or --unpause: pause or unpause only this desktop lane of the profile, which
                                takes no new capture while paused
   --help
-  Every other option is an option of npm start (see npm start -- --help) and is given to every thread; --only and
-  --resume are not taken.
+  Every other option is an option of npm start (see npm start -- --help) and is given to every thread; --only is not
+  taken.
 
-Exit status: 0 converged (a thread and the tuning after it changed nothing) or limit, 2 failed (a thread exited with 2 or a tuning's job failed),
-3 setup error. --pause and --unpause exit with 0 once the control file (out/loop/<loop>/control.json) is written.`;
+Exit status: 0 converged (a thread and the tuning after it changed nothing), limit or stopped (also for --stop), 2 failed
+(a thread exited with 2 or a tuning's job failed), 3 setup error: a loop that started stays running and resumes with
+--resume; a refused --resume or --stop changes nothing. --pause and --unpause exit with 0 once the control file
+(out/loop/<loop>/control.json) is written.`;
 
 function maxRuns(text: string | undefined): number {
   if (text === undefined || text.startsWith("--")) throw new SetupError("Option '--max-runs' needs a value.");
@@ -70,6 +89,13 @@ function parsePause(args: readonly string[]): LoopCommand {
 export function parseLoopArguments(args: readonly string[]): LoopCommand {
   if (args.includes("--help") || args.includes("-h")) return { kind: "help" };
   if (args.some((option) => option === "--pause" || option === "--unpause" || option === "--lane")) return parsePause(args);
+  for (const [option, reason] of loopOptions) {
+    const index = args.indexOf(option);
+    if (index === -1) continue;
+    const loopId = value(args, index + 1, option);
+    if (args.length !== 2) throw new SetupError(`${option} takes no other options: ${reason}.`);
+    return { kind: option === "--resume" ? "resume" : "stop", loopId: checkLoopId(loopId) };
+  }
   const options: string[] = [];
   let runs: number | null = null;
   for (let index = 0; index < args.length; index++) {

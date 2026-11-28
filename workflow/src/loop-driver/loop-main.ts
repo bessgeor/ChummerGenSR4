@@ -7,19 +7,43 @@ import { composeEvalContext } from "../evals/compose-eval-context.js";
 import { setupErrorStatus } from "../graph/run-workflow.js";
 import { interruptSignal } from "../host/interrupt-signal.js";
 import { SetupError } from "../host/setup-error.js";
-import { loadProfile } from "../options/profile.js";
+import { loadProfile, type Profile } from "../options/profile.js";
 import { workflowPaths } from "../paths.js";
 import { loopUsage, parseLoopArguments } from "./loop-arguments.js";
 import { loopPaths, newLoopId } from "./loop-document.js";
 import { pauseLoop } from "./pause-loop.js";
 import { laneDefinitions } from "../lanes/lane-settings.js";
-import { hostLoopSteps, openLoopCheckpointer, runLoop } from "./run-loop.js";
+import { hostLoopSteps, openLoopCheckpointer, runLoop, stopLoop, type LoopComposition } from "./run-loop.js";
 
 // An unexpected error must not end with Node's status 1.
 process.on("uncaughtException", (error) => {
   console.error(`npm run loop failed: ${error.stack ?? String(error)}`);
   process.exit(setupErrorStatus);
 });
+
+/** Composes the workflow, the loop's checkpointer and the evaluation context of the tuning; what a failure left open is closed. */
+function composeLoop(repositoryRoot: string, profile: Profile, loopId: string, now: () => Date, log: (line: string) => void,
+  signal: AbortSignal): LoopComposition {
+  const paths = loopPaths(repositoryRoot);
+  const opened: (() => void)[] = [];
+  const close = () => {
+    for (const closing of opened.splice(0).reverse()) closing();
+  };
+  try {
+    // The loop's control file pauses the desktop lanes of the composed workflow.
+    const workflow = composeWorkflow(repositoryRoot, profile, log, signal, { loopFolder: paths.folder(loopId) });
+    opened.push(workflow.close);
+    const checkpointer = openLoopCheckpointer(paths);
+    opened.push(() => checkpointer.db.close());
+    const evals = composeEvalContext(repositoryRoot, log, signal);
+    opened.push(evals.close);
+    const threadFolder = workflowPaths(repositoryRoot).threadFolder;
+    return { checkpointer, steps: hostLoopSteps(loopId, { paths, workflow, threadFolder, evalContext: evals.context, now, log }), close };
+  } catch (error) {
+    close();
+    throw error;
+  }
+}
 
 async function main(): Promise<number> {
   const log = (line: string) => console.log(line);
@@ -32,6 +56,7 @@ async function main(): Promise<number> {
       log(loopUsage);
       return 0;
     }
+    if (command.kind === "stop") return stopLoop(command.loopId, loopPaths(repositoryRoot), () => new Date(), log);
     profile = loadProfile(process.env);
     if (command.kind === "pause") return pauseLoop(command, { paths: loopPaths(repositoryRoot), lanes: laneDefinitions(profile.lanes), now: () => new Date(), log });
   } catch (error) {
@@ -42,29 +67,9 @@ async function main(): Promise<number> {
 
   const now = () => new Date();
   const signal = interruptSignal(log);
-  const paths = loopPaths(repositoryRoot);
-  // The loop's ID comes first: its control file pauses the desktop lanes of the composed workflow.
-  const loopId = newLoopId(now());
-  const workflow = composeWorkflow(repositoryRoot, profile, log, signal, { loopFolder: paths.folder(loopId) });
-  try {
-    const checkpointer = openLoopCheckpointer(paths);
-    try {
-      const evals = composeEvalContext(repositoryRoot, log, signal);
-      try {
-        const threadFolder = workflowPaths(repositoryRoot).threadFolder;
-        return await runLoop(command, {
-          paths, checkpointer, now, log, signal, newLoopId: () => loopId,
-          steps: (loopId) => hostLoopSteps(loopId, { paths, workflow, threadFolder, evalContext: evals.context, now, log }),
-        });
-      } finally {
-        evals.close();
-      }
-    } finally {
-      checkpointer.db.close();
-    }
-  } finally {
-    workflow.close();
-  }
+  return runLoop(command, {
+    paths: loopPaths(repositoryRoot), compose: (loopId) => composeLoop(repositoryRoot, profile, loopId, now, log, signal), now, log, signal, newLoopId,
+  });
 }
 
 process.exitCode = await main().catch((error: unknown) => {
