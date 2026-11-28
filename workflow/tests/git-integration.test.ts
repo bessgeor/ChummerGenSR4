@@ -301,3 +301,52 @@ test("a fix the branch holds in its history already still gets a merge commit wi
   equal(other.run("rev-parse", `${commit}^{tree}`), other.run("rev-parse", `${moved}^{tree}`));
   equal(other.run("rev-parse", "main"), commit);
 });
+
+test("a source that captured a checkout git converts holds no edit, and its fixes are merged as the branch's own commits hold their files", () => {
+  const repo = repositoryOnMain();
+  const blob = (revision: string) => execFileSync("git", ["-C", repo.root, "cat-file", "blob", revision], { encoding: "utf8" });
+  // A file the branch holds with CRLF, then the person's checkout converts line endings.
+  write(repo.root, "Chummer/frmCreate.Designer.cs", "designer\r\n");
+  repo.run("add", "Chummer/frmCreate.Designer.cs");
+  repo.run("commit", "-q", "-m", "designer");
+  repo.run("config", "core.autocrlf", "true");
+  const base = repo.run("rev-parse", "main");
+  // The clean checkout's bytes, as the thread's source commit captures them, and two fixes made on them.
+  const source = repo.commitOn(base, "Source captured by thread wf-1", { "Chummer/frmCreate.cs": "create\r\n", "Core/XmlManager.cs": "xml\r\n" });
+  equal(blob(`${source}:Core/XmlManager.cs`), "xml\r\n");
+  const first = repo.commitOn(source, "Fix d-1", { "Chummer/frmCreate.cs": "create\r\nfixed\r\n" });
+  const second = repo.commitOn(first, "Fix d-2", { "Chummer/frmCreate.Designer.cs": "designer\r\nfixed\r\n", "Chummer/added.cs": "added\r\n" });
+  const result = integrate(repo.git, repo.worktrees, repo.request([repo.item("d-1", first), repo.item("d-2", second)]));
+  deepStrictEqual(result.items.map((item) => [item.name, item.status, item.reason]), [["d-1", "merged", null], ["d-2", "merged", null]]);
+  equal(repo.run("rev-parse", "main"), result.after);
+  // Each fix changes only what it fixed, in the form the branch holds the file: LF where the branch has LF, CRLF where it has CRLF.
+  deepStrictEqual(repo.run("diff", "--name-only", base, "main").split("\n"), ["Chummer/added.cs", "Chummer/frmCreate.Designer.cs", "Chummer/frmCreate.cs"]);
+  equal(blob("main:Chummer/frmCreate.cs"), "create\nfixed\n");
+  equal(blob("main:Chummer/frmCreate.Designer.cs"), "designer\r\nfixed\r\n");
+  equal(blob("main:Chummer/added.cs"), "added\n");
+  equal(blob("main:Core/XmlManager.cs"), "xml\n");
+  equal(repo.run("log", "-1", "--format=%an %s", "workflow/wf-1/fix/d-1"), "Test Fix d-1");
+  // The checkout gets the bytes the fixes were verified with, and nothing is left uncommitted or behind.
+  equal(readFileSync(join(repo.root, "Chummer/frmCreate.cs"), "utf8"), "create\r\nfixed\r\n");
+  equal(readFileSync(join(repo.root, "Chummer/frmCreate.Designer.cs"), "utf8"), "designer\r\nfixed\r\n");
+  equal(repo.run("status", "--porcelain=v1"), "");
+  equal(repo.worktrees.list().length, 1);
+});
+
+test("a converted source's real edit still keeps its fixes from a branch that lacks it", () => {
+  const repo = repositoryOnMain();
+  repo.run("config", "core.autocrlf", "true");
+  const source = repo.commitOn(repo.start, "Source captured by thread wf-1", { "Chummer/frmCreate.cs": "create\r\n", "Core/XmlManager.cs": "xml edited\r\n" });
+  const fix = repo.commitOn(source, "Fix d-1", { "Chummer/frmCreate.cs": "create\r\nfixed\r\n" });
+  const blocked = integrate(repo.git, repo.worktrees, repo.request([repo.item("d-1", fix)]));
+  deepStrictEqual(blocked.items.map((item) => [item.status, item.reason]), [["blocked", "the thread's source held edits of Core/XmlManager.cs that main lacks; commit them first (the fixes were verified on top of them)"]]);
+  equal(repo.run("rev-parse", "main"), repo.start);
+
+  // The person commits the edit from their checkout: the fix is merged.
+  write(repo.root, "Core/XmlManager.cs", "xml edited\r\n");
+  repo.run("commit", "-q", "-am", "the edit");
+  const merged = integrate(repo.git, repo.worktrees, repo.request([repo.item("d-1", fix)]));
+  deepStrictEqual(merged.items.map((item) => item.status), ["merged"]);
+  equal(execFileSync("git", ["-C", repo.root, "cat-file", "blob", "main:Chummer/frmCreate.cs"], { encoding: "utf8" }), "create\nfixed\n");
+  equal(repo.run("status", "--porcelain=v1"), "");
+});

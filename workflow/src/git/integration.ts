@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { SetupError } from "../host/setup-error.js";
 import { GitCommandError, type BranchGit } from "./branch-git.js";
 import { sourceSubjectPrefix } from "./thread-source.js";
@@ -63,23 +66,100 @@ function reachableTrailers(git: BranchGit, tip: string, key: string): Map<string
   return found;
 }
 
-/** The files the thread's source commit changed on its parent when it captured working-tree edits; none for a commit of the repository's own. */
-function sourceEdits(git: BranchGit, source: string): string[] {
+/**
+ * The trees of commits as a person's own `git add` on `reference` would have staged their files: with the machine's and
+ * the repository's line-ending settings, the attributes of `reference` and its index entries. A thread's commits hold the
+ * bytes of the checkout the candidate was built from, and a clean checkout may hold other bytes than the branch's blobs
+ * (CRLF for LF with `core.autocrlf=true`). Only the files a commit holds otherwise than `reference` are staged again;
+ * without any conversion a commit's tree stays as it is.
+ */
+class Normalizer {
+  private readonly trees = new Map<string, string>();
+  private folder: string | null = null;
+  private count = 0;
+
+  constructor(private readonly git: BranchGit, private readonly reference: string) {}
+
+  tree(commit: string): string {
+    const known = this.trees.get(commit);
+    if (known !== undefined) return known;
+    const removed: string[] = [];
+    const special: string[] = [];
+    const files: string[] = [];
+    const fields = this.git(["diff-tree", "-r", "-z", "--no-renames", "--no-commit-id", this.reference, commit]).split("\0").filter((field) => field.length > 0);
+    for (let index = 0; index + 1 < fields.length; index += 2) {
+      // `:<mode> <mode> <blob> <blob> <status>` then the path.
+      const [, mode, , blob] = fields[index]!.slice(1).split(" ");
+      const path = fields[index + 1]!;
+      if (mode === "000000") removed.push(path);
+      else if (mode === "100644" || mode === "100755") files.push(path);
+      else special.push(`${mode} ${blob}\t${path}`);
+    }
+    let tree = this.git(["rev-parse", `${commit}^{tree}`]).trim();
+    if (files.length > 0) {
+      this.folder ??= mkdtempSync(join(tmpdir(), "workflow-normalize-"));
+      const count = ++this.count;
+      const staged = join(this.folder, `files-${count}`);
+      mkdirSync(staged);
+      const env = { GIT_INDEX_FILE: join(this.folder, `index-${count}`) };
+      // The commit's bytes as they are, then staged on the reference's index as the person's checkout would stage them.
+      this.git(["read-tree", commit], { env });
+      this.git(["checkout-index", "--force", "-z", "--stdin", `--prefix=${staged.replace(/\\/g, "/")}/`], { env, input: files.join("\0") });
+      this.git(["read-tree", this.reference], { env });
+      if (removed.length > 0) this.git(["update-index", "-z", "--force-remove", "--stdin"], { env, input: removed.join("\0") });
+      if (special.length > 0) this.git(["update-index", "-z", "--index-info"], { env, input: special.join("\0") });
+      this.git([`--work-tree=${staged}`, "add", "--force", "--pathspec-from-file=-", "--pathspec-file-nul"],
+        { cwd: staged, env, input: files.join("\0"), userSettings: true, attributeSource: this.reference });
+      tree = this.git(["write-tree"], { env }).trim();
+    }
+    this.trees.set(commit, tree);
+    return tree;
+  }
+
+  /** `commit` on `parent`, or when either one's tree converts, commits of the converted trees with `commit`'s message and author. */
+  pair(commit: string, parent: string): { readonly commit: string; readonly parent: string } {
+    const parentTree = this.tree(parent);
+    const tree = this.tree(commit);
+    const own = (of: string) => this.git(["rev-parse", `${of}^{tree}`]).trim();
+    if (parentTree === own(parent) && tree === own(commit)) return { commit, parent };
+    const convertedParent = this.git(["commit-tree", parentTree, "-p", parent, "-F", "-"], { input: `Convert ${parent} as ${this.reference} stages it\n` }).trim();
+    const [name, email, date] = this.git(["log", "-1", "--format=%an%x00%ae%x00%aI", commit]).trim().split("\0");
+    const converted = this.git(["commit-tree", tree, "-p", convertedParent, "-F", "-"], {
+      input: this.git(["log", "-1", "--format=%B", commit]), env: { GIT_AUTHOR_NAME: name!, GIT_AUTHOR_EMAIL: email!, GIT_AUTHOR_DATE: date! },
+    }).trim();
+    return { commit: converted, parent: convertedParent };
+  }
+
+  dispose(): void {
+    if (this.folder !== null) rmSync(this.folder, { recursive: true, force: true });
+    this.folder = null;
+  }
+}
+
+/** The paths whose entries differ between two trees. */
+function differing(git: BranchGit, from: string, to: string): string[] {
+  return git(["diff-tree", "-r", "-z", "--no-renames", "--name-only", from, to]).split("\0").filter((path) => path.length > 0);
+}
+
+/**
+ * The files the thread's source commit changed on its parent when it captured working-tree edits, as the person's own
+ * commit would hold them, so a file the checkout held unchanged is no edit; none for a commit of the repository's own.
+ */
+function sourceEdits(git: BranchGit, normalized: Normalizer, source: string): string[] {
   const subject = git(["log", "-1", "--format=%s", source]).trim();
   if (!subject.startsWith(sourceSubjectPrefix)) return [];
-  return git(["diff-tree", "-r", "--no-renames", "--name-only", `${source}^`, source]).split(/\r?\n/).filter((path) => path.length > 0);
+  return differing(git, `${source}^`, normalized.tree(source));
 }
 
 /**
  * The files the thread's source commit changed that `tip` holds in another state than `verified` does: the fixes were
  * verified on top of those edits, so `verified` is the source or the last fix merged before.
  */
-function missingEdits(git: BranchGit, source: string, verified: string, tip: string): string[] {
-  return sourceEdits(git, source).filter((path) => {
-    const wanted = git(["ls-tree", verified, "--", path]).trim().split(/\s+/)[2] ?? null;
-    const held = git(["ls-tree", tip, "--", path]).trim().split(/\s+/)[2] ?? null;
-    return wanted !== held;
-  });
+function missingEdits(git: BranchGit, normalized: Normalizer, source: string, verified: string, tip: string): string[] {
+  const edits = sourceEdits(git, normalized, source);
+  if (edits.length === 0) return [];
+  const changed = new Set(differing(git, normalized.tree(verified), tip));
+  return edits.filter((path) => changed.has(path));
 }
 
 function message(item: MergeItem): string[] {
@@ -111,16 +191,18 @@ export function integrate(git: BranchGit, worktrees: Worktrees, request: Integra
   // cannot be merged until the branch has them: the merged branch would not be the state the fixes were verified on.
   // A resumed merge checks it again, against the state its last merged fix was verified on, since that fix may have changed an edited file.
   const lastMerged = request.items.map((item) => mergedBefore(item) !== null).lastIndexOf(true);
-  const unmergedEdits = request.items.every((item) => mergedBefore(item) !== null)
-    ? []
-    : missingEdits(git, worktrees.parent(request.items[0]!.commit), request.items[lastMerged]?.commit ?? worktrees.parent(request.items[0]!.commit), before);
-  if (unmergedEdits.length > 0) {
-    blocked = `the thread's source held edits of ${unmergedEdits.join(", ")} that ${request.branch} lacks`;
-  }
-  worktrees.remove(request.worktree);
-  worktrees.addDetached(request.worktree, before);
+  // The thread's commits are compared and replayed as the branch's own commits would hold their files.
+  const normalized = new Normalizer(git, before);
   const inWorktree = (args: readonly string[]) => git(args, { worktree: request.worktree });
   try {
+    const unmergedEdits = request.items.every((item) => mergedBefore(item) !== null)
+      ? []
+      : missingEdits(git, normalized, worktrees.parent(request.items[0]!.commit), request.items[lastMerged]?.commit ?? worktrees.parent(request.items[0]!.commit), before);
+    if (unmergedEdits.length > 0) {
+      blocked = `the thread's source held edits of ${unmergedEdits.join(", ")} that ${request.branch} lacks`;
+    }
+    worktrees.remove(request.worktree);
+    worktrees.addDetached(request.worktree, before);
     for (const item of request.items) {
       const existing = mergedBefore(item);
       if (existing !== null) {
@@ -135,10 +217,11 @@ export function integrate(git: BranchGit, worktrees: Worktrees, request: Integra
         continue;
       }
       const parent = worktrees.parent(item.commit);
-      inWorktree(["checkout", "--quiet", "-B", item.branch, item.commit]);
+      const replayed = normalized.pair(item.commit, parent);
+      inWorktree(["checkout", "--quiet", "-B", item.branch, replayed.commit]);
       try {
         // Pinned against the user's configuration: no other branch that points at the commit may move with it.
-        inWorktree(["rebase", "--quiet", "--no-autosquash", "--no-update-refs", "--onto", tip, parent]);
+        inWorktree(["rebase", "--quiet", "--no-autosquash", "--no-update-refs", "--onto", tip, replayed.parent]);
       } catch (error) {
         if (!(error instanceof GitCommandError)) throw error;
         const files = inWorktree(["diff", "--name-only", "--diff-filter=U"]).split(/\r?\n/).filter((path) => path.length > 0);
@@ -173,6 +256,7 @@ export function integrate(git: BranchGit, worktrees: Worktrees, request: Integra
       items.push({ name: item.name, status: "merged", branch: item.branch, mergeCommit: tip, reason: null, files: [] });
     }
   } finally {
+    normalized.dispose();
     worktrees.remove(request.worktree);
   }
   if (tip === before) return { branch: request.branch, before, after: before, integrationBranch: null, items };
