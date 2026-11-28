@@ -270,3 +270,21 @@ Run 5 above: one thread on the desktop, with a confirmed cluster, through diagno
 - A live merge into a branch whose checkout does not convert line endings.
 - In run 5 the canonical sides of every capture run but one case of the diagnosis check came from the cache (see above); they were not captured live in that run.
 - A live removal of a widening worktree that another process holds.
+
+## Task 4.2: archive
+
+Tasks 1.1 to 4.1 were checked off and each has its evidence and what remains unverified above.
+
+| Command | Result |
+| --- | --- |
+| `npm run openspec:validate`, before the archive | Passed strict validation: 20 passed, 0 failed. |
+| `npx openspec archive add-repair-worktrees --yes` | Task status complete; applied the deltas to `deterministic-widening` (4 modified), `isolated-repair` (1 added, 4 modified, 1 removed) and `self-fixing-loop` (1 added, 2 modified); archived as `2026-11-28-add-repair-worktrees`. |
+| `npm run openspec:validate`, after the archive | Passed strict validation: 19 passed, 0 failed (exit 0). |
+| `npm run workflow:typecheck`, before the dependencies were installed in the checkout | Failed: `error TS2688: Cannot find type definition file for 'node'.` |
+| `npm run workflow:test`, run 1, before the dependencies were installed | Failed (exit 1): 73 tests, 0 passed, 73 failed; every test file failed to load with `Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'tsx' imported from` the checkout's root, for example `not ok 1 - workflow\tests\agents.test.ts`. |
+| `npm ci` | Installed the dependencies. |
+| `npm run workflow:typecheck` | Passed (exit 0). |
+| `npm run workflow:test`, run 2 | Passed: 711 tests, 711 passed, 0 failed, 0 skipped (exit 0). |
+| SHA-256 of `bin/ChummerGenSR4.exe` | `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`; the executable was not built, launched or touched. |
+
+No code changed in this task, so no live run belongs to it.
