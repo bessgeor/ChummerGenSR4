@@ -27,4 +27,4 @@ Each task names the tasks it builds on as `(after: …)`, by number in this list
 ## 6. Verification and archive
 
 - [x] 6.1 (after: 5.1) [desktop] Run `npm run loop` live for at least two threads with a pause and unpause of the loop and of a lane; record in `verification.md` the canonical hash before and after, each thread's execution outcomes apart from its visual results, the tuning step, how the loop ended, fixture-tested scope apart from live evidence, and what remains unverified.
-- [ ] 6.2 (after: 6.1) Archive the change with `openspec archive add-loop-driver`. Evidence: `npm run openspec:validate` passes after the archive.
+- [x] 6.2 (after: 6.1) Archive the change with `openspec archive add-loop-driver`. Evidence: `npm run openspec:validate` passes after the archive.
