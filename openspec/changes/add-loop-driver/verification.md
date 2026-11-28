@@ -180,3 +180,87 @@ The busy timeout does not cover the switch to WAL itself. In a probe, `journal_m
 | SHA-256 of `bin/ChummerGenSR4.exe` | `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`; the executable was not built, launched or touched. |
 
 No live run: the task changes only `AGENTS.md` and `README.md`. The section "Loop driver" of `AGENTS.md` and the paragraph of `README.md` were checked against `workflow/src/loop-driver/` and `workflow/src/loop/` (options, files, schemas, statuses and exit statuses, when a loop goes on and how it ends, resume, stop, pause of the loop and of a lane, and what it writes for readers); a review against the source corrected when a loop ends `limit`, what a failed tuning is, a merge that does not change the branch, `--stop` of a loop that has ended or does not exist, and what `state.json`'s `paused` means.
+
+## Task 6.1: live loop
+
+Every loop command ran with `PARITY_WORKFLOW_PROFILE` naming a local profile that puts every job kind on Claude and sets `discovery.targets` to 1, with the canonical capture cache shared by the worktrees (outside the repository). The settings overlay `out/overlays/fixture-books` holds `settings/default.xml` with the fixture books added.
+
+### Canonical executable
+
+| When | SHA-256 of `bin/ChummerGenSR4.exe` |
+| --- | --- |
+| Before the first loop (10:13Z) and before its resume (16:49Z) | `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56` |
+| Before and after every build and capture run (printed by each) | `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56`, also for each staged copy |
+| After the last loop ended (16:59Z) | `9ff3009946f0212842eb5aa803c3d8e1697752040229f52b25f584e7b0ae9e56` |
+
+### Loop 1: `loop-20261128T101402Z-b0ecbc86` (ended `failed`)
+
+`npm run loop -- --settings-overlay out/overlays/fixture-books --case build-Diego_v_alpha2_by_bessgeor --capture common --no-repair --max-runs 2`
+
+| Step | Observed |
+| --- | --- |
+| Start (10:14:02Z) | Printed the loop ID, its `loop.json` and the resume and stop commands. Thread 1 `wf-20261128T101402Z-c1ff7c74` built the candidate (SHA-256 `086f31bc5abe3dc9477eecd1a5625e45f684624b28816f8920bb8ac998469829`), and its capture waited: `Waiting for desktop lane desktop, held by process 30304 … since 2026-11-28T09:50:15.059Z` (another process held the desktop lane lock until about 16:49Z). |
+| `--pause` of the loop (10:14:33Z) while the capture task waited for the lock | Exit 0; `state.json` `pausing: true`, `busy: null` (the lane was never acquired). It did not reach `paused`, as the waiting task did not end. |
+| The loop's process ended by its host after two hours (12:15Z), then `--resume` (12:25Z) | The loop stayed `running`. `Resuming loop … at run_thread`, then `Loop … is paused; it goes on once the loop is unpaused`; `state.json` `paused: true`, `pausing: false`; `activity.jsonl` got a `loop`/`run_thread` line with status `interrupted`. |
+| `--pause --lane desktop` (12:25:23Z), then `--unpause` of the loop (12:25:25Z) | Both exit 0. `Loop … goes on: the loop is unpaused.`, `resuming thread wf-20261128T101402Z-c1ff7c74`, `Resuming thread …`, then `Every desktop lane (desktop) is paused; the desktop command waits until one is unpaused.` `control.json` `{ paused: false, lanes: { desktop: { paused: true } } }`; `state.json` `lanes.desktop` `{ paused: true, busy: null }`. |
+| `--unpause --lane desktop` (12:26:45Z) | Exit 0; the capture went back to `Waiting for desktop lane desktop, held by process 30304 …`. The process was ended by its host again at 14:25Z; the loop stayed `running`. |
+| `--resume` (16:49:36Z), once the lock was free | Resumed the thread; capture run `20261128T164936Z-61233eb5`. **Execution: failed.** Canonical side from the cache (entry `a8d0067f…d22c`, stored by run `20261127T224516Z-3f12f9f0`), ok; candidate `FAILED after 8.8 s: action 0 (capture:common): pointer: the pointer moved from {X=1280,Y=22} to {X=1290,Y=0} during the side; leave the mouse alone during a run.` Capture status 2, coverage INVALID (`failure:build-Diego_v_alpha2_by_bessgeor/candidate`). **Visual:** no rows; compare 0 (clear), completeness 16 planned, 0 reported, 16 execution-lost. Triage 0 clusters, 16 other findings; outcome `findings_remaining`. |
+| How the loop ended (16:49:48Z) | `Thread wf-20261128T101402Z-c1ff7c74 finished: exit 2.`, `Loop …: failed; thread wf-20261128T101402Z-c1ff7c74 exited with 2: its execution failures need a person.`, exit 2. `loop.json`: status `failed`, the iteration with `exitStatus: 2`, `tuning: null` (no tuning ran) and decision `failed`. |
+| `--pause` and `--pause --lane desktop` (16:49:50Z), after the loop had ended | Both exit 0 and wrote `control.json`; nothing ran any more. |
+
+The pointer failure is an execution failure of this run, not a visual difference. Its cause is unknown: a disturbance of the pointer during that side is likely, but nothing recorded shows who or what moved it. The case was captured again in loop 2 below with the same candidate and passed, which does not show what caused the earlier failure.
+
+### Loop 2: `loop-20261128T165010Z-c9fec2e3` (ended `limit`)
+
+The same command, started at 16:50:10Z.
+
+| Step | Observed |
+| --- | --- |
+| Thread 1 `wf-20261128T165010Z-1ebbc65c` build | Candidate SHA-256 `086f31bc5abe3dc9477eecd1a5625e45f684624b28816f8920bb8ac998469829`. |
+| `--pause` of the loop (16:50:28Z) while the capture ran on the lane | Exit 0. `state.json`: `pausing: true` with `lanes.desktop.busy` `{ thread: wf-20261128T165010Z-1ebbc65c, node: capture, subject: build-Diego_v_alpha2_by_bessgeor }` (16:50:28Z); the capture finished, then `paused: true`, `pausing: false`, `busy: null` (16:51:00Z), and the thread printed `Thread wf-20261128T165010Z-1ebbc65c is paused; it goes on once the loop is unpaused`. `activity.jsonl` got `interrupted` lines for the workflow's `capture` stage and its `route_cases` node at 16:51:00Z. |
+| `--pause --lane desktop` (16:51:07Z), then `--unpause` of the loop (16:51:08Z) | Both exit 0. `Thread … goes on: the loop is unpaused.` The compare ran, then discovery `disc-wf-20261128T165010Z-1ebbc65c` ran its rank and scenario jobs (target `frmCreate/tabMartialArts`), and its capture printed `Every desktop lane (desktop) is paused; the desktop command waits until one is unpaused.`; `state.json` `lanes.desktop` `{ paused: true, busy: null }`. |
+| `--unpause --lane desktop` (16:54:52Z) | Exit 0; the discovery capture took the lane at once (`busy` `{ thread: disc-wf-20261128T165010Z-1ebbc65c, node: execute }`). |
+| Thread 1 execution | Capture run `20261128T165015Z-e5e14ff4`: status 0, coverage valid (0 failures, 6 optional absent), canonical side from the cache (entry `a8d0067f…d22c`). Discovery capture run `20261128T165454Z-18f8bd18`: status 0, coverage valid, both sides performed 5 actions, the canonical side run live and stored in the cache. |
+| Thread 1 visual | `common` passed (1 passed, 0 failed); compare 0 (clear), completeness 16 planned, 1 reported, 15 filtered, 0 execution-lost; triage 0 clusters, 0 other findings; outcome `verified_for_scope`. Discovery rows `common` and `martial-arts` passed; the scenario was proven and admitted as `build-rigger@frmcreate-tabmartialarts-c7d54e25`. |
+| Thread 1 paused time | `outcome.json` `pausedMilliseconds: 10109` (elapsed 304140 ms); `pauses.json` holds one pause, 16:51:00.692Z to 16:51:10.801Z; the loop's `run_thread` line in `activity.jsonl` has `pausedMs: 10111`. |
+| Tuning after thread 1 | `Automatic tuning: 0 of 12 new hypothesis records; not due.` (`tuning: { kind: not_due, count: 0, every: 12 }`). |
+| Decision | `next thread; thread wf-20261128T165010Z-1ebbc65c admitted build-rigger@frmcreate-tabmartialarts-c7d54e25.` |
+| Thread 2 `wf-20261128T165525Z-cdc17d98` execution | Built the same candidate. The capture and compare of the case were reused from thread 1 (`reusing … 20261128T165015Z-e5e14ff4 from thread wf-20261128T165010Z-1ebbc65c (status 0)`), canonical side from the cache. Discovery `disc-wf-20261128T165525Z-cdc17d98` (target `frmCreate/tabCharacterInfo`): capture run `20261128T165830Z-ce8e4c99` status 0, coverage valid, the canonical side run live and stored. |
+| Thread 2 visual | `common` passed (reused report); triage 0 clusters, 0 other findings; outcome `verified_for_scope`. Discovery row `character-info` passed; the scenario was proven and admitted as `build-rigger@frmcreate-tabcharacterinfo-b3690a83`. |
+| Tuning after thread 2 | Not due (0 of 12). |
+| How the loop ended (16:58:55Z) | `Loop …: limit; thread wf-20261128T165525Z-cdc17d98 admitted build-rigger@frmcreate-tabcharacterinfo-b3690a83; 2 of --max-runs 2 threads ran.`, then `Loop … limit after 2 threads: exit 0.` |
+| `loop.json` | Status `limit`; two iterations with exit status 0, outcome `verified_for_scope`, no fixes or merges, `sourceChanged: false`, the admitted case, the `not_due` tuning and the decisions above; `threads` lists both workflow threads and both discovery threads in order with their start and end times and reasons (`the loop started`, `the discovery of workflow thread …`, `thread wf-20261128T165010Z-1ebbc65c admitted build-rigger@frmcreate-tabmartialarts-c7d54e25`). |
+| Files for readers | The loop folder holds `loop.json`, `state.json` (every lane free and unpaused at the end), `control.json`, `activity.jsonl` (64 lines: loop 10 succeeded, workflow 28 succeeded and 2 interrupted, discovery 24 succeeded) and `run.lock`; `out/loop/graphs/` holds `loop`, `workflow`, `discovery` and `tuning` as `.json` and `.mmd`. |
+
+The discovery threads wrote the two admitted scenarios into `parity/discovery/registry.json` and `parity/cases/discovered.json`; they are not part of this change, and both files were restored to their committed state afterwards.
+
+### Tests
+
+| Command | Result |
+| --- | --- |
+| `npm run workflow:typecheck` | Passed (exit 0). |
+| `npm run workflow:test` | Passed: 727 tests, 727 passed, 0 failed, 0 skipped (exit 0). |
+| `npm run openspec:validate` | Passed strict validation: 18 passed, 0 failed. |
+
+### Fixture-tested scope and live evidence
+
+Live: a loop of two workflow threads that went on after an admitted scenario and ended `limit` at `--max-runs`; a loop that ended `failed` (exit 2) after its thread exited with 2, with no tuning after it; the automatic tuning after each thread, not due; a loop pause during a capture (`pausing`, then `paused` once the capture ended, then unpaused), a loop pause found by a resume, a lane pause that held a desktop command until the lane was unpaused, paused time in `pauses.json`, `outcome.json` and `activity.jsonl`; the resume of a `running` loop and of its unfinished thread after its process ended; `loop.json`, `state.json`, `activity.jsonl` and the graph files as written.
+
+Fixture-tested only (Tasks 2.1 to 4.3): a merged fix that changes the branch's tree, an activated tuning, a tuning that fails with 2 or is rejected, the `converged` ending, `--stop`, Ctrl+C in a step, a resume after a setup error in a thread or a tuning, agent lanes and two lanes, an invalid control file and a held control lock, budgets and deadlines that leave out paused time.
+
+### Unverified
+
+Everything listed above as fixture-tested only has no live evidence:
+
+- A live loop that goes on after a merged fix or an activated tuning, and one that ends `converged`: the scope had no discrepancy, and the automatic tuning was never due (0 of 12 records).
+- A live tuning step that runs a tuning thread, its pause, and a tuning that fails with 2 or is rejected.
+- `--stop` of a running loop, and Ctrl+C in a live step.
+- A live resume after a setup error in a thread or a tuning. The live resumes followed a process ended by its host.
+- Agent lanes and two lanes, including the pause of an agent lane and of one lane while another is free.
+- An invalid control file and a held control lock in a live loop.
+- Run budgets and attempt deadlines that leave out paused time: the live loops ran with `--no-repair` and started no diagnosis, repair or tuning job.
+
+Also unverified:
+
+- A live pause while a model job runs: the live pause of the loop took effect during a capture.
+- Thread 2 captured only the case `--case` planned; the admitted scenarios were captured only by their discovery runs, not in a later thread's suite.
