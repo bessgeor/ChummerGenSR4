@@ -2,7 +2,8 @@
 import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
+import type { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
+import { openCheckpointSaver } from "./graph/checkpoint-database.js";
 import { agentRunners } from "./agents/agent-runners.js";
 import { planCases } from "./cases/case-plan.js";
 import { hostCheckCapture } from "./diagnosis/check-capture.js";
@@ -108,7 +109,7 @@ export function composeWorkflow(repositoryRoot: string, profile: Profile, log: (
     },
   });
 
-  const checkpointer = SqliteSaver.fromConnString(paths.checkpoints);
+  const checkpointer = openCheckpointSaver(paths.checkpoints);
   // A thread's discovery is a discovery thread like those of npm run discover, in their checkpointer and folders.
   const folders = discoveryPaths(repositoryRoot);
   let store: SqliteStore | undefined;
@@ -121,7 +122,7 @@ export function composeWorkflow(repositoryRoot: string, profile: Profile, log: (
   try {
     store = new SqliteStore(paths.store);
     mkdirSync(folders.root, { recursive: true });
-    discoveryCheckpointer = SqliteSaver.fromConnString(folders.checkpoints);
+    discoveryCheckpointer = openCheckpointSaver(folders.checkpoints);
     const discovery = new RunnerDiscovery(composeDiscovery({
       repositoryRoot, paths, folders, registry: registryPaths(repositoryRoot), git: processGit(repositoryRoot), host: hostDiscovery(paths, host, steps, createScratchFolder),
       agents, quota, createScratchFolder, checkpointer: discoveryCheckpointer, store, now, log,
