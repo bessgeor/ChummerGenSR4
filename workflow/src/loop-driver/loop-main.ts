@@ -69,6 +69,7 @@ async function main(): Promise<number> {
   const signal = interruptSignal(log);
   return runLoop(command, {
     paths: loopPaths(repositoryRoot), compose: (loopId) => composeLoop(repositoryRoot, profile, loopId, now, log, signal), now, log, signal, newLoopId,
+    lanes: laneDefinitions(profile.lanes).map((lane) => lane.name),
   });
 }
 

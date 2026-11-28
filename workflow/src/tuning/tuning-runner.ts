@@ -47,7 +47,7 @@ export async function runTuningThread(graph: TuningGraph, steps: TuningRun, inpu
   try {
     final = await invokePausable(graph, unfinished ? null : input, {
       configurable: { thread_id: input.tuningId }, durability: "sync", ...(signal === undefined ? {} : { signal }),
-    }, gate, `Tuning ${input.tuningId}`) as TuningStateValue;
+    }, gate, `Tuning ${input.tuningId}`, "tuning") as TuningStateValue;
   } catch (error) {
     if (signal?.aborted === true) throw new SetupError(`Interrupted: tuning ${input.tuningId} stopped; resume it with ${resume}.`);
     throw error;

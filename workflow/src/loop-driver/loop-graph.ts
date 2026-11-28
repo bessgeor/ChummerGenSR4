@@ -4,7 +4,7 @@ import type { ThreadProgress } from "../graph/run-workflow.js";
 import { SetupError } from "../host/setup-error.js";
 import type { Arguments } from "../options/arguments.js";
 import type { AutoTuningResult, AutoTuningStart } from "../tuning/tune-commands.js";
-import type { Decision, Iteration, LoopDocument, ThreadSummary } from "./loop-document.js";
+import type { Decision, Iteration, LoopDocument, LoopProgress, ThreadSummary } from "./loop-document.js";
 
 /** The exit status of a workflow thread stopped by a setup error or an interruption. */
 const threadSetupErrorStatus = 3;
@@ -15,10 +15,10 @@ export interface LoopSteps {
   newThreadId(): string;
   /** Whether the workflow thread `threadId` started, and whether it finished. */
   threadProgress(threadId: string): Promise<ThreadProgress>;
-  /** Starts the workflow thread `threadId` as `npm start` would with `args`, and returns its exit status. */
-  runThread(threadId: string, args: Arguments): Promise<number>;
-  /** Resumes the unfinished workflow thread `threadId` as `npm start -- --resume` would, and returns its exit status. */
-  resumeThread(threadId: string): Promise<number>;
+  /** Starts the workflow thread `threadId` as `npm start` would with `args`, and returns its exit status; `reason` says why it starts. */
+  runThread(threadId: string, args: Arguments, reason: string): Promise<number>;
+  /** Resumes the unfinished workflow thread `threadId` as `npm start -- --resume` would, and returns its exit status; `reason` says why it started. */
+  resumeThread(threadId: string, reason: string): Promise<number>;
   /** What the finished thread changed, from its `outcome.json` and the commits of its merges. */
   threadSummary(threadId: string): ThreadSummary;
   /** Whether the automatic tuning holds the tuning `tuningId`, in progress or ended. */
@@ -26,9 +26,9 @@ export interface LoopSteps {
   /**
    * Runs an automatic tuning, which tunes only when it is due and continues the one in progress first; `onStart` learns
    * the tuning before it runs. `recorded` is the tuning `loop.json` recorded for this step before an interruption: when
-   * it ended, its result is returned and nothing else runs.
+   * it ended, its result is returned and nothing else runs. `reason` says why the tuning runs.
    */
-  tune(onStart: (start: AutoTuningStart) => void, recorded: string | null): Promise<AutoTuningResult>;
+  tune(onStart: (start: AutoTuningStart) => void, recorded: string | null, reason: string): Promise<AutoTuningResult>;
   /** Writes `loop.json`. */
   writeLoop(document: LoopDocument): void;
   /** Reads `loop.json` as last written. */
@@ -39,35 +39,48 @@ export interface LoopSteps {
   log(line: string): void;
 }
 
+/** The steps the loop graph's nodes call: those of the loop, with `loop.json` read and written without its threads. */
+export type LoopGraphSteps = Omit<LoopSteps, "writeLoop" | "readLoop"> & {
+  writeLoop(progress: LoopProgress): void;
+  readLoop(): LoopProgress;
+};
+
 export const LoopState = Annotation.Root({
   loopId: Annotation<string>(),
   /** The options every thread is started with. */
   arguments: Annotation<Arguments>(),
-  /** `loop.json` as last written. */
-  document: Annotation<LoopDocument>(),
+  /** `loop.json` as last written, without its threads. */
+  document: Annotation<LoopProgress>(),
   /** The running thread's exit status, from `run_thread` to `decide_thread`. */
   exitStatus: Annotation<number | null>(),
 });
 export type LoopStateValue = typeof LoopState.State;
 
-export function loopInput(document: LoopDocument, args: Arguments): LoopStateValue {
+export function loopInput(document: LoopProgress, args: Arguments): LoopStateValue {
   return { loopId: document.loopId, arguments: args, document, exitStatus: null };
 }
 
-function current(document: LoopDocument): Iteration {
+function current(document: LoopProgress): Iteration {
   const iteration = document.iterations.at(-1);
   if (iteration === undefined) throw new Error(`Loop ${document.loopId} has no iteration.`);
   return iteration;
 }
 
 /** `document` with its current iteration changed by `change`, written to `loop.json`. */
-function recordIteration(steps: LoopSteps, document: LoopDocument, change: Partial<Iteration>, status = document.status): LoopDocument {
-  const next: LoopDocument = { ...document, status, iterations: [...document.iterations.slice(0, -1), { ...current(document), ...change }] };
+function recordIteration(steps: LoopGraphSteps, document: LoopProgress, change: Partial<Iteration>, status = document.status): LoopProgress {
+  const next: LoopProgress = { ...document, status, iterations: [...document.iterations.slice(0, -1), { ...current(document), ...change }] };
   steps.writeLoop(next);
   return next;
 }
 
 const stopReason = (step: string) => `a stop was requested before the ${step}`;
+
+/** Why the current iteration's thread starts: the loop started, or what the iteration before it changed. */
+export function threadReason(document: LoopProgress): string {
+  const before = document.iterations.at(-2);
+  if (before === undefined) return "the loop started";
+  return before.decision?.reasons.join("; ") ?? `thread ${before.thread} ended`;
+}
 
 /** What the iteration changed that the next thread would see. */
 export function changes(iteration: Iteration): string[] {
@@ -83,7 +96,7 @@ export function changes(iteration: Iteration): string[] {
  * After the tuning: `failed` when the tuning's job failed (exit status 2), whatever the thread changed; else the next
  * thread when the iteration changed something and the limit is not reached.
  */
-export function decide(document: LoopDocument): Decision {
+export function decide(document: LoopProgress): Decision {
   const iteration = current(document);
   const tuning = iteration.tuning;
   if (tuning?.kind === "tuning" && tuning.outcome === "failed") {
@@ -106,7 +119,7 @@ export function decide(document: LoopDocument): Decision {
  * started) and each tuning (`tune` while none that started is recorded) and ends the loop
  * `stopped` without starting that step; a step that started runs to its end first.
  */
-export function buildLoopGraph(steps: LoopSteps) {
+export function buildLoopGraph(steps: LoopGraphSteps) {
   return new StateGraph(LoopState)
     .addNode("start_thread", pausable((state: LoopStateValue) => {
       if (steps.stopRequested()) {
@@ -114,7 +127,7 @@ export function buildLoopGraph(steps: LoopSteps) {
         const reason = stopReason(first ? "first thread" : "next thread");
         steps.log(`Loop ${state.loopId}: stopped; ${reason}.`);
         if (first) {
-          const document: LoopDocument = { ...state.document, status: "stopped" };
+          const document: LoopProgress = { ...state.document, status: "stopped" };
           steps.writeLoop(document);
           return { document };
         }
@@ -125,7 +138,7 @@ export function buildLoopGraph(steps: LoopSteps) {
       const iteration: Iteration = {
         thread: steps.newThreadId(), startedUtc: steps.now().toISOString(), endedUtc: null, exitStatus: null, summary: null, tuning: null, decision: null,
       };
-      const document: LoopDocument = { ...state.document, iterations: [...state.document.iterations, iteration] };
+      const document: LoopProgress = { ...state.document, iterations: [...state.document.iterations, iteration] };
       steps.writeLoop(document);
       steps.log(`Loop ${state.loopId}: thread ${document.iterations.length} is ${iteration.thread}.`);
       return { document, exitStatus: null };
@@ -155,9 +168,9 @@ export function buildLoopGraph(steps: LoopSteps) {
         exitStatus = progress.exitStatus;
       } else if (progress.kind === "unfinished") {
         steps.log(`Loop ${state.loopId}: resuming thread ${thread}.`);
-        exitStatus = await steps.resumeThread(thread);
+        exitStatus = await steps.resumeThread(thread, threadReason(document));
       } else {
-        exitStatus = await steps.runThread(thread, state.arguments);
+        exitStatus = await steps.runThread(thread, state.arguments, threadReason(document));
       }
       if (exitStatus === threadSetupErrorStatus) throw new SetupError(`Thread ${thread} of loop ${state.loopId} stopped with exit status ${exitStatus}; the loop stays running.`);
       return { document, exitStatus };
@@ -188,7 +201,7 @@ export function buildLoopGraph(steps: LoopSteps) {
       }
       const result = await steps.tune((start) => {
         recordIteration(steps, state.document, { tuning: { kind: "tuning", tuningId: start.tuningId, cycle: start.cycleId, outcome: null, exitStatus: null } });
-      }, recorded);
+      }, recorded, `the automatic tuning after thread ${current(state.document).thread}`);
       const tuning = result.kind === "not_due"
         ? { kind: "not_due" as const, count: result.count, every: result.every }
         : { kind: "tuning" as const, tuningId: result.tuningId, cycle: result.cycleId, outcome: result.outcome, exitStatus: result.status };

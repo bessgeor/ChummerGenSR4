@@ -8,15 +8,17 @@ import { graphEnded } from "../graph/graph-ended.js";
 import { newThreadId, recursionLimit, setupErrorStatus } from "../graph/run-workflow.js";
 import { acquireExclusiveLock } from "../host/exclusive-lock.js";
 import { SetupError } from "../host/setup-error.js";
-import { invokePausable, type PauseGate } from "../loop/loop-control.js";
+import { invokePausable, type LoopThread, type PauseGate } from "../loop/loop-control.js";
+import { LoopMonitor } from "../loop/loop-monitor.js";
 import { readAutoTuning } from "../tuning/auto-tuning.js";
 import { cycleStatus, runAutoTuning, type AutoTuningResult } from "../tuning/tune-commands.js";
 import { autoCycleId } from "../tuning/tuning-steps.js";
 import type { LoopCommand } from "./loop-arguments.js";
+import { writeGraphStructures } from "./graph-structure.js";
 import {
-  checkLoopId, readLoopDocument, readThreadSummary, stopRequested, writeLoopDocument, writeStopRequest, type LoopDocument, type LoopPaths,
+  checkLoopId, readLoopDocument, readThreadSummary, stopRequested, writeLoopDocument, writeStopRequest, type LoopDocument, type LoopPaths, type LoopProgress,
 } from "./loop-document.js";
-import { buildLoopGraph, loopInput, type LoopStateValue, type LoopSteps } from "./loop-graph.js";
+import { buildLoopGraph, loopInput, type LoopGraphSteps, type LoopStateValue, type LoopSteps } from "./loop-graph.js";
 
 /** The loop's checkpointer, `out/loop/checkpoints.sqlite`. */
 export function openLoopCheckpointer(paths: LoopPaths): SqliteSaver {
@@ -53,23 +55,23 @@ export function endedAutoTuning(evalsFolder: string, tuningId: string): AutoTuni
  */
 export function hostLoopSteps(loopId: string, host: LoopHost): LoopSteps {
   const { paths, workflow, evalContext, now, log } = host;
-  // The loop's threads and tunings pause with it.
-  const gate: PauseGate = { folder: paths.folder(loopId), log };
+  // The loop's threads and tunings pause with it, and the loop records why each started.
+  const gate = (reason: string): PauseGate => ({ folder: paths.folder(loopId), log, reason });
   const treeOf = (commit: string) => evalContext.branchGit(["rev-parse", "--verify", `${commit}^{tree}`]).trim();
   return {
     newThreadId: () => newThreadId(now()),
     threadProgress: (threadId) => workflow.progress(threadId),
-    runThread: (threadId, args) => workflow.run({ kind: "start", arguments: args }, { threadId, loopControl: gate }),
-    resumeThread: (threadId) => workflow.run({ kind: "resume", threadId }, { loopControl: gate }),
+    runThread: (threadId, args, reason) => workflow.run({ kind: "start", arguments: args }, { threadId, loopControl: gate(reason) }),
+    resumeThread: (threadId, reason) => workflow.run({ kind: "resume", threadId }, { loopControl: gate(reason) }),
     threadSummary: (threadId) => readThreadSummary(threadId, host.threadFolder(threadId), treeOf),
     tuningStarted: (tuningId) => startedAutoTuning(evalContext.paths.evalsFolder, tuningId),
-    tune: async (onStart, recorded) => {
+    tune: async (onStart, recorded, reason) => {
       const ended = recorded === null ? null : endedAutoTuning(evalContext.paths.evalsFolder, recorded);
       if (ended?.kind === "tuned") {
         log(`Loop ${loopId}: tuning ${ended.tuningId} had ended ${ended.outcome}.`);
         return ended;
       }
-      return runAutoTuning(evalContext, false, onStart, gate);
+      return runAutoTuning(evalContext, false, onStart, gate(reason));
     },
     writeLoop: (document) => writeLoopDocument(paths.document(loopId), document),
     readLoop: () => readLoopDocument(paths.document(loopId)),
@@ -90,16 +92,20 @@ export type LoopDependencies = {
   readonly paths: LoopPaths;
   /** Composes what the loop `loopId` runs on, opening its databases; a resume composes only under the loop's lock. */
   readonly compose: (loopId: string) => LoopComposition;
+  /** The desktop lanes of the profile, whose flags and tasks `state.json` shows. */
+  readonly lanes: readonly string[];
   readonly newLoopId: (now: Date) => string;
   readonly now: () => Date;
   readonly log: (line: string) => void;
   readonly signal?: AbortSignal;
   /** How the loop graph waits while the loop is paused; by default it reads the control file every second. */
   readonly pause?: Omit<PauseGate, "folder" | "log">;
+  /** How often `state.json` follows the control file between the graphs' events; by default every second. */
+  readonly statePollMilliseconds?: number;
 };
 
 /** Exit status of a loop that ended: 0 converged, limit or stopped, 2 failed. */
-export function loopExitStatus(document: LoopDocument): number {
+export function loopExitStatus(document: LoopProgress): number {
   if (document.status === "running") throw new Error(`Loop ${document.loopId} ended while it is running.`);
   return document.status === "failed" ? 2 : 0;
 }
@@ -137,11 +143,44 @@ export function stopLoop(loopId: string, paths: LoopPaths, now: () => Date, log:
 }
 
 /**
+ * The graph of a loop over the composed steps, and the monitor of its run. `loop.json` holds what the graph keeps of it
+ * and the threads the monitor learns of, those `recorded` in it already included; the graph reads it without them.
+ */
+function observedLoop(composed: LoopComposition, recorded: LoopDocument, dependencies: LoopDependencies) {
+  const { threads: recordedThreads, ...kept } = recorded;
+  let progress: LoopProgress = kept;
+  let threads: readonly LoopThread[] = recordedThreads;
+  const write = () => composed.steps.writeLoop({ ...progress, threads: [...threads] });
+  const steps: LoopGraphSteps = {
+    ...composed.steps,
+    writeLoop: (next) => {
+      progress = next;
+      write();
+    },
+    readLoop: () => {
+      const { threads: _, ...read } = composed.steps.readLoop();
+      return read;
+    },
+  };
+  const monitor = new LoopMonitor({
+    folder: dependencies.paths.folder(recorded.loopId), lanes: dependencies.lanes, now: dependencies.now, threads: recordedThreads,
+    onThreads: (next) => {
+      threads = next;
+      write();
+    },
+    ...(dependencies.statePollMilliseconds === undefined ? {} : { pollMilliseconds: dependencies.statePollMilliseconds }),
+  });
+  return { graph: buildLoopGraph(steps).compile({ checkpointer: composed.checkpointer }), monitor };
+}
+
+/**
  * Starts a loop, recorded in `loop.json` as running, or resumes a running loop from its checkpoint, and runs its graph,
  * checkpointed under the loop's ID, to its end. A resumed loop repeats the node that stopped, which resumes the thread or
  * the tuning it was running. A setup error or an interruption ends the process with status 3 and leaves the loop running;
  * a resume of a loop that does not exist, is not running or is run by another process is a setup error that changes
- * nothing. The process holds the loop's lock while it runs the loop.
+ * nothing. The process holds the loop's lock while it runs the loop. Before the graph runs, the structure of the graphs
+ * the loop runs is written to `out/loop/graphs/`; while it runs, `state.json` and `activity.jsonl` in the loop's folder
+ * and the threads in `loop.json` follow it (see `LoopMonitor`).
  */
 export async function runLoop(command: Extract<LoopCommand, { kind: "start" | "resume" }>, dependencies: LoopDependencies): Promise<number> {
   const { log } = dependencies;
@@ -149,38 +188,45 @@ export async function runLoop(command: Extract<LoopCommand, { kind: "start" | "r
   let loopId: string | null = null;
   let release = () => {};
   let composition: LoopComposition | null = null;
+  let monitor: LoopMonitor | null = null;
   try {
-    const graphOf = (composed: LoopComposition) => buildLoopGraph(composed.steps).compile({ checkpointer: composed.checkpointer });
     // The loop's own nodes pause with it too: a paused loop starts no further thread or tuning until it is unpaused.
-    const invoke = (composed: LoopComposition, input: LoopStateValue | null, id: string) => invokePausable(graphOf(composed), input, {
-      configurable: { thread_id: id }, recursionLimit, durability: "sync", ...(dependencies.signal === undefined ? {} : { signal: dependencies.signal }),
-    }, { folder: dependencies.paths.folder(id), log, ...dependencies.pause }, `Loop ${id}`) as Promise<LoopStateValue>;
+    const invoke = async (loop: ReturnType<typeof observedLoop>, input: LoopStateValue | null, id: string) => {
+      await writeGraphStructures(dependencies.paths.graphs);
+      monitor = loop.monitor;
+      monitor.start();
+      return await invokePausable(loop.graph, input, {
+        configurable: { thread_id: id }, recursionLimit, durability: "sync", ...(dependencies.signal === undefined ? {} : { signal: dependencies.signal }),
+      }, { folder: dependencies.paths.folder(id), log, ...dependencies.pause }, `Loop ${id}`, "loop") as LoopStateValue;
+    };
     let final: LoopStateValue;
     if (command.kind === "resume") {
       resumableLoop(dependencies.paths, command.loopId);
       release = acquireExclusiveLock(dependencies.paths.lock(command.loopId), `Loop ${command.loopId} is running in another process`);
       // Read again under the lock: the process that held it may have ended the loop.
-      resumableLoop(dependencies.paths, command.loopId);
+      const recorded = resumableLoop(dependencies.paths, command.loopId);
       composition = dependencies.compose(command.loopId);
-      const snapshot = await graphOf(composition).getState({ configurable: { thread_id: command.loopId } });
+      const loop = observedLoop(composition, recorded, dependencies);
+      const snapshot = await loop.graph.getState({ configurable: { thread_id: command.loopId } });
       if (snapshot.config.configurable?.["checkpoint_id"] === undefined) throw new SetupError(`Loop ${command.loopId} has no checkpoint in ${dependencies.paths.checkpoints}.`);
       if (graphEnded(snapshot)) throw new SetupError(`Loop ${command.loopId}'s graph has ended, but its loop.json says it is running.`);
       loopId = command.loopId;
       log(`Resuming loop ${loopId} at ${snapshot.tasks.map((task) => task.name).join(", ")}: ${dependencies.paths.document(loopId)}`);
-      final = await invoke(composition, null, loopId);
+      final = await invoke(loop, null, loopId);
     } else {
       const startedUtc = dependencies.now();
       const newId = dependencies.newLoopId(startedUtc);
       composition = dependencies.compose(newId);
       release = acquireExclusiveLock(dependencies.paths.lock(newId), `Loop ${newId} is running in another process`);
       loopId = newId;
-      const document: LoopDocument = {
+      const document: LoopProgress = {
         schemaVersion: 1, loopId, startedUtc: startedUtc.toISOString(), options: { arguments: [...command.options], maxRuns: command.maxRuns }, status: "running", iterations: [],
       };
       log(`Loop ${loopId}: ${dependencies.paths.document(loopId)}`);
       log(`Resume it after an interruption with: npm run loop -- --resume ${loopId}; stop it with: npm run loop -- --stop ${loopId}`);
-      composition.steps.writeLoop(document);
-      final = await invoke(composition, loopInput(document, command.arguments), loopId);
+      const recorded: LoopDocument = { ...document, threads: [] };
+      composition.steps.writeLoop(recorded);
+      final = await invoke(observedLoop(composition, recorded, dependencies), loopInput(document, command.arguments), loopId);
     }
     const status = loopExitStatus(final.document);
     log(`Loop ${loopId} ${final.document.status} after ${final.document.iterations.length} threads: exit ${status}.`);
@@ -192,6 +238,8 @@ export async function runLoop(command: Extract<LoopCommand, { kind: "start" | "r
     return setupErrorStatus;
   } finally {
     try {
+      // Set inside `invoke`, which the compiler's narrowing does not follow.
+      (monitor as LoopMonitor | null)?.stop();
       composition?.close();
     } finally {
       release();
