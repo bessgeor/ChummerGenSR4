@@ -16,7 +16,7 @@ import { composeDiscovery, hostDiscovery } from "./discovery/discovery-runner.js
 import { registryPaths } from "./discovery/registry.js";
 import { RunnerDiscovery } from "./discovery/thread-discovery.js";
 import { buildWorkflowGraph } from "./graph/workflow-graph.js";
-import { runWorkflow, type RunDependencies, type RunRequest } from "./graph/run-workflow.js";
+import { runWorkflow, threadProgress, type RunDependencies, type RunRequest, type ThreadProgress } from "./graph/run-workflow.js";
 import { HostSteps } from "./host-steps.js";
 import { CpuPool, defaultCpuPoolSize } from "./host/cpu-pool.js";
 import { ProcessHostRunner } from "./host/host-runner.js";
@@ -53,6 +53,8 @@ import { WideningService } from "./widening/widening-service.js";
 export type ComposedWorkflow = {
   /** Runs or resumes a thread as `npm start` does and returns its exit status; a start given `request.threadId` runs its new thread under that ID. */
   readonly run: (command: Exclude<Command, { kind: "help" }>, request?: RunRequest) => Promise<number>;
+  /** Whether the thread `threadId` was checkpointed, and the exit status of one that finished. */
+  readonly progress: (threadId: string) => Promise<ThreadProgress>;
   /** Closes the store and the checkpoint databases. */
   readonly close: () => void;
 };
@@ -143,7 +145,7 @@ export function composeWorkflow(repositoryRoot: string, profile: Profile, log: (
       now,
       ...(signal === undefined ? {} : { signal }),
     };
-    return { run: (command, request = {}) => runWorkflow(command, dependencies, request), close };
+    return { run: (command, request = {}) => runWorkflow(command, dependencies, request), progress: (threadId) => threadProgress(graph, threadId), close };
   } catch (error) {
     close();
     throw error;

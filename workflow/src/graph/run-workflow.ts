@@ -198,6 +198,20 @@ async function storedByFlatGraph(threadId: string, dependencies: RunDependencies
   return nodes.some((node) => !node.startsWith("__") && !(stageIds as readonly string[]).includes(node));
 }
 
+/** Whether a thread was checkpointed, and the exit status of one whose graph ran to its end. */
+export type ThreadProgress = { readonly kind: "new" } | { readonly kind: "unfinished" } | { readonly kind: "finished"; readonly exitStatus: number };
+
+/**
+ * The progress of the thread `threadId` (its exact ID) in the graph's checkpoints: `new` without a checkpoint, `finished`
+ * with the exit status its run gave when its graph ran to its end, else `unfinished` (a resume continues it).
+ */
+export async function threadProgress(graph: WorkflowGraph, threadId: string): Promise<ThreadProgress> {
+  const snapshot = await graph.getState({ configurable: { thread_id: threadId } });
+  if (snapshot.config.configurable?.["checkpoint_id"] === undefined) return { kind: "new" };
+  if (snapshot.next.length > 0) return { kind: "unfinished" };
+  return { kind: "finished", exitStatus: exitStatus(snapshot.values as WorkflowStateValue) };
+}
+
 /** Reports a thread whose graph ran to its end; a result that cannot be read is a setup error, and the finished thread has nothing to resume. */
 function finish(final: WorkflowStateValue, dependencies: RunDependencies): number {
   try {

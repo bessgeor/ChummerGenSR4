@@ -14,7 +14,7 @@ import { inventoryLines, type InventorySummary } from "../src/inventory/inventor
 import type { WorkflowStateValue } from "../src/graph/workflow-state.js";
 import type { Conclusion, ConcludeInput } from "../src/loop/loop-service.js";
 import type { OutcomeDocument } from "../src/loop/outcome.js";
-import { exitStatus, runWorkflow, type RunDependencies, type RunRequest } from "../src/graph/run-workflow.js";
+import { exitStatus, runWorkflow, threadProgress, type RunDependencies, type RunRequest } from "../src/graph/run-workflow.js";
 import type { Pause } from "../src/loop/loop-control.js";
 import { SetupError } from "../src/host/setup-error.js";
 import type { Arguments, NodeName } from "../src/options/arguments.js";
@@ -277,6 +277,22 @@ test("a finished or unknown thread cannot be resumed", async () => {
   equal(await runWorkflow({ kind: "resume", threadId: "wf-unknown" }, run.dependencies), 3);
   ok(run.lines.some((line) => line.includes("no thread wf-unknown")));
   equal(run.steps.calls.length, calls);
+});
+
+test("a thread's progress is new without a checkpoint, unfinished after a setup error and finished with its run's exit status", async () => {
+  const steps = new FakeSteps();
+  steps.failCapture = "b";
+  steps.captureStatus = { a: 1 };
+  const run = harness(["a", "b"], steps);
+  const given = "wf-20261001T120000Z-progress";
+  deepStrictEqual(await threadProgress(run.dependencies.graph, given), { kind: "new" });
+  equal(await runWorkflow({ kind: "start", arguments: baseArguments }, run.dependencies, { threadId: given }), 3);
+  deepStrictEqual(await threadProgress(run.dependencies.graph, given), { kind: "unfinished" });
+  steps.failCapture = null;
+  equal(await runWorkflow({ kind: "resume", threadId: given }, run.dependencies), 1);
+  deepStrictEqual(await threadProgress(run.dependencies.graph, given), { kind: "finished", exitStatus: 1 });
+  // The ID is exact: another case is another thread.
+  deepStrictEqual(await threadProgress(run.dependencies.graph, given.toUpperCase()), { kind: "new" });
 });
 
 test("a start given a new thread ID runs its thread under that ID", async () => {

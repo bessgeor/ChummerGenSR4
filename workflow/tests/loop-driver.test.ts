@@ -276,6 +276,7 @@ test("on this machine's steps, threads start through the composed workflow with 
   const threadFolder = (threadId: string) => join(root, "threads", threadId);
   const runs: { command: unknown; request: unknown; loopFolder: string | undefined; outcome: boolean }[] = [];
   const workflow: ComposedWorkflow = {
+    progress: async () => ({ kind: "new" }),
     run: async (command, request) => {
       const threadId = request!.threadId!;
       // A start given an ID that exists is refused, so the loop's thread is new when it starts; it pauses with the loop.
