@@ -293,6 +293,7 @@ export function diagnosisHarness(options: HarnessOptions) {
       options.beforeMerge?.(sourceRepository);
       return integrate(branchGit, worktrees, request);
     },
+    removeWorktree: (folder) => worktrees.remove(folder),
   });
   const graph = buildWorkflowGraph(steps, diagnosis, repair, widening, loop, noDiscovery).compile({ checkpointer, store });
   const settings = resolveAgentSettings({ ...(options.budgetMinutes === undefined ? {} : { runBudgetMinutes: options.budgetMinutes }) });

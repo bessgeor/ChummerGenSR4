@@ -62,7 +62,7 @@ test("of an attempt with two passed tries only the selected one is widened and p
   // Only the selected try's commit is applied: one widening build of the widened source, which holds try 2's file.
   const widened = run.wideningHost.builds.filter((build) => build.label === `widen ${cluster} build`);
   equal(widened.length, 1);
-  equal(readFileSync(join(widened[0]!.source, "Chummer", "frmCreate.cs"), "utf8"), repairedSource);
+  equal(run.wideningHost.builtSources[run.wideningHost.builds.indexOf(widened[0]!)], repairedSource);
   ok(!run.wideningHost.builtSources.includes(longerSource));
   const tip = git(run.sourceRepository, "rev-parse", `accepted/${threadId}`);
   equal(git(run.sourceRepository, "show", `${tip}:Chummer/frmCreate.cs`), repairedSource);
