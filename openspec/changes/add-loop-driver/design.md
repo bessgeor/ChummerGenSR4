@@ -33,7 +33,7 @@ START → start_thread → run_thread → decide_thread ─┬→ tune → decid
 ```
 
 - `start_thread` picks the thread ID (a new one, recorded in the state before the thread starts) or keeps the unfinished one.
-- `run_thread` runs or resumes the workflow thread through the shared composition; its discovery runs inside it. A setup error there fails the node, so `--resume` repeats it, and the workflow thread resumes.
+- `run_thread` runs or resumes the workflow thread through the shared composition; its discovery runs inside it. A setup error there fails the node, so `--resume` repeats it, and the workflow thread resumes. The node takes the thread's ID from `loop.json`: a node that fails saves nothing to the checkpoint, and the node may have recorded a new ID for a thread whose start left its ID in use. A thread, tuning or loop graph has ended when its checkpoint holds no task: the list of next nodes leaves out a node that was resumed from a pause and then failed, once it is interrupted again.
 - `decide_thread` records the thread's exit status and outcome summary: status 2 ends `failed`; a stop request ends `stopped`; the limit ends `limit` after tuning.
 - `tune` runs or resumes the tuning graph (see the automatic tuning), recorded before it starts.
 - `decide` ends `converged` when the thread merged nothing, admitted nothing and the tuning activated nothing; otherwise it goes back to `start_thread`.
@@ -42,7 +42,7 @@ The options of each thread are the loop's arguments; the default suite of each n
 
 ### State
 
-`loop.json` holds `loopId`, the arguments, the threads in order with their graph kind, start and end times and the reason the next one started, `maxRuns`, `status` (`running`, `converged`, `limit`, `stopped`, `failed`), and `iterations`, each with the thread ID, its status, the summary read from its `outcome.json`, and the tuning (`not_due`, or the tuning's cycle and outcome). It is written to a temporary file and renamed after every change. `--resume <loop>` refuses a loop that is not `running`. The stop request is a file `stop` in the loop's folder; `--stop` writes it and exits with 0, and the driver checks it before each step.
+`loop.json` holds `loopId`, the arguments, the threads in order with their graph kind, start and end times and the reason the next one started, `maxRuns`, `status` (`running`, `converged`, `limit`, `stopped`, `failed`), and `iterations`, each with the thread ID, its status, the summary read from its `outcome.json`, and the tuning (`not_due`, or the tuning's cycle and outcome). It is written to a temporary file and renamed after every change. `--resume <loop>` refuses a loop that is not `running`, and one whose lock (`run.lock` in its folder, held by the process that runs the loop) another process holds. The stop request is a file `stop` in the loop's folder; `--stop` writes it and exits with 0, and the driver checks it before each step that has not started: a resumed thread that has started, or a resumed tuning that `loop.json` records and the automatic tuning's state holds, runs to its end first. The check is part of a pausable node, so a paused loop reads the request once it is unpaused.
 
 ### Pause and unpause
 
