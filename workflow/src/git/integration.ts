@@ -79,14 +79,15 @@ function reachableTrailers(git: BranchGit, tip: string, key: string): Map<string
  * branch's tip unless another is named. A thread's commits hold the bytes of the checkout the candidate was built from,
  * and a clean checkout may hold other bytes than the repository's blobs (CRLF for LF with `core.autocrlf=true`). Only the
  * files a commit holds otherwise than the reference are staged again; without any conversion a commit's tree stays as it
- * is. A commit's file modes are kept.
+ * is. A file the reference lacks is staged on its entry of the commit the source was captured on, so one the branch
+ * renamed keeps the form it had there and its change follows the rename. A commit's file modes are kept.
  */
 class Normalizer {
   private readonly trees = new Map<string, string>();
   private scratch: ScratchFolder | null = null;
   private count = 0;
 
-  constructor(private readonly git: BranchGit, private readonly branchTip: string, private readonly createFolder: typeof createScratchFolder) {}
+  constructor(private readonly git: BranchGit, private readonly branchTip: string, private readonly start: string, private readonly createFolder: typeof createScratchFolder) {}
 
   tree(commit: string, reference: string = this.branchTip): string {
     const key = `${reference} ${commit}`;
@@ -95,6 +96,7 @@ class Normalizer {
     const removed: string[] = [];
     const special: string[] = [];
     const files: string[] = [];
+    const lacked: string[] = [];
     // The files whose mode is, or was, executable: their mode in the commit, by path.
     const modes = new Map<string, string>();
     const fields = this.git(["diff-tree", "-r", "-z", "--no-renames", "--no-commit-id", reference, commit]).split("\0").filter((field) => field.length > 0);
@@ -105,6 +107,7 @@ class Normalizer {
       if (mode === "000000") removed.push(path);
       else if (mode === "100644" || mode === "100755") {
         files.push(path);
+        if (referenceMode === "000000") lacked.push(path);
         if (mode === "100755" || referenceMode === "100755") modes.set(path, mode);
       } else special.push(`${mode} ${blob}\t${path}`);
     }
@@ -121,6 +124,10 @@ class Normalizer {
       this.git(["read-tree", reference], { env });
       if (removed.length > 0) this.git(["update-index", "-z", "--force-remove", "--stdin"], { env, input: removed.join("\0") });
       if (special.length > 0) this.git(["update-index", "-z", "--index-info"], { env, input: special.join("\0") });
+      if (lacked.length > 0 && reference !== this.start) {
+        const entries = this.git(["--literal-pathspecs", "ls-tree", "-z", "--full-tree", this.start, "--", ...lacked]);
+        if (entries.length > 0) this.git(["update-index", "-z", "--index-info"], { env, input: entries });
+      }
       // The paths are file names, not patterns; and a conversion `core.safecrlf` would refuse stages the same bytes.
       this.git(["--literal-pathspecs", "-c", "core.safecrlf=false", `--work-tree=${staged}`, "add", "--force", "--pathspec-from-file=-", "--pathspec-file-nul"],
         { cwd: staged, env, input: files.join("\0"), userSettings: true, attributeSource: reference });
@@ -171,16 +178,20 @@ function differing(git: BranchGit, from: string, to: string): string[] {
   return git(["diff-tree", "-r", "-z", "--no-renames", "--name-only", from, to]).split("\0").filter((path) => path.length > 0);
 }
 
+/** The commit a thread's source was captured on: its parent when it holds captured edits, else the source itself. */
+function capturedOn(git: BranchGit, source: string): string {
+  const subject = git(["log", "-1", "--format=%s", source]).trim();
+  return subject.startsWith(sourceSubjectPrefix) ? git(["rev-parse", `${source}^`]).trim() : source;
+}
+
 /**
- * The files the thread's source commit changed on its parent when it captured working-tree edits, as the person's own
- * `git add` on that parent would hold them, whatever the branch gained since: a file the checkout held unchanged is no
- * edit. None for a commit of the repository's own.
+ * The files the thread's source commit changed on the commit it was captured on, as the person's own `git add` on that
+ * commit would hold them, whatever the branch gained since: a file the checkout held unchanged is no edit. None for a
+ * commit of the repository's own.
  */
 function sourceEdits(git: BranchGit, normalized: Normalizer, source: string): string[] {
-  const subject = git(["log", "-1", "--format=%s", source]).trim();
-  if (!subject.startsWith(sourceSubjectPrefix)) return [];
-  const parent = git(["rev-parse", `${source}^`]).trim();
-  return differing(git, parent, normalized.tree(source, parent));
+  const start = capturedOn(git, source);
+  return start === source ? [] : differing(git, start, normalized.tree(source, start));
 }
 
 /**
@@ -225,7 +236,8 @@ export function integrate(git: BranchGit, worktrees: Worktrees, request: Integra
   // A resumed merge checks it again, against the state its last merged fix was verified on, since that fix may have changed an edited file.
   const lastMerged = request.items.map((item) => mergedBefore(item) !== null).lastIndexOf(true);
   // The thread's commits are compared and replayed as the branch's own commits would hold their files.
-  const normalized = new Normalizer(git, before, host.createScratchFolder ?? createScratchFolder);
+  const start = request.items.length === 0 ? before : capturedOn(git, worktrees.parent(request.items[0]!.commit));
+  const normalized = new Normalizer(git, before, start, host.createScratchFolder ?? createScratchFolder);
   const inWorktree = (args: readonly string[]) => git(args, { worktree: request.worktree });
   try {
     const unmergedEdits = request.items.every((item) => mergedBefore(item) !== null)

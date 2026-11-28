@@ -377,6 +377,25 @@ test("a source's edits are read against the commit it was captured on, so a file
   }
 });
 
+test("a converted fix follows a file the branch renamed while the thread ran", () => {
+  const repo = repositoryOnMain();
+  const lines = (end: string, third: string) => ["one", "two", third, "four", "five", "six", ""].join(end);
+  // A file the branch holds with CRLF in a checkout that converts line endings, which the branch renames meanwhile.
+  write(repo.root, "Chummer/frmCreate.Designer.cs", lines("\r\n", "three"));
+  repo.run("add", "Chummer/frmCreate.Designer.cs");
+  repo.run("commit", "-q", "-m", "designer");
+  repo.run("config", "core.autocrlf", "true");
+  const source = repo.commitOn(repo.run("rev-parse", "main"), "Source captured by thread wf-1", { "Chummer/frmCreate.cs": "create\r\n" });
+  const fix = repo.commitOn(source, "Fix d-1", { "Chummer/frmCreate.Designer.cs": lines("\r\n", "fixed") });
+  repo.run("mv", "Chummer/frmCreate.Designer.cs", "Chummer/renamed.cs");
+  repo.run("commit", "-q", "-m", "renamed");
+  const result = integrate(repo.git, repo.worktrees, repo.request([repo.item("d-1", fix)]));
+  deepStrictEqual(result.items.map((item) => [item.status, item.files]), [["merged", []]]);
+  equal(execFileSync("git", ["-C", repo.root, "cat-file", "blob", "main:Chummer/renamed.cs"], { encoding: "utf8" }), lines("\r\n", "fixed"));
+  equal(repo.run("diff", "--name-only", "main~1", "main"), "Chummer/renamed.cs");
+  equal(repo.run("status", "--porcelain=v1"), "");
+});
+
 test("a converted fix that conflicts leaves its branch at the fix commit", () => {
   const repo = repositoryOnMain();
   repo.run("config", "core.autocrlf", "true");
